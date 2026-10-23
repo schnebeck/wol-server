@@ -12,6 +12,8 @@ aus dem Intranet und über VPN.
 - **OpenVPN-Client auf dem Pi:** Er ist über das VPN erreichbar, ohne Portfreigabe zu Hause (auch bei DS-Lite/CGNAT)
 - **Reiner WLAN-Betrieb:** Powersave aus, WLAN-Watchdog, Hardware-Watchdog; Magic Packets gehen immer ins WLAN,
   nie in den Tunnel
+- **Einrichtungs-Hotspot wie bei einer Appliance:** Findet der Pi kein bekanntes WLAN, öffnet er einen eigenen
+  Hotspot mit Einrichtungsseite. WLAN wechseln geht ohne Imager, Tastatur oder SD-Karte.
 - **Zugriff nur aus LAN/VPN** (Netz-Allowlist), Passwort-Login, CSRF-Schutz, gehärteter systemd-Dienst
 - **Keine Abhängigkeiten** außer Python 3 (Standardbibliothek) – kein pip, kein Node, keine Datenbank, kein CDN
 
@@ -35,10 +37,13 @@ Mit dem **Raspberry Pi Imager**:
 2. Unter „Einstellungen bearbeiten“:
    - Hostname, z. B. `wol` (die GUI ist dann unter `http://wol.local/` erreichbar)
    - Benutzer und Passwort
-   - WLAN (SSID, Passwort, Land `DE`)
+   - WLAN (SSID, Passwort, Land `DE`): nur für die Erstinstallation per SSH nötig, siehe unten
    - Zeitzone `Europe/Berlin`. **Wichtig für die Zeitpläne**, denn sie laufen in der Zeitzone des Pi.
    - Unter „Dienste“: **SSH aktivieren**
 3. Karte schreiben, in den Pi stecken, booten (der erste Start dauert ein paar Minuten).
+
+Der Imager wird nur dieses eine Mal gebraucht. Nach der Installation richtet der Pi neue oder geänderte WLANs
+über seinen **Einrichtungs-Hotspot** ein (siehe [WLAN einrichten](#wlan-einrichten-und-wechseln-einrichtungs-hotspot)).
 
 > **Tipp:** Im Router dem Pi eine feste IP zuweisen (z. B. FRITZ!Box: *Heimnetz → Netzwerk → Gerät → „Diesem
 > Netzwerkgerät immer die gleiche IPv4-Adresse zuweisen“*).
@@ -57,8 +62,8 @@ sudo ./deploy/lowpower.sh                          # optional, empfohlen – dan
 
 `install.sh` legt den Systembenutzer `wol` an, kopiert das Programm nach `/opt/wol-server`, schreibt
 `/etc/wol-server/config.json`, erzeugt einen SSH-Schlüssel und startet den Dienst `wol-server`.
-Außerdem richtet es die WLAN-Absicherung ein (`wlan-setup.sh`, siehe unten) und mit `--openvpn` den
-VPN-Client (`openvpn-setup.sh`, siehe Abschnitt 4).
+Außerdem richtet es die WLAN-Absicherung (`wlan-setup.sh`) und den Einrichtungs-Hotspot (`hotspot-setup.sh`)
+ein, beide siehe unten, und mit `--openvpn` den VPN-Client (`openvpn-setup.sh`, siehe Abschnitt 4).
 Das Skript lässt sich gefahrlos erneut ausführen, so werden auch **Updates** eingespielt.
 Daten und Konfiguration bleiben dabei erhalten.
 
@@ -66,7 +71,9 @@ Optionen:
 - `--port 8080`: anderer Port
 - `--no-password`: keine Passwortabfrage
 - `--openvpn <datei.ovpn>`: OpenVPN-Client einrichten
+- `--country AT`: WLAN-Land (Standard `DE`), wichtig für erlaubte Kanäle und Sendeleistung
 - `--no-wlan-setup`: ohne WLAN-Absicherung
+- `--no-hotspot`: ohne Einrichtungs-Hotspot
 
 ### WLAN-Betrieb: `wlan-setup.sh`
 
@@ -76,10 +83,48 @@ automatisch Folgendes ein. Einzeln lässt es sich mit `sudo ./deploy/wlan-setup.
 | Maßnahme | Wirkung |
 |---|---|
 | WLAN-Powersave aus | Ohne diese Einstellung verpasst der Zero eingehende Verbindungen und Broadcasts. Kostet nur wenige mA. |
-| WLAN-Watchdog (Timer, jede Minute) | Pingt das Gateway. Nach 3 Fehlschlägen wird das WLAN neu verbunden, nach 30 min ohne Netz startet der Pi neu (frühestens 1 h nach dem Boot). Einstellbar in `/etc/default/wol-wlan-watchdog`. |
+| WLAN-Watchdog (Timer, jede Minute) | Pingt das Gateway. Nach 3 Fehlschlägen wird das WLAN neu verbunden, nach 30 min ohne Netz startet der Pi neu (frühestens 1 h nach dem Boot). Läuft der Einrichtungs-Hotspot, hält sich der Watchdog heraus. Einstellbar in `/etc/default/wol-wlan-watchdog`. |
 | Hardware-Watchdog | Startet den Pi neu, falls das System komplett hängt |
 
 Der Watchdog protokolliert ins Journal: `journalctl -t wlan-watchdog`.
+
+### WLAN einrichten und wechseln: Einrichtungs-Hotspot
+
+Neuer Router, geändertes WLAN-Passwort, Umzug: Findet der Pi keines seiner gespeicherten WLANs, öffnet er nach
+5 Minuten einen eigenen Hotspot. Ist noch gar kein WLAN gespeichert, geschieht das schon 30 Sekunden nach dem Start.
+
+1. Mit dem Handy oder Laptop mit dem WLAN **`WOL-Setup-XXXX`** verbinden. `XXXX` sind die letzten Stellen der
+   WLAN-MAC-Adresse.
+2. Die Einrichtungsseite öffnet sich von selbst (Captive Portal). Falls nicht: **`http://10.42.0.1/`** aufrufen.
+3. Anmelden (sofern ein GUI-Passwort gesetzt ist), WLAN aus der Liste wählen, Passwort eingeben, *Verbinden*.
+4. Der Pi beendet den Hotspot und verbindet sich. Danach ist die GUI wieder im Heimnetz erreichbar, z. B. unter
+   `http://wol.local/`. Klappt die Verbindung nicht, etwa weil das Passwort falsch ist, öffnet sich der Hotspot
+   nach etwa einer Minute wieder und die Seite zeigt den Fehler.
+
+Im Normalbetrieb verwaltet *System → WLAN* die gespeicherten Netze. Zusätzliche WLANs lassen sich vorab
+eintragen, etwa für einen Umzug. Der Pi nutzt sie automatisch, sobald das aktuelle WLAN nicht mehr erreichbar
+ist.
+
+Gut zu wissen:
+- Der Zero W hat nur einen 2,4-GHz-Funkchip. Hotspot und WLAN-Client gehen **nicht gleichzeitig**. Während der
+  Hotspot läuft, schaltet der Pi ihn deshalb alle 5 Minuten kurz ab und sucht nach den gespeicherten WLANs. Das
+  passiert nicht, solange ein Gerät mit dem Hotspot verbunden ist oder die Einrichtungsseite benutzt wird.
+- Die WLAN-Liste im Hotspot stammt aus der Suche direkt vor dem Start, denn im Hotspot-Betrieb kann der Chip
+  nicht scannen. Fehlt ein Netz, den Namen von Hand eingeben.
+- **Sicherheit:** Der Hotspot ist anfangs offen, damit die Ersteinrichtung ohne Vorwissen klappt. Die GUI ist
+  durch ihr Passwort geschützt. Unter *System → WLAN → Einrichtungs-Hotspot* lässt sich ein WPA2-Passwort
+  setzen. Hotspot-Clients dürfen die GUI immer nutzen, auch wenn `10.42.0.0/24` nicht in `allowed_networks`
+  steht.
+- Während der Hotspot läuft, ist der Pi nicht im Heimnetz. Fällige Zeitpläne werden dann nicht ausgeführt und
+  als Fehler protokolliert.
+- Technik: Ein eigener Dienst `wol-wifi` steuert den Hotspot als root über NetworkManager. Der Web-Server
+  spricht mit ihm über einen Unix-Socket und braucht selbst keine Rechte am Netzwerk. Einzeln einrichten:
+  `sudo ./deploy/hotspot-setup.sh --country DE`.
+
+**Als fertiges Gerät weitergeben oder ein Image erstellen:** Nach der Installation die gespeicherten WLANs löschen
+(`sudo nmcli connection delete <Name>`, Namen mit `nmcli connection show`) und den Pi herunterfahren. Beim nächsten
+Start öffnet er sofort den Hotspot. Die SD-Karte lässt sich in diesem Zustand auch als Image für weitere Geräte
+sichern.
 
 ### Stromsparen: `lowpower.sh`
 
@@ -227,7 +272,7 @@ der GUI reicht die Leistung problemlos.
 | **Geräte** | Karten mit Online-Status, nächster geplanter Aktion, Buttons *Aufwecken* / *Schlafen* |
 | **Zeitpläne** | Uhrzeit + Wochentage + Aktion; per Schalter pausierbar; Vorlagen „Werktags/Wochenende/Täglich“ |
 | **Protokoll** | Die letzten 300 Aktionen mit Ergebnis (manuell / Zeitplan) |
-| **System** | Hostname, Uhrzeit, CPU-Temperatur, WLAN-Signal, VPN-Status, Interfaces, erlaubte Netze, SSH-Schlüssel, Passwort |
+| **System** | WLAN (Status, gespeicherte Netze, hinzufügen, Hotspot-Passwort), Hostname, Uhrzeit, CPU-Temperatur, WLAN-Signal, VPN-Status, Interfaces, erlaubte Netze, SSH-Schlüssel, Passwort |
 
 Der Online-Status wird nur abgefragt, solange die Seite offen und sichtbar ist (alle 10 s). Ist niemand auf
 der GUI, schläft der Pi bis zur nächsten Zeitplan-Minute.
@@ -238,6 +283,7 @@ der GUI, schläft der Pi bis zur nächsten Zeitplan-Minute.
 sudo wol-server passwd                       # GUI-Passwort setzen/ändern (meldet alle Sitzungen ab)
 wol-server wake AA:BB:CC:DD:EE:FF            # Magic Packet direkt senden
 journalctl -u wol-server -f                  # Logs
+journalctl -u wol-wifi -f                    # WLAN-Verwaltung / Hotspot
 sudo systemctl restart wol-server            # nach Änderung der config.json
 ```
 
@@ -252,6 +298,12 @@ sudo systemctl restart wol-server            # nach Änderung der config.json
 | `data_dir` | `/var/lib/wol-server` | Geräte, Zeitpläne, Protokoll, Passwort-Hash, SSH-Schlüssel |
 | `allowed_networks` | private Netze | Quellnetze mit Zugriff |
 | `wol_interface` | `""` (automatisch) | Interface für Magic Packets, z. B. `"wlan0"`; automatisch heißt: das Interface der Default-Route, VPN-Interfaces ausgenommen |
+| `wifi_interface` | `"wlan0"` | WLAN-Interface für Client-Betrieb und Hotspot |
+| `hotspot_enabled` | `true` | Einrichtungs-Hotspot, wenn kein bekanntes WLAN erreichbar ist |
+| `hotspot_ssid` | `""` | Name des Hotspots; leer heißt `WOL-Setup-XXXX` |
+| `hotspot_delay_minutes` | `5` | Minuten ohne WLAN, bis der Hotspot startet |
+| `hotspot_retry_minutes` | `5` | Abstand, in dem der Hotspot nach den gespeicherten WLANs sucht |
+| `wifi_socket` | `/run/wol-wifi/control.sock` | Socket zwischen Web-Server und `wol-wifi` |
 | `session_days` | `30` | Gültigkeit des Login-Cookies |
 | `status_cache_seconds` | `5` | Cache für Online-Prüfungen |
 | `log_level` | `INFO` | `DEBUG` loggt jede Anfrage |
@@ -266,6 +318,9 @@ Dateien:
 /var/lib/wol-server/.ssh/        SSH-Schlüssel und known_hosts für das Schlafenlegen
 /etc/openvpn/client/wol.conf     OpenVPN-Client (Dienst openvpn-client@wol)
 /etc/default/wol-wlan-watchdog   Einstellungen des WLAN-Watchdogs
+/var/lib/wol-wifi/hotspot.json   Hotspot-Passwort (nur root)
+/etc/NetworkManager/system-connections/   gespeicherte WLANs (NetworkManager)
+/etc/NetworkManager/dnsmasq-shared.d/60-wol-server-captive.conf   DNS-Umleitung im Hotspot
 ```
 
 **Backup:** `/var/lib/wol-server/` sichern.
@@ -303,6 +358,8 @@ POST   /api/devices/<id>/wake       POST /api/devices/<id>/sleep    GET  /api/st
 GET    /api/schedules               POST /api/schedules             PUT/DELETE /api/schedules/<id>
 GET    /api/events                  DELETE /api/events
 GET    /api/info                    POST /api/password {current, new}
+GET    /api/wifi                    POST /api/wifi/scan             POST /api/wifi/connect {ssid, password, hidden}
+POST   /api/wifi/forget {ssid}      PUT  /api/wifi/hotspot {password}
 ```
 
 ## 8. Entwicklung
@@ -325,11 +382,14 @@ python3 -m unittest discover -s tests -t .   # Tests
 | VPN verbindet nicht | `journalctl -u openvpn-client@wol -e`; Zugangsdaten in `/etc/openvpn/client/wol.auth` prüfen |
 | VPN steht, GUI über VPN nicht erreichbar | Auf dem Server `client-to-client`/Routing prüfen; VPN-Subnetz in `allowed_networks`? |
 | Pi zeitweise weg | `journalctl -t wlan-watchdog`; Signal unter *System* prüfen (schlechter als −75 dBm: Pi näher an den Router oder Repeater nutzen) |
+| Hotspot erscheint nicht | `journalctl -u wol-wifi -e`; WLAN-Land gesetzt (`sudo raspi-config nonint do_wifi_country DE`)? `rfkill list` |
+| Handy öffnet die Einrichtungsseite nicht | `http://10.42.0.1/` von Hand aufrufen; manche Handys trennen WLANs ohne Internet, dann „Verbunden bleiben“ wählen |
+| *System → WLAN*: „nicht erreichbar“ | `systemctl status wol-wifi`; erneut einrichten mit `sudo ./deploy/hotspot-setup.sh` |
 | Zeitpläne laufen zur falschen Zeit | Zeitzone setzen: `sudo timedatectl set-timezone Europe/Berlin` |
 
 ## Deinstallation
 
 ```bash
-sudo ./deploy/uninstall.sh            # Programm entfernen, Daten behalten (OpenVPN-Client bleibt)
+sudo ./deploy/uninstall.sh            # Programm entfernen, Daten behalten (OpenVPN-Client und WLANs bleiben)
 sudo ./deploy/uninstall.sh --purge    # alles entfernen
 ```

@@ -1,20 +1,25 @@
 #!/bin/bash
 # Installiert bzw. aktualisiert den WOL-Server auf Raspberry Pi OS (Lite).
 # Aufruf aus dem Projektverzeichnis:
-#   sudo ./deploy/install.sh [--port 80] [--no-password] [--openvpn client.ovpn] [--no-wlan-setup]
+#   sudo ./deploy/install.sh [--port 80] [--no-password] [--openvpn client.ovpn] [--country DE]
+#                            [--no-wlan-setup] [--no-hotspot]
 set -euo pipefail
 
 PORT=80
 ASK_PASSWORD=1
 OVPN=""
 WLAN_SETUP=1
+HOTSPOT=1
+COUNTRY=DE
 while [ $# -gt 0 ]; do
     case "$1" in
         --port) PORT="$2"; shift 2 ;;
         --no-password) ASK_PASSWORD=0; shift ;;
         --openvpn) OVPN="$(realpath "$2")"; shift 2 ;;
         --no-wlan-setup) WLAN_SETUP=0; shift ;;
-        -h|--help) sed -n '2,4p' "$0"; exit 0 ;;
+        --no-hotspot) HOTSPOT=0; shift ;;
+        --country) COUNTRY="$2"; shift 2 ;;
+        -h|--help) sed -n '2,5p' "$0"; exit 0 ;;
         *) echo "Unbekannte Option: $1" >&2; exit 1 ;;
     esac
 done
@@ -115,6 +120,11 @@ fi
 
 if [ "$WLAN_SETUP" -eq 1 ] && [ -d /sys/class/net/wlan0 ]; then
     "$SRC/deploy/wlan-setup.sh" --iface wlan0
+fi
+
+if [ "$HOTSPOT" -eq 1 ] && [ -d /sys/class/net/wlan0 ]; then
+    "$SRC/deploy/hotspot-setup.sh" --country "$COUNTRY" \
+        || echo "Einrichtungs-Hotspot nicht aktiv – später erneut: sudo ./deploy/hotspot-setup.sh" >&2
 fi
 
 if [ -n "$OVPN" ]; then

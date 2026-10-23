@@ -281,6 +281,36 @@ pre code { background: none; border: 0; padding: 0; }
 .howto summary { cursor: pointer; font-weight: 550; }
 .howto > * + * { margin-top: 8px; }
 .stack { display: grid; gap: 12px; }
+.panel-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.saved { display: grid; gap: 6px; margin-top: 6px; }
+.saved-item { display: flex; align-items: center; gap: 10px; padding: 6px 6px 6px 12px; border: 1px solid var(--border); border-radius: 8px; }
+.saved-item > span:first-child { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.saved-item .tag { margin: 0; }
+.tag.current { color: var(--wake); background: var(--wake-soft); border-color: transparent; }
+.inline-form { display: grid; grid-template-columns: 1fr auto; align-items: end; gap: 8px; }
+.inline-form .form-error { grid-column: 1 / -1; }
+
+/* WLAN-Auswahl */
+.scan-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 30px; }
+.scan-list { display: grid; max-height: 220px; overflow-y: auto; border: 1px solid var(--border); border-radius: 10px; margin-bottom: 14px; }
+.scan-list > p { padding: 12px; }
+.scan-item {
+  display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px 12px; text-align: left;
+  font: inherit; color: var(--text); background: transparent; border: 0; border-bottom: 1px solid var(--border); cursor: pointer;
+}
+.scan-item:last-child { border-bottom: 0; }
+.scan-item:hover { background: var(--surface-2); }
+.scan-item.selected { background: var(--wake-soft); }
+.scan-item:focus-visible { outline: 2px solid var(--wake); outline-offset: -2px; }
+.scan-ssid { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 550; }
+.scan-item .icon { width: 15px; height: 15px; color: var(--muted); }
+.bars { display: inline-flex; align-items: flex-end; gap: 2px; height: 14px; flex: none; }
+.bars i { width: 3px; border-radius: 1px; background: var(--border-strong); }
+.bars i:nth-child(1) { height: 25%; }
+.bars i:nth-child(2) { height: 50%; }
+.bars i:nth-child(3) { height: 75%; }
+.bars i:nth-child(4) { height: 100%; }
+.bars.b1 i:nth-child(-n+1), .bars.b2 i:nth-child(-n+2), .bars.b3 i:nth-child(-n+3), .bars.b4 i { background: var(--text); }
 
 /* ---------- Formulare ---------- */
 

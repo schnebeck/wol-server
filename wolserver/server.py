@@ -14,7 +14,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit
 
-from . import __version__, models, netinfo, power, wol
+from . import __version__, models, netinfo, power, wifi, wol
 from .auth import Auth, LoginLimiter
 from .scheduler import Scheduler, next_run
 from .status import StatusMonitor
@@ -53,11 +53,29 @@ class ApiError(Exception):
 
 
 class Request:
-    def __init__(self, body, client, authenticated):
+    def __init__(self, body, client, authenticated, via_hotspot=False):
         self.body = body
         self.client = client
         self.authenticated = authenticated
+        self.via_hotspot = via_hotspot
         self.cookies = []
+
+
+def captive_redirect(host_header, port):
+    """Im Hotspot fremde Hostnamen auf die GUI umleiten.
+
+    Handys prüfen nach dem Verbinden z. B. connectivitycheck.gstatic.com oder captive.apple.com.
+    Da der Hotspot alle Namen auf den Pi auflöst, landen diese Anfragen hier; die Umleitung
+    lässt das Handy die Einrichtungsseite als Captive Portal öffnen.
+    """
+    host = (host_header or "").strip().lower()
+    if host.startswith("["):
+        host = host.split("]")[0] + "]"
+    else:
+        host = host.split(":")[0]
+    if host == wifi.HOTSPOT_ADDRESS:
+        return None
+    return "http://%s%s/" % (wifi.HOTSPOT_ADDRESS, "" if port == 80 else ":%d" % port)
 
 
 def _read_text(path):
@@ -106,6 +124,11 @@ class App:
             R("DELETE", r"/api/schedules/(?P<item_id>\w+)", self.api_schedule_delete),
             R("GET", r"/api/events", self.api_events),
             R("DELETE", r"/api/events", self.api_events_clear),
+            R("GET", r"/api/wifi", self.api_wifi),
+            R("POST", r"/api/wifi/scan", self.api_wifi_scan),
+            R("POST", r"/api/wifi/connect", self.api_wifi_connect),
+            R("POST", r"/api/wifi/forget", self.api_wifi_forget),
+            R("PUT", r"/api/wifi/hotspot", self.api_wifi_hotspot),
         ]
 
     @staticmethod
@@ -148,7 +171,9 @@ class App:
                 log.warning("Interface %s hat keine IPv4-Adresse", self.config["wol_interface"])
             source_ip = iface["address"] if iface else None
             via = " über %s" % iface["name"] if iface else ""
-            if action == "wake":
+            if source_ip == wifi.HOTSPOT_ADDRESS:
+                ok, message = False, "Nicht ausgeführt: Der Pi ist nicht im Heimnetz (Einrichtungs-Hotspot aktiv)"
+            elif action == "wake":
                 wol.send_magic_packet(
                     device["mac"], device["broadcast"], device["wol_port"], source_ip=source_ip
                 )
@@ -168,7 +193,11 @@ class App:
     # -- Session --
 
     def api_session(self, req):
-        return 200, {"auth_required": self.auth.required, "authenticated": req.authenticated}
+        return 200, {
+            "auth_required": self.auth.required,
+            "authenticated": req.authenticated,
+            "hotspot": req.via_hotspot,
+        }
 
     def api_login(self, req):
         if not self.auth.required:
@@ -330,6 +359,36 @@ class App:
         self.store.clear_events()
         return 200, {"ok": True}
 
+    # -- WLAN (über den Dienst wol-wifi) --
+
+    def _wifi(self, payload, timeout=35):
+        try:
+            res = wifi.request(self.config["wifi_socket"], payload, timeout)
+        except (OSError, ValueError):
+            raise ApiError(503, "WLAN-Verwaltung nicht erreichbar (Dienst wol-wifi)") from None
+        if not res.get("ok"):
+            raise ApiError(400, res.get("error") or "WLAN-Befehl fehlgeschlagen")
+        return res
+
+    def api_wifi(self, req):
+        return 200, self._wifi({"cmd": "status"}, timeout=5)["status"]
+
+    def api_wifi_scan(self, req):
+        return 200, self._wifi({"cmd": "scan"})
+
+    def api_wifi_connect(self, req):
+        b = req.body
+        res = self._wifi({"cmd": "connect", "ssid": b.get("ssid"), "password": b.get("password") or "",
+                          "hidden": bool(b.get("hidden"))})
+        log.info("WLAN „%s“ eingerichtet von %s", b.get("ssid"), req.client)
+        return 200, res
+
+    def api_wifi_forget(self, req):
+        return 200, self._wifi({"cmd": "forget", "ssid": req.body.get("ssid")})
+
+    def api_wifi_hotspot(self, req):
+        return 200, self._wifi({"cmd": "hotspot_password", "password": req.body.get("password") or ""})
+
     # -- statische Dateien --
 
     def static_file(self, name):
@@ -376,16 +435,34 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         log.debug("%s %s", self.address_string(), fmt % args)
 
-    def _client_ip(self):
-        ip = ipaddress.ip_address(self.client_address[0].split("%")[0])
+    @staticmethod
+    def _plain_ip(address):
+        ip = ipaddress.ip_address(address.split("%")[0])
         if ip.version == 6 and ip.ipv4_mapped:
             ip = ip.ipv4_mapped
         return ip
 
+    def _client_ip(self):
+        return self._plain_ip(self.client_address[0])
+
+    def _via_hotspot(self):
+        try:
+            return str(self._plain_ip(self.connection.getsockname()[0])) == wifi.HOTSPOT_ADDRESS
+        except (OSError, ValueError):
+            return False
+
     def _handle(self, method):
         try:
             ip = self._client_ip()
-            if not self.app.is_allowed(ip):
+            via_hotspot = self._via_hotspot()
+            if via_hotspot:
+                # Hotspot-Clients sind immer erlaubt (sonst wäre die Einrichtung unmöglich).
+                location = captive_redirect(self.headers.get("Host"), self.server.server_address[1])
+                if location:
+                    if self._read_body() is None:
+                        return
+                    return self._send(302, b"", None, {"Location": location, "Cache-Control": "no-store"})
+            elif not self.app.is_allowed(ip):
                 log.warning("Zugriff verweigert für %s", ip)
                 self.close_connection = True
                 return self._send(403, b"Zugriff nur aus dem lokalen Netz / VPN erlaubt.\n",
@@ -395,7 +472,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
             path = urlsplit(self.path).path
             if path.startswith("/api/"):
-                return self._handle_api(method, path, raw, str(ip))
+                return self._handle_api(method, path, raw, str(ip), via_hotspot)
             if method == "GET" and path in STATIC:
                 return self._send_static(*STATIC[path])
             self._send(404, b"Nicht gefunden\n", "text/plain; charset=utf-8")
@@ -419,7 +496,7 @@ class Handler(BaseHTTPRequestHandler):
             return None
         return self.rfile.read(length) if length else b""
 
-    def _handle_api(self, method, path, raw, client):
+    def _handle_api(self, method, path, raw, client, via_hotspot=False):
         req = None
         try:
             handler, params, needs_auth = self.app.resolve(method, path)
@@ -438,7 +515,7 @@ class Handler(BaseHTTPRequestHandler):
                     raise ApiError(400, "Ungültiges JSON") from None
                 if not isinstance(body, dict):
                     raise ApiError(400, "JSON-Objekt erwartet")
-            req = Request(body, client, authenticated)
+            req = Request(body, client, authenticated, via_hotspot)
             status, payload = handler(req, **params)
         except ApiError as e:
             status, payload = e.status, {"error": e.message}

@@ -107,7 +107,7 @@ class ApiTest(unittest.TestCase):
         self.app.auth.set_password("geheim123")
         self.assertEqual(self.call("GET", "/api/devices")[0], 401)
         _, session = self.call("GET", "/api/session")
-        self.assertEqual(session, {"auth_required": True, "authenticated": False})
+        self.assertEqual(session, {"auth_required": True, "authenticated": False, "hotspot": False})
         self.assertEqual(self.call("POST", "/api/login", {"password": "falsch"})[0], 401)
         self.assertEqual(self.call("POST", "/api/login", {"password": "geheim123"})[0], 200)
         self.assertEqual(self.call("GET", "/api/devices")[0], 200)
@@ -121,6 +121,24 @@ class ApiTest(unittest.TestCase):
         resp = conn.getresponse()
         resp.read()
         self.assertEqual(resp.status, 403)
+
+    def test_hotspot_clients_and_captive_portal(self):
+        # Anfragen, die an der Hotspot-Adresse ankommen: immer erlaubt, fremde Hosts umgeleitet
+        from unittest import mock
+
+        from wolserver import wifi
+
+        self.app.networks = []
+        with mock.patch.object(wifi, "HOTSPOT_ADDRESS", "127.0.0.1"):
+            conn = http.client.HTTPConnection("127.0.0.1", self.port)
+            conn.request("GET", "/generate_204", headers={"Host": "connectivitycheck.gstatic.com"})
+            resp = conn.getresponse()
+            resp.read()
+            self.assertEqual(resp.status, 302)
+            self.assertEqual(resp.getheader("Location"), "http://127.0.0.1:%d/" % self.port)
+            status, session = self.call("GET", "/api/session")
+            self.assertEqual(status, 200)
+            self.assertTrue(session["hotspot"])
 
 
 if __name__ == "__main__":

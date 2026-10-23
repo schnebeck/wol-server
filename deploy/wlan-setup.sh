@@ -79,6 +79,13 @@ IFACE=wlan0; CHECK_HOST=; RECONNECT_AFTER=3; REBOOT_AFTER=30
 [ -r /etc/default/wol-wlan-watchdog ] && . /etc/default/wol-wlan-watchdog
 STATE=/run/wol-wlan-watchdog.fails
 
+# Einrichtungs-Hotspot aktiv (Dienst wol-wifi): Es gibt kein Gateway, und ein Reconnect oder
+# Neustart würde die Einrichtung unterbrechen. Der Hotspot ersetzt hier den Neustart.
+if ip -4 addr show dev "$IFACE" 2>/dev/null | grep -q "inet 10\.42\.0\.1/"; then
+    rm -f "$STATE"
+    exit 0
+fi
+
 target=$CHECK_HOST
 [ -n "$target" ] || target=$(ip -4 route show default dev "$IFACE" 2>/dev/null | awk '{print $3; exit}')
 

@@ -84,6 +84,33 @@
     <section id="view-system" class="view" hidden>
       <div class="view-head"><h2>System</h2></div>
       <div class="sys-grid">
+        <div class="panel wide" id="wifi-panel">
+          <div class="panel-head">
+            <h3>WLAN</h3>
+            <button type="button" class="btn small" id="wifi-add" hidden>WLAN hinzufügen</button>
+          </div>
+          <p class="muted small" id="wifi-unavailable" hidden>Die WLAN-Verwaltung ist nicht erreichbar. Läuft der Dienst <code>wol-wifi</code>? Einrichten mit <code>sudo ./deploy/hotspot-setup.sh</code>.</p>
+          <div id="wifi-body" class="stack" hidden>
+            <dl class="kv" id="wifi-info"></dl>
+            <p class="form-error" id="wifi-error" hidden></p>
+            <div>
+              <p class="small muted">Gespeicherte Netze</p>
+              <div id="wifi-saved" class="saved"></div>
+            </div>
+            <details class="howto">
+              <summary>Einrichtungs-Hotspot</summary>
+              <p class="small" id="hotspot-text"></p>
+              <form id="hotspot-form" class="inline-form" novalidate>
+                <label class="field">
+                  <span>Hotspot-Passwort <em class="opt">leer = offener Hotspot</em></span>
+                  <input type="password" name="password" autocomplete="new-password" maxlength="63">
+                </label>
+                <button class="btn" type="submit">Speichern</button>
+                <p class="form-error" hidden></p>
+              </form>
+            </details>
+          </div>
+        </div>
         <div class="panel">
           <h3>Server</h3>
           <dl class="kv" id="sys-info"></dl>
@@ -291,6 +318,51 @@ echo "$USER ALL=(root) NOPASSWD: /usr/bin/systemctl suspend, /usr/bin/systemctl 
       <span class="spacer"></span>
       <button type="button" class="btn ghost" data-close>Abbrechen</button>
       <button type="submit" class="btn primary">Speichern</button>
+    </footer>
+  </form>
+</dialog>
+
+<dialog id="wifi-dialog" class="dialog">
+  <form id="wifi-form" class="dialog-body" novalidate>
+    <header class="dialog-head">
+      <h2>WLAN einrichten</h2>
+      <button type="button" class="icon-btn" data-close aria-label="Schließen">×</button>
+    </header>
+    <div class="dialog-content" id="wifi-step-form">
+      <div class="scan-head">
+        <span class="small muted" id="wifi-scan-info"></span>
+        <button type="button" class="btn small ghost" id="wifi-rescan">Neu suchen</button>
+      </div>
+      <div id="wifi-scan" class="scan-list"></div>
+      <div class="form-grid">
+        <label class="field span2">
+          <span>WLAN-Name (SSID)</span>
+          <input name="ssid" required maxlength="32" spellcheck="false" autocapitalize="off" autocomplete="off">
+        </label>
+        <label class="field span2">
+          <span>Passwort</span>
+          <input name="password" type="password" autocomplete="off" maxlength="64" spellcheck="false" autocapitalize="off">
+          <small>Leer lassen bei offenen Netzen.</small>
+        </label>
+        <label class="check">
+          <input type="checkbox" name="show_password"> <span>Passwort anzeigen</span>
+        </label>
+        <label class="check">
+          <input type="checkbox" name="hidden_ssid"> <span>Verstecktes Netz</span>
+        </label>
+      </div>
+      <p class="hint small">Der Pi Zero W kann nur 2,4-GHz-Netze nutzen. Er muss im selben Netz wie die Zielgeräte sein, also nicht im Gast-WLAN.</p>
+      <p class="form-error" hidden></p>
+    </div>
+    <div class="dialog-content" id="wifi-step-done" hidden>
+      <h3 id="wifi-done-title"></h3>
+      <p id="wifi-done-text"></p>
+      <p class="small muted">Klappt die Verbindung nicht, öffnet der WOL-Server seinen Hotspot nach etwa einer Minute wieder und zeigt hier den Fehler an.</p>
+    </div>
+    <footer class="dialog-foot">
+      <span class="spacer"></span>
+      <button type="button" class="btn ghost" data-close id="wifi-cancel">Abbrechen</button>
+      <button type="submit" class="btn primary" id="wifi-submit">Verbinden</button>
     </footer>
   </form>
 </dialog>

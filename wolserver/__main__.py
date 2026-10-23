@@ -1,4 +1,4 @@
-"""Kommandozeile: `python3 -m wolserver [serve|passwd|wake]`."""
+"""Kommandozeile: `python3 -m wolserver [serve|passwd|wake|wifi-daemon]`."""
 
 import argparse
 import getpass
@@ -76,6 +76,7 @@ def main(argv=None):
     wake.add_argument("mac")
     wake.add_argument("--broadcast", default="255.255.255.255")
     wake.add_argument("--port", type=int, default=9)
+    sub.add_parser("wifi-daemon", help="WLAN-Verwaltung mit Einrichtungs-Hotspot (als root, Dienst wol-wifi)")
     args = parser.parse_args(argv)
 
     if args.cmd == "wake":
@@ -86,6 +87,10 @@ def main(argv=None):
     logging.getLogger().setLevel(str(cfg["log_level"]).upper())
     if args.cmd == "passwd":
         return cmd_passwd(cfg, args.stdin)
+    if args.cmd == "wifi-daemon":
+        from .wifi import run_daemon
+
+        return run_daemon(cfg)
     return cmd_serve(cfg)
 
 

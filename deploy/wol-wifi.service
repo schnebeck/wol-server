@@ -1,0 +1,46 @@
+[Unit]
+Description=WOL-Server WLAN-Verwaltung (Einrichtungs-Hotspot)
+Documentation=file:///opt/wol-server/README.md
+After=NetworkManager.service
+Wants=NetworkManager.service
+
+[Service]
+Type=simple
+# root für NetworkManager; Gruppe wol, damit der Web-Server den Socket nutzen kann
+User=root
+Group=wol
+WorkingDirectory=/opt/wol-server
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/usr/bin/python3 -m wolserver --config /etc/wol-server/config.json wifi-daemon
+Restart=always
+RestartSec=10
+
+RuntimeDirectory=wol-wifi
+RuntimeDirectoryMode=0750
+StateDirectory=wol-wifi
+StateDirectoryMode=0700
+
+# Härtung: nmcli spricht nur per D-Bus mit NetworkManager, braucht also keine Capabilities.
+CapabilityBoundingSet=
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+RestrictNamespaces=yes
+RestrictRealtime=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+UMask=0027
+
+Nice=5
+MemoryMax=60M
+TasksMax=32
+
+[Install]
+WantedBy=multi-user.target

@@ -8,13 +8,16 @@ rm -f /etc/systemd/system/wol-server.service /usr/local/bin/wol-server /etc/sysc
 systemctl disable --now wol-wlan-watchdog.timer 2>/dev/null || true
 rm -f /etc/systemd/system/wol-wlan-watchdog.service /etc/systemd/system/wol-wlan-watchdog.timer \
       /usr/local/sbin/wol-wlan-watchdog /etc/default/wol-wlan-watchdog
-# WLAN-Powersave-aus, Hardware-Watchdog und OpenVPN-Client bleiben bewusst bestehen:
+systemctl disable --now wol-wifi.service 2>/dev/null || true
+rm -f /etc/systemd/system/wol-wifi.service /etc/NetworkManager/dnsmasq-shared.d/60-wol-server-captive.conf
+nmcli connection delete wol-hotspot >/dev/null 2>&1 || true
+# Gespeicherte WLANs, WLAN-Powersave-aus, Hardware-Watchdog und OpenVPN-Client bleiben bewusst bestehen:
 # Sie sind für einen Headless-Pi im WLAN auch ohne WOL-Server sinnvoll.
 systemctl daemon-reload
 rm -rf /opt/wol-server
 
 if [ "${1:-}" = "--purge" ]; then
-    rm -rf /var/lib/wol-server /etc/wol-server
+    rm -rf /var/lib/wol-server /var/lib/wol-wifi /etc/wol-server
     userdel wol 2>/dev/null || true
     echo "WOL-Server inkl. Daten entfernt."
 else

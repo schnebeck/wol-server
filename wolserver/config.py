@@ -26,6 +26,13 @@ DEFAULTS = {
     ],
     # Interface für Magic Packets; leer = automatisch (Default-Route, VPN-Interfaces ausgenommen)
     "wol_interface": "",
+    # WLAN-Verwaltung (Dienst wol-wifi): Einrichtungs-Hotspot, wenn kein bekanntes WLAN erreichbar ist
+    "wifi_interface": "wlan0",
+    "hotspot_enabled": True,
+    "hotspot_ssid": "",  # leer = "WOL-Setup-XXXX" (Ende der MAC-Adresse)
+    "hotspot_delay_minutes": 5,  # so lange ohne WLAN, bis der Hotspot startet
+    "hotspot_retry_minutes": 5,  # Abstand, in dem der Hotspot nach bekannten WLANs sucht
+    "wifi_socket": "/run/wol-wifi/control.sock",
     "session_days": 30,
     "status_cache_seconds": 5,
     "log_level": "INFO",
