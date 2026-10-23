@@ -5,7 +5,7 @@ import tempfile
 import time
 import unittest
 
-from wolserver import auth, models, wol
+from wolserver import auth, models, netinfo, wol
 from wolserver.scheduler import Scheduler, next_run
 from wolserver.store import Store
 
@@ -39,6 +39,56 @@ class WolTest(unittest.TestCase):
             wol.send_magic_packet("01:02:03:04:05:06", "127.0.0.1", port, count=1)
             data, _ = rx.recvfrom(200)
         self.assertEqual(data, wol.magic_packet("01:02:03:04:05:06"))
+
+
+    def test_send_with_source_ip(self):
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as rx:
+            rx.bind(("127.0.0.1", 0))
+            rx.settimeout(2)
+            wol.send_magic_packet("01:02:03:04:05:06", "127.0.0.1", rx.getsockname()[1],
+                                  count=1, source_ip="127.0.0.1")
+            _, (src, _) = rx.recvfrom(200)
+        self.assertEqual(src, "127.0.0.1")
+
+
+class NetinfoTest(unittest.TestCase):
+    def test_classify(self):
+        self.assertEqual(netinfo.classify("wlan0", netinfo.IFF_UP), "wifi")
+        self.assertEqual(netinfo.classify("tun0", netinfo.IFF_UP), "vpn")
+        self.assertEqual(netinfo.classify("ppp0", netinfo.IFF_POINTOPOINT), "vpn")
+        self.assertEqual(netinfo.classify("eth0", netinfo.IFF_UP), "lan")
+        self.assertEqual(netinfo.classify("docker0", netinfo.IFF_UP), "virtual")
+        self.assertEqual(netinfo.classify("lo", netinfo.IFF_LOOPBACK), "loopback")
+
+    def test_interfaces_contains_loopback(self):
+        lo = [i for i in netinfo.interfaces() if i["kind"] == "loopback"]
+        self.assertEqual(lo[0]["address"], "127.0.0.1")
+
+    def test_default_route_with_vpn_redirect(self):
+        # redirect-gateway def1 legt 0/1 und 128/1 auf tun0, die Default-Route bleibt auf wlan0
+        table = (
+            "Iface\tDestination\tGateway\tFlags\tRefCnt\tUse\tMetric\tMask\tMTU\tWindow\tIRTT\n"
+            "tun0\t00000000\t0100080A\t0003\t0\t0\t0\t00000080\t0\t0\t0\n"
+            "tun0\t00000080\t0100080A\t0003\t0\t0\t0\t00000080\t0\t0\t0\n"
+            "wlan0\t00000000\t01B2A8C0\t0003\t0\t0\t600\t00000000\t0\t0\t0\n"
+            "eth9\t00000000\t01B2A8C0\t0003\t0\t0\t100\t00000000\t0\t0\t0\n"
+        )
+        with tempfile.NamedTemporaryFile("w", delete=False) as f:
+            f.write(table)
+        try:
+            self.assertEqual(netinfo.default_route_interfaces(f.name), ["eth9", "wlan0"])
+        finally:
+            os.unlink(f.name)
+        self.assertEqual(netinfo.default_route_interfaces("/nonexistent"), [])
+
+    def test_parse_wireless(self):
+        text = (
+            "Inter-| sta-|   Quality        |   Discarded packets               | Missed | WE\n"
+            " face | tus | link level noise |  nwid  crypt   frag  retry   misc | beacon | 22\n"
+            " wlan0: 0000   54.  -56.  -256        0      0      0      0     12        0\n"
+        )
+        self.assertEqual(netinfo.parse_wireless(text), {"wlan0": {"link": 54, "signal_dbm": -56}})
+        self.assertEqual(netinfo.parse_wireless(""), {})
 
 
 class ModelTest(unittest.TestCase):

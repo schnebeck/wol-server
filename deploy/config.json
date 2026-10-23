@@ -12,6 +12,7 @@
     "fc00::/7",
     "fe80::/10"
   ],
+  "wol_interface": "",
   "session_days": 30,
   "status_cache_seconds": 5,
   "log_level": "INFO"

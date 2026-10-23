@@ -264,6 +264,16 @@ pre code { background: none; border: 0; padding: 0; }
 .kv > div:last-child { border-bottom: 0; }
 .kv dt { color: var(--muted); }
 .kv dd { margin: 0; text-align: right; font-weight: 500; }
+.signal.good { color: var(--wake); }
+.signal.fair { color: var(--warn-text); }
+.signal.poor { color: var(--danger); }
+.ifaces { display: grid; gap: 6px; }
+.iface { display: grid; grid-template-columns: 52px 1fr auto; align-items: center; gap: 10px; font-size: 0.88rem; }
+.iface .tag { margin: 0; text-align: center; }
+.iface a { color: var(--text); text-decoration: none; border-bottom: 1px dashed var(--border-strong); }
+.iface a:hover { border-bottom-color: var(--text); }
+.tag.kind-vpn { color: var(--sleep); background: var(--sleep-soft); border-color: transparent; }
+.tag.kind-wifi { color: var(--wake); background: var(--wake-soft); border-color: transparent; }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .chip { font-size: 0.78rem; padding: 2px 8px; border-radius: 6px; background: var(--surface-2); border: 1px solid var(--border); }
 .keybox { display: flex; gap: 8px; align-items: flex-start; }

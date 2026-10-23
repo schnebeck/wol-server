@@ -14,7 +14,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit
 
-from . import __version__, models, power, wol
+from . import __version__, models, netinfo, power, wol
 from .auth import Auth, LoginLimiter
 from .scheduler import Scheduler, next_run
 from .status import StatusMonitor
@@ -134,13 +134,27 @@ class App:
 
     # -- Aktionen (genutzt von API und Zeitplaner) --
 
+    def wol_source(self):
+        """LAN/WLAN-Interface für Magic Packets – pro Aktion neu ermittelt (DHCP, WLAN-Reconnect)."""
+        try:
+            return netinfo.lan_source(self.config["wol_interface"])
+        except OSError:
+            return None
+
     def run_action(self, device, action, source):
         try:
+            iface = self.wol_source()
+            if iface is None and self.config["wol_interface"]:
+                log.warning("Interface %s hat keine IPv4-Adresse", self.config["wol_interface"])
+            source_ip = iface["address"] if iface else None
+            via = " über %s" % iface["name"] if iface else ""
             if action == "wake":
-                wol.send_magic_packet(device["mac"], device["broadcast"], device["wol_port"])
-                ok, message = True, "Magic Packet an %s gesendet" % device["mac"]
+                wol.send_magic_packet(
+                    device["mac"], device["broadcast"], device["wol_port"], source_ip=source_ip
+                )
+                ok, message = True, "Magic Packet an %s%s gesendet" % (device["mac"], via)
             else:
-                ok, message = power.sleep_device(device, self.identity)
+                ok, message = power.sleep_device(device, self.identity, source_ip=source_ip)
         except (OSError, ValueError) as e:
             ok, message = False, "Fehler: %s" % e
         self.status.invalidate(device["id"])
@@ -212,6 +226,22 @@ class App:
             "auth_required": self.auth.required,
             "allowed_networks": self.config["allowed_networks"],
             "client": req.client,
+            "network": self._network_info(),
+        }
+
+    def _network_info(self):
+        try:
+            ifaces = [i for i in netinfo.interfaces() if i["kind"] not in ("loopback", "virtual")]
+        except OSError:
+            ifaces = []
+        wifi = netinfo.wifi_signal()
+        for iface in ifaces:
+            iface["wifi"] = wifi.get(iface["name"])
+        source = self.wol_source()
+        return {
+            "interfaces": ifaces,
+            "wol_interface": source["name"] if source else None,
+            "port": self.config["port"],
         }
 
     # -- Geräte --

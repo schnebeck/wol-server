@@ -553,11 +553,42 @@ async function renderSystem() {
     ["Last (1 min)", info.load.toFixed(2)],
   ];
   $("#sys-info").replaceChildren(...rows.map(([k, v]) => el("div", {}, el("dt", {}, k), el("dd", {}, v))));
+  renderNetwork(info.network);
   $("#sys-networks").replaceChildren(...info.allowed_networks.map((n) => el("span", { class: "chip mono" }, n)));
   $("#sys-client").textContent = info.client;
   $("#ssh-key").value = info.ssh_public_key || "(kein Schlüssel – ssh-keygen nicht verfügbar)";
   $("#pw-title").textContent = info.auth_required ? "Passwort ändern" : "Passwort festlegen";
   $("#pw-current-field").hidden = !info.auth_required;
+}
+
+const IFACE_KINDS = { wifi: "WLAN", lan: "LAN", vpn: "VPN" };
+
+function signalLabel(dbm) {
+  if (dbm >= -60) return ["gut", "good"];
+  if (dbm >= -70) return ["mittel", "fair"];
+  return ["schwach", "poor"];
+}
+
+function renderNetwork(net) {
+  const ifaces = net.interfaces.filter((i) => i.up && i.address);
+  const vpn = ifaces.filter((i) => i.kind === "vpn");
+  const wifi = ifaces.find((i) => i.wifi);
+  const port = net.port === 80 ? "" : `:${net.port}`;
+  const rows = [];
+  if (wifi) {
+    const [label, cls] = signalLabel(wifi.wifi.signal_dbm);
+    rows.push(["WLAN-Signal", el("span", { class: `signal ${cls}` }, `${wifi.wifi.signal_dbm} dBm · ${label}`)]);
+  }
+  rows.push(["VPN", vpn.length
+    ? el("span", { class: "signal good" }, `verbunden · ${vpn.map((i) => i.address).join(", ")}`)
+    : el("span", { class: "muted" }, "nicht verbunden")]);
+  rows.push(["Magic Packets über", net.wol_interface || "Default-Route"]);
+  $("#sys-network").replaceChildren(...rows.map(([k, v]) => el("div", {}, el("dt", {}, k), el("dd", {}, v))));
+  $("#sys-ifaces").replaceChildren(...ifaces.map((i) =>
+    el("div", { class: "iface" },
+      el("span", { class: `tag kind-${i.kind}` }, IFACE_KINDS[i.kind] || i.kind),
+      el("span", { class: "mono" }, i.name),
+      el("a", { class: "mono", href: `http://${i.address}${port}/` }, i.address))));
 }
 
 async function copyKey() {

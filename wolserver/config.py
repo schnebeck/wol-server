@@ -24,6 +24,8 @@ DEFAULTS = {
         "fc00::/7",  # IPv6 ULA, u. a. Tailscale/WireGuard
         "fe80::/10",
     ],
+    # Interface für Magic Packets; leer = automatisch (Default-Route, VPN-Interfaces ausgenommen)
+    "wol_interface": "",
     "session_days": 30,
     "status_cache_seconds": 5,
     "log_level": "INFO",

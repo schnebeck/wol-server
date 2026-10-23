@@ -100,31 +100,7 @@ if systemctl cat dphys-swapfile.service >/dev/null 2>&1; then
     systemctl disable --now dphys-swapfile.service >/dev/null 2>&1 || true
 fi
 
-# ---------------------------------------------------------------- WLAN
-# Bewusst AUS: Mit WLAN-Powersave verpasst der Zero eingehende Verbindungen und
-# reagiert verzögert. Kostet nur wenige mA, macht den Server aber zuverlässig erreichbar.
-say "WLAN-Powersave abschalten (Erreichbarkeit vor den letzten Milliampere)"
-if [ -d /etc/NetworkManager/conf.d ]; then
-    cat > /etc/NetworkManager/conf.d/60-wol-server-wifi-powersave.conf <<'EOF'
-[connection]
-wifi.powersave = 2
-EOF
-fi
-cat > /etc/systemd/system/wifi-powersave-off.service <<'EOF'
-[Unit]
-Description=WLAN-Powersave auf wlan0 abschalten
-After=sys-subsystem-net-devices-wlan0.device network-online.target
-BindsTo=sys-subsystem-net-devices-wlan0.device
-
-[Service]
-Type=oneshot
-ExecStart=/bin/sh -c 'command -v iw >/dev/null && iw dev wlan0 set power_save off || true'
-
-[Install]
-WantedBy=sys-subsystem-net-devices-wlan0.device
-EOF
-systemctl daemon-reload
-systemctl enable wifi-powersave-off.service >/dev/null
+# WLAN-Powersave bleibt bewusst AUS – das erledigt wlan-setup.sh (Erreichbarkeit geht vor).
 
 echo
 say "Fertig. Bitte neu starten: sudo reboot"

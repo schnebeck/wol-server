@@ -46,7 +46,7 @@ class SshIdentity:
             return ""
 
 
-def sleep_device(device, identity):
+def sleep_device(device, identity, source_ip=None):
     """Liefert (ok, meldung)."""
     method = device.get("sleep_method", "none")
     if method == "ssh":
@@ -54,7 +54,9 @@ def sleep_device(device, identity):
     if method == "http":
         return _sleep_http(device)
     if method == "sol":
-        wol.send_magic_packet(device["mac"], device["broadcast"], device["wol_port"], reverse=True)
+        wol.send_magic_packet(
+            device["mac"], device["broadcast"], device["wol_port"], reverse=True, source_ip=source_ip
+        )
         return True, "Sleep-on-LAN-Paket gesendet"
     return False, "Keine Schlaf-Methode eingerichtet"
 

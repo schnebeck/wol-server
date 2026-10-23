@@ -1,15 +1,20 @@
 #!/bin/bash
 # Installiert bzw. aktualisiert den WOL-Server auf Raspberry Pi OS (Lite).
-# Aufruf aus dem Projektverzeichnis:  sudo ./deploy/install.sh [--port 80] [--no-password]
+# Aufruf aus dem Projektverzeichnis:
+#   sudo ./deploy/install.sh [--port 80] [--no-password] [--openvpn client.ovpn] [--no-wlan-setup]
 set -euo pipefail
 
 PORT=80
 ASK_PASSWORD=1
+OVPN=""
+WLAN_SETUP=1
 while [ $# -gt 0 ]; do
     case "$1" in
         --port) PORT="$2"; shift 2 ;;
         --no-password) ASK_PASSWORD=0; shift ;;
-        -h|--help) sed -n '2,3p' "$0"; exit 0 ;;
+        --openvpn) OVPN="$(realpath "$2")"; shift 2 ;;
+        --no-wlan-setup) WLAN_SETUP=0; shift ;;
+        -h|--help) sed -n '2,4p' "$0"; exit 0 ;;
         *) echo "Unbekannte Option: $1" >&2; exit 1 ;;
     esac
 done
@@ -108,6 +113,15 @@ else
     exit 1
 fi
 
+if [ "$WLAN_SETUP" -eq 1 ] && [ -d /sys/class/net/wlan0 ]; then
+    "$SRC/deploy/wlan-setup.sh" --iface wlan0
+fi
+
+if [ -n "$OVPN" ]; then
+    "$SRC/deploy/openvpn-setup.sh" "$OVPN" \
+        || echo "OpenVPN noch nicht verbunden – später erneut: sudo ./deploy/openvpn-setup.sh <client.ovpn>" >&2
+fi
+
 suffix=""
 [ "$PORT" != "80" ] && suffix=":$PORT"
 echo
@@ -117,3 +131,5 @@ for ip in $(hostname -I); do
 done
 echo "  Logs:     journalctl -u wol-server -f"
 echo "  Stromsparen (optional, einmalig): sudo ./deploy/lowpower.sh"
+[ -z "$OVPN" ] && echo "  OpenVPN-Client:  sudo ./deploy/openvpn-setup.sh <client.ovpn>"
+exit 0

@@ -9,17 +9,20 @@ aus dem Intranet und über VPN.
 - **Zeitpläne:** pro Gerät Aufwecken/Schlafen zu einer Uhrzeit an gewählten Wochentagen
 - **Online-Status** (ICMP-Ping bzw. TCP-Probe, erkennt auch Windows-PCs mit ICMP-Firewall)
 - **Protokoll** aller manuellen und geplanten Aktionen
+- **OpenVPN-Client auf dem Pi:** Er ist über das VPN erreichbar, ohne Portfreigabe zu Hause (auch bei DS-Lite/CGNAT)
+- **Reiner WLAN-Betrieb:** Powersave aus, WLAN-Watchdog, Hardware-Watchdog; Magic Packets gehen immer ins WLAN,
+  nie in den Tunnel
 - **Zugriff nur aus LAN/VPN** (Netz-Allowlist), Passwort-Login, CSRF-Schutz, gehärteter systemd-Dienst
 - **Keine Abhängigkeiten** außer Python 3 (Standardbibliothek) – kein pip, kein Node, keine Datenbank, kein CDN
 
 ```
- Handy / Laptop ──(LAN oder VPN)──► Pi Zero W :80 ──(UDP-Broadcast, Magic Packet)──► PC / NAS / Server
-                                       │
-                                       └──(SSH / HTTP / Sleep-on-LAN)──► Gerät schlafen legen
+ Handy unterwegs ──► OpenVPN-Server ◄──(tun0, ausgehend)── Pi Zero W ──(wlan0)──► WLAN-Router ──(LAN)──► PC / NAS
+ Laptop zu Hause ─────────────(WLAN/LAN)──────────────────►   :80                  Magic Packet (Broadcast)
+                                                                └──(SSH / HTTP / Sleep-on-LAN)──► schlafen legen
 ```
 
 Warum ein Pi? Magic Packets sind Layer-2-Broadcasts und kommen nicht durch einen VPN-Tunnel. Der Pi steht im
-Heimnetz und schickt das Paket dort stellvertretend ab.
+Heimnetz und schickt das Paket dort stellvertretend ab. Dafür baut er selbst den OpenVPN-Tunnel nach außen auf.
 
 ---
 
@@ -48,16 +51,35 @@ Vom eigenen Rechner aus:
 scp -r WOL-Server <benutzer>@wol.local:~/
 ssh <benutzer>@wol.local
 cd ~/WOL-Server
-sudo ./deploy/install.sh          # fragt nach einem GUI-Passwort
-sudo ./deploy/lowpower.sh         # optional, empfohlen – danach: sudo reboot
+sudo ./deploy/install.sh --openvpn ~/client.ovpn   # fragt nach GUI-Passwort (und ggf. VPN-Zugang)
+sudo ./deploy/lowpower.sh                          # optional, empfohlen – danach: sudo reboot
 ```
 
 `install.sh` legt den Systembenutzer `wol` an, kopiert das Programm nach `/opt/wol-server`, schreibt
 `/etc/wol-server/config.json`, erzeugt einen SSH-Schlüssel und startet den Dienst `wol-server`.
+Außerdem richtet es die WLAN-Absicherung ein (`wlan-setup.sh`, siehe unten) und mit `--openvpn` den
+VPN-Client (`openvpn-setup.sh`, siehe Abschnitt 4).
 Das Skript lässt sich gefahrlos erneut ausführen, so werden auch **Updates** eingespielt.
 Daten und Konfiguration bleiben dabei erhalten.
 
-Optionen: `--port 8080` (anderer Port), `--no-password` (keine Passwortabfrage).
+Optionen:
+- `--port 8080`: anderer Port
+- `--no-password`: keine Passwortabfrage
+- `--openvpn <datei.ovpn>`: OpenVPN-Client einrichten
+- `--no-wlan-setup`: ohne WLAN-Absicherung
+
+### WLAN-Betrieb: `wlan-setup.sh`
+
+Der Zero W hat nur WLAN. Damit der Server trotzdem zuverlässig erreichbar bleibt, richtet `install.sh`
+automatisch Folgendes ein. Einzeln lässt es sich mit `sudo ./deploy/wlan-setup.sh` ausführen.
+
+| Maßnahme | Wirkung |
+|---|---|
+| WLAN-Powersave aus | Ohne diese Einstellung verpasst der Zero eingehende Verbindungen und Broadcasts. Kostet nur wenige mA. |
+| WLAN-Watchdog (Timer, jede Minute) | Pingt das Gateway. Nach 3 Fehlschlägen wird das WLAN neu verbunden, nach 30 min ohne Netz startet der Pi neu (frühestens 1 h nach dem Boot). Einstellbar in `/etc/default/wol-wlan-watchdog`. |
+| Hardware-Watchdog | Startet den Pi neu, falls das System komplett hängt |
+
+Der Watchdog protokolliert ins Journal: `journalctl -t wlan-watchdog`.
 
 ### Stromsparen: `lowpower.sh`
 
@@ -69,7 +91,6 @@ Optionen: `--port 8080` (anderer Port), `--no-password` (keine Passwortabfrage).
 | `triggerhappy`, `ModemManager` aus | weniger Hintergrundprozesse |
 | Journal nur im RAM, SD-Swap aus | schont die SD-Karte |
 | `--led-off` | grüne Aktivitäts-LED aus |
-| **WLAN-Powersave aus** | Bewusst so gewählt, denn mit Powersave verpasst der Zero eingehende Verbindungen. Kostet nur wenige mA. |
 
 Vorher wird `config.txt` gesichert (`config.txt.bak-<datum>`). Mit `--keep-hdmi` / `--keep-bluetooth`
 lassen sich einzelne Maßnahmen überspringen.
@@ -87,7 +108,14 @@ lassen sich einzelne Maßnahmen überspringen.
   - Zum Aufwecken aus dem *ausgeschalteten* Zustand den **Schnellstart deaktivieren**
     (Energieoptionen → „Auswahl der Netzschaltertasten“)
 - Das Zielgerät sollte **per Kabel** angeschlossen sein, denn WOL über WLAN unterstützen nur wenige Geräte.
-  Der Pi selbst darf im WLAN hängen; der Router reicht den Broadcast ins LAN weiter.
+
+**Der Pi im WLAN:** Der Router bzw. Access Point reicht den Broadcast aus dem WLAN ins Kabelnetz weiter. Dafür
+gilt:
+- Der Pi muss im **selben Netz** wie die Zielgeräte sein, also **nicht im Gast-WLAN**.
+- Am Access Point darf **keine Client-Isolation** aktiv sein.
+- Mesh-Repeater (FRITZ!Repeater u. ä.) leiten Broadcasts normalerweise weiter.
+- WLAN-Broadcasts werden nicht bestätigt; der Server sendet jedes Magic Packet deshalb 5-mal.
+- Die Signalstärke zeigt die GUI unter *System → Netzwerk* (besser als ca. −70 dBm ist gut).
 
 Kommt das Paket nicht an, in der GUI als Broadcast-Adresse die des eigenen Netzes eintragen
 (z. B. `192.168.178.255` statt `255.255.255.255`).
@@ -120,20 +148,47 @@ oder einen eigenen Sleep-Endpunkt.
 **Sleep-on-LAN:** Sendet ein Magic Packet mit umgekehrter MAC. Dafür muss auf dem Ziel ein passender Dienst
 laufen, z. B. [sleep-on-lan](https://github.com/SR-G/sleep-on-lan) (Windows/Linux).
 
-## 4. Zugriff über VPN
+## 4. Zugriff über VPN (OpenVPN-Client auf dem Pi)
+
+Der Pi verbindet sich als **OpenVPN-Client** mit einem OpenVPN-Server, z. B. auf einem VPS, im Router oder auf
+einem NAS. Andere VPN-Teilnehmer (Handy, Laptop) erreichen ihn dann über seine VPN-Adresse. Weil der Tunnel vom
+Pi nach außen aufgebaut wird, braucht es zu Hause keine Portfreigabe; das funktioniert auch hinter DS-Lite/CGNAT.
+
+```bash
+sudo ./deploy/openvpn-setup.sh ~/client.ovpn      # oder gleich: install.sh --openvpn ~/client.ovpn
+```
+
+Das Skript erledigt Folgendes:
+- installiert `openvpn` und legt die Konfiguration als `/etc/openvpn/client/wol.conf` ab (Modus 0600)
+- fragt Benutzername und Passwort ab, falls die Konfiguration `auth-user-pass` nutzt; die Zugangsdaten landen
+  in `/etc/openvpn/client/wol.auth`, denn headless kann OpenVPN nicht nachfragen
+- kopiert referenzierte Dateien (`ca ca.crt` …) mit; Konfigurationen mit Inline-Zertifikaten gehen direkt
+- sorgt für unbegrenzte Neuverbindung nach WLAN- oder Server-Ausfällen (`connect-retry`, `ping-restart`,
+  systemd `Restart=always`)
+- **ignoriert `redirect-gateway` und gepushte DNS-Server.** Der Pi soll über das VPN nur *erreichbar* sein,
+  nicht seinen gesamten Verkehr durch den Tunnel schicken. Das spart CPU auf dem Single-Core-Zero.
+  `--allow-redirect-gateway` schaltet das ab. Magic Packets gehen in jedem Fall ins WLAN, weil der Server sie an
+  die WLAN-Adresse bindet.
+- zeigt am Ende die URL im VPN an, z. B. `http://10.8.0.6/`
+
+**Auf dem OpenVPN-Server** sollte man:
+- dem Pi eine **feste VPN-Adresse** geben (`client-config-dir` + `ifconfig-push 10.8.0.6 255.255.255.0`),
+  damit die URL stabil bleibt
+- **`client-to-client`** aktivieren oder passend routen, damit andere VPN-Clients den Pi erreichen
+- darauf achten, dass sich das VPN-Subnetz nicht mit dem Heimnetz überschneidet (z. B. VPN `10.8.0.0/24`,
+  Heimnetz `192.168.178.0/24`)
 
 Die GUI ist nur aus den Netzen in `allowed_networks` erreichbar. Standardmäßig sind das alle privaten Netze
-(RFC 1918), `100.64.0.0/10` (Tailscale/CGNAT), IPv6-ULA und Link-Local. Andere Quellen bekommen `403`.
+(RFC 1918, damit auch die üblichen OpenVPN-Netze `10.8.0.0/24` …), `100.64.0.0/10`, IPv6-ULA und Link-Local.
+Liegt das VPN-Netz woanders, warnt `openvpn-setup.sh`. Dann das Netz in `/etc/wol-server/config.json`
+ergänzen und `sudo systemctl restart wol-server` ausführen. Den VPN-Status samt Adresse zeigt die GUI unter
+*System → Netzwerk*.
 
-- **VPN im Router** (FRITZ!Box-VPN/WireGuard, OpenVPN/WireGuard auf dem Router): Ist das der schonendste Weg
-  für den Zero, denn VPN-Clients erhalten meist eine Adresse im Heimnetz oder in einem privaten Netz. Damit ist
-  der Zugriff ohne weitere Konfiguration möglich: `http://<IP-des-Pi>/`.
-- **Tailscale/WireGuard direkt auf dem Pi:** funktioniert, kostet auf dem Single-Core-Zero aber spürbar CPU.
-- Liegt dein VPN-Netz außerhalb der Standardnetze, ergänze es in `/etc/wol-server/config.json` und führe
-  `sudo systemctl restart wol-server` aus.
-
-> Die GUI spricht bewusst nur HTTP: Sie ist ausschließlich im LAN/VPN erreichbar, und VPN-Verkehr ist bereits
+> Die GUI spricht bewusst nur HTTP: Sie ist ausschließlich im LAN/VPN erreichbar, und der VPN-Verkehr ist
 > verschlüsselt. **Den Port niemals per Portfreigabe ins Internet öffnen.**
+
+Ein OpenVPN-Client verursacht auf dem Zero W im Leerlauf kaum Last (nur Keepalives). Für die wenigen Kilobyte
+der GUI reicht die Leistung problemlos.
 
 ## 5. Bedienung
 
@@ -142,7 +197,7 @@ Die GUI ist nur aus den Netzen in `allowed_networks` erreichbar. Standardmäßig
 | **Geräte** | Karten mit Online-Status, nächster geplanter Aktion, Buttons *Aufwecken* / *Schlafen* |
 | **Zeitpläne** | Uhrzeit + Wochentage + Aktion; per Schalter pausierbar; Vorlagen „Werktags/Wochenende/Täglich“ |
 | **Protokoll** | Die letzten 300 Aktionen mit Ergebnis (manuell / Zeitplan) |
-| **System** | Hostname, Uhrzeit, CPU-Temperatur, Laufzeit, erlaubte Netze, SSH-Schlüssel, Passwort ändern |
+| **System** | Hostname, Uhrzeit, CPU-Temperatur, WLAN-Signal, VPN-Status, Interfaces, erlaubte Netze, SSH-Schlüssel, Passwort |
 
 Der Online-Status wird nur abgefragt, solange die Seite offen und sichtbar ist (alle 10 s). Ist niemand auf
 der GUI, schläft der Pi bis zur nächsten Zeitplan-Minute.
@@ -166,6 +221,7 @@ sudo systemctl restart wol-server            # nach Änderung der config.json
 | `port` | `80` | HTTP-Port |
 | `data_dir` | `/var/lib/wol-server` | Geräte, Zeitpläne, Protokoll, Passwort-Hash, SSH-Schlüssel |
 | `allowed_networks` | private Netze | Quellnetze mit Zugriff |
+| `wol_interface` | `""` (automatisch) | Interface für Magic Packets, z. B. `"wlan0"`; automatisch heißt: das Interface der Default-Route, VPN-Interfaces ausgenommen |
 | `session_days` | `30` | Gültigkeit des Login-Cookies |
 | `status_cache_seconds` | `5` | Cache für Online-Prüfungen |
 | `log_level` | `INFO` | `DEBUG` loggt jede Anfrage |
@@ -178,6 +234,8 @@ Dateien:
 /var/lib/wol-server/data.json    Geräte, Zeitpläne, Protokoll (atomar geschrieben)
 /var/lib/wol-server/auth.json    Passwort-Hash (PBKDF2) + Cookie-Secret, Modus 0600
 /var/lib/wol-server/.ssh/        SSH-Schlüssel und known_hosts für das Schlafenlegen
+/etc/openvpn/client/wol.conf     OpenVPN-Client (Dienst openvpn-client@wol)
+/etc/default/wol-wlan-watchdog   Einstellungen des WLAN-Watchdogs
 ```
 
 **Backup:** `/var/lib/wol-server/` sichern.
@@ -187,6 +245,10 @@ Dateien:
 - **Zeitplaner:** Er wacht einmal pro Minute auf. Der Zero hat keine Echtzeituhr: Springt die Uhr nach dem Boot
   per NTP nach vorne, werden höchstens die letzten 10 Minuten nachgeholt. Rücksprünge und die doppelte Stunde
   bei der Zeitumstellung lösen nichts doppelt aus.
+- **Magic Packets und VPN:** Pusht ein VPN-Server `redirect-gateway def1`, gehören `0.0.0.0/1` und
+  `128.0.0.0/1` zu `tun0`, und ein Broadcast an `255.255.255.255` würde im Tunnel landen. Deshalb bindet der
+  Server den Socket an die Adresse des WLAN/LAN-Interfaces. Linux schickt einen Limited Broadcast dann über
+  genau dieses Interface. Das Protokoll zeigt, über welches Interface gesendet wurde.
 - **Online-Prüfung:** ICMP-Echo über unprivilegierte Sockets (dafür setzt `install.sh`
   `net.ipv4.ping_group_range`). Antwortet das Gerät nicht, folgen TCP-Probes auf 22/445/3389/80/443/139. Auch
   ein „Connection refused“ bedeutet: Das Gerät ist an.
@@ -230,11 +292,14 @@ python3 -m unittest discover -s tests -t .   # Tests
 | Status immer „Offline“ | Host/IP prüfen; Firewall blockt ICMP *und* droppt TCP: z. B. ICMP-Echo in der Windows-Firewall erlauben |
 | SSH: `Permission denied (publickey)` | Schlüssel aus *System* in die richtige `authorized_keys` eintragen |
 | SSH: `sudo: a password is required` | sudoers-Regel aus Abschnitt 3 anlegen |
+| VPN verbindet nicht | `journalctl -u openvpn-client@wol -e`; Zugangsdaten in `/etc/openvpn/client/wol.auth` prüfen |
+| VPN steht, GUI über VPN nicht erreichbar | Auf dem Server `client-to-client`/Routing prüfen; VPN-Subnetz in `allowed_networks`? |
+| Pi zeitweise weg | `journalctl -t wlan-watchdog`; Signal unter *System* prüfen (schlechter als −75 dBm: Pi näher an den Router oder Repeater nutzen) |
 | Zeitpläne laufen zur falschen Zeit | Zeitzone setzen: `sudo timedatectl set-timezone Europe/Berlin` |
 
 ## Deinstallation
 
 ```bash
-sudo ./deploy/uninstall.sh            # Programm entfernen, Daten behalten
+sudo ./deploy/uninstall.sh            # Programm entfernen, Daten behalten (OpenVPN-Client bleibt)
 sudo ./deploy/uninstall.sh --purge    # alles entfernen
 ```

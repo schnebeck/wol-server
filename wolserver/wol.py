@@ -23,10 +23,18 @@ def magic_packet(mac, reverse=False):
     return b"\xff" * 6 + raw * 16
 
 
-def send_magic_packet(mac, broadcast="255.255.255.255", port=9, count=3, reverse=False):
+def send_magic_packet(mac, broadcast="255.255.255.255", port=9, count=5, reverse=False, source_ip=None):
+    """Sendet das Paket count-mal (WLAN-Broadcasts werden nicht bestätigt und gehen leichter verloren).
+
+    source_ip bindet den Socket an die Adresse des LAN/WLAN-Interfaces; Linux schickt einen
+    Broadcast an 255.255.255.255 dann über genau dieses Interface – auch wenn ein VPN die
+    Default-Route übernommen hat.
+    """
     packet = magic_packet(mac, reverse=reverse)
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        if source_ip:
+            sock.bind((source_ip, 0))
         for i in range(count):
             if i:
                 time.sleep(0.05)
