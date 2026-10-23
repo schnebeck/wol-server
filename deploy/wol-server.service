@@ -1,0 +1,47 @@
+[Unit]
+Description=WOL-Server (Wake-on-LAN-Manager mit Web-GUI)
+Documentation=file:///opt/wol-server/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=wol
+Group=wol
+WorkingDirectory=/opt/wol-server
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/usr/bin/python3 -m wolserver --config /etc/wol-server/config.json serve
+Restart=on-failure
+RestartSec=5
+
+# Port 80 ohne root
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+
+# Härtung
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/wol-server
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+RestrictNamespaces=yes
+RestrictRealtime=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+UMask=0077
+
+# Ressourcen: freundlich zum Pi Zero
+Nice=5
+MemoryMax=120M
+TasksMax=64
+
+[Install]
+WantedBy=multi-user.target

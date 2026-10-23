@@ -1,0 +1,309 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>WOL-Server</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/style.css">
+<script src="/app.js" defer></script>
+</head>
+<body>
+
+<div id="boot" class="boot">Lade …</div>
+
+<div id="login" class="login" hidden>
+  <form id="login-form" class="login-card" novalidate>
+    <img src="/favicon.svg" alt="" class="login-logo" width="48" height="48">
+    <h1>WOL-Server</h1>
+    <p class="muted">Bitte anmelden, um Geräte zu steuern.</p>
+    <label class="field">
+      <span>Passwort</span>
+      <input type="password" name="password" autocomplete="current-password" required>
+    </label>
+    <p class="form-error" id="login-error" hidden></p>
+    <button class="btn primary block" type="submit">Anmelden</button>
+  </form>
+</div>
+
+<div id="app" hidden>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand">
+        <img src="/favicon.svg" alt="" width="26" height="26">
+        <span class="brand-name">WOL-Server</span>
+        <span class="brand-host" id="hostname"></span>
+      </div>
+      <nav class="tabs" aria-label="Bereiche">
+        <button type="button" class="tab" data-view="devices">Geräte</button>
+        <button type="button" class="tab" data-view="schedules">Zeitpläne</button>
+        <button type="button" class="tab" data-view="events">Protokoll</button>
+        <button type="button" class="tab" data-view="system">System</button>
+      </nav>
+      <button type="button" id="logout" class="btn ghost small" hidden>Abmelden</button>
+    </div>
+  </header>
+
+  <div id="banner" class="banner" hidden></div>
+
+  <main class="main">
+    <section id="view-devices" class="view" hidden>
+      <div class="view-head">
+        <div>
+          <h2>Geräte</h2>
+          <p class="muted" id="status-line">&nbsp;</p>
+        </div>
+        <button type="button" class="btn primary" id="add-device">Gerät hinzufügen</button>
+      </div>
+      <div id="device-list" class="grid"></div>
+    </section>
+
+    <section id="view-schedules" class="view" hidden>
+      <div class="view-head">
+        <div>
+          <h2>Zeitpläne</h2>
+          <p class="muted" id="server-time">&nbsp;</p>
+        </div>
+        <button type="button" class="btn primary" id="add-schedule">Zeitplan hinzufügen</button>
+      </div>
+      <div id="schedule-list" class="list"></div>
+    </section>
+
+    <section id="view-events" class="view" hidden>
+      <div class="view-head">
+        <div>
+          <h2>Protokoll</h2>
+          <p class="muted">Die letzten 300 Aktionen.</p>
+        </div>
+        <button type="button" class="btn ghost" id="clear-events">Leeren</button>
+      </div>
+      <div id="event-list" class="list"></div>
+    </section>
+
+    <section id="view-system" class="view" hidden>
+      <div class="view-head"><h2>System</h2></div>
+      <div class="sys-grid">
+        <div class="panel">
+          <h3>Server</h3>
+          <dl class="kv" id="sys-info"></dl>
+        </div>
+        <div class="panel">
+          <h3>Zugriff</h3>
+          <p class="muted small">Die Oberfläche ist nur aus diesen Netzen erreichbar (Intranet und VPN). Ändern lässt sich das in <code>/etc/wol-server/config.json</code>.</p>
+          <div id="sys-networks" class="chips"></div>
+          <p class="small">Deine Adresse: <code id="sys-client"></code></p>
+        </div>
+        <div class="panel wide">
+          <h3>SSH-Schlüssel zum Schlafenlegen</h3>
+          <p class="muted small">Damit der WOL-Server ein Gerät per SSH schlafen legen kann, muss dieser öffentliche Schlüssel auf dem Zielgerät in <code>~/.ssh/authorized_keys</code> des gewählten Benutzers stehen.</p>
+          <div class="keybox">
+            <textarea id="ssh-key" readonly rows="3" spellcheck="false"></textarea>
+            <button type="button" class="btn small" id="copy-key">Kopieren</button>
+          </div>
+          <details class="howto">
+            <summary>Einrichtung auf dem Zielgerät</summary>
+            <p class="small"><strong>Linux:</strong> Schlüssel eintragen und dem Benutzer erlauben, ohne Passwort zu suspendieren:</p>
+            <pre><code>echo '&lt;Schlüssel&gt;' &gt;&gt; ~/.ssh/authorized_keys
+echo "$USER ALL=(root) NOPASSWD: /usr/bin/systemctl suspend, /usr/bin/systemctl poweroff" \
+  | sudo tee /etc/sudoers.d/wol-server</code></pre>
+            <p class="small">Befehl im Gerät: <code>sudo systemctl suspend</code></p>
+            <p class="small"><strong>Windows 10/11:</strong> Unter „Optionale Features“ den <em>OpenSSH-Server</em> installieren, Schlüssel in <code>C:\ProgramData\ssh\administrators_authorized_keys</code> (Admins) bzw. <code>%USERPROFILE%\.ssh\authorized_keys</code> eintragen.</p>
+            <p class="small">Befehl: <code>rundll32.exe powrprof.dll,SetSuspendState 0,1,0</code> (Standby, bei deaktiviertem Ruhezustand) oder <code>shutdown /h</code> (Ruhezustand)</p>
+          </details>
+        </div>
+        <div class="panel">
+          <h3 id="pw-title">Passwort ändern</h3>
+          <form id="password-form" class="stack" novalidate>
+            <label class="field" id="pw-current-field">
+              <span>Aktuelles Passwort</span>
+              <input type="password" name="current" autocomplete="current-password">
+            </label>
+            <label class="field">
+              <span>Neues Passwort (mind. 8 Zeichen)</span>
+              <input type="password" name="new" autocomplete="new-password" minlength="8" required>
+            </label>
+            <label class="field">
+              <span>Wiederholen</span>
+              <input type="password" name="repeat" autocomplete="new-password" minlength="8" required>
+            </label>
+            <p class="form-error" hidden></p>
+            <button class="btn primary" type="submit">Speichern</button>
+          </form>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<dialog id="device-dialog" class="dialog">
+  <form id="device-form" class="dialog-body" novalidate>
+    <header class="dialog-head">
+      <h2 id="device-dialog-title">Gerät</h2>
+      <button type="button" class="icon-btn" data-close aria-label="Schließen">×</button>
+    </header>
+    <div class="dialog-content">
+      <div class="form-grid">
+        <label class="field span2">
+          <span>Name</span>
+          <input name="name" required maxlength="64" placeholder="z. B. Arbeitsplatz-PC">
+        </label>
+        <label class="field">
+          <span>MAC-Adresse</span>
+          <input name="mac" required class="mono" placeholder="AA:BB:CC:DD:EE:FF" autocapitalize="characters" spellcheck="false">
+        </label>
+        <label class="field">
+          <span>Host / IP <em class="opt">optional</em></span>
+          <input name="host" class="mono" placeholder="192.168.178.20" spellcheck="false">
+          <small>Für Statusanzeige und Schlafenlegen.</small>
+        </label>
+        <label class="field">
+          <span>Broadcast-Adresse</span>
+          <input name="broadcast" class="mono" placeholder="255.255.255.255" spellcheck="false">
+          <small>Z. B. 192.168.178.255, wenn 255.255.255.255 nicht ankommt.</small>
+        </label>
+        <label class="field">
+          <span>WOL-Port</span>
+          <input name="wol_port" type="number" min="1" max="65535" placeholder="9">
+        </label>
+      </div>
+
+      <fieldset class="group">
+        <legend>Schlafen legen</legend>
+        <div class="segmented" role="radiogroup" id="sleep-method">
+          <label><input type="radio" name="sleep_method" value="none"><span>Keine</span></label>
+          <label><input type="radio" name="sleep_method" value="ssh"><span>SSH</span></label>
+          <label><input type="radio" name="sleep_method" value="http"><span>HTTP</span></label>
+          <label><input type="radio" name="sleep_method" value="sol"><span>Sleep-on-LAN</span></label>
+        </div>
+
+        <div class="method-panel" data-method="ssh" hidden>
+          <div class="form-grid">
+            <label class="field">
+              <span>Benutzer</span>
+              <input name="ssh_user" placeholder="admin" spellcheck="false" autocapitalize="off">
+            </label>
+            <label class="field">
+              <span>Port</span>
+              <input name="ssh_port" type="number" min="1" max="65535" placeholder="22">
+            </label>
+            <label class="field span2">
+              <span>Befehl</span>
+              <input name="ssh_command" class="mono" placeholder="sudo systemctl suspend" spellcheck="false">
+            </label>
+          </div>
+          <div class="presets">
+            <span class="muted small">Vorlagen:</span>
+            <button type="button" class="chip-btn" data-cmd="sudo systemctl suspend">Linux Standby</button>
+            <button type="button" class="chip-btn" data-cmd="sudo systemctl poweroff">Linux Aus</button>
+            <button type="button" class="chip-btn" data-cmd="rundll32.exe powrprof.dll,SetSuspendState 0,1,0">Windows Standby</button>
+            <button type="button" class="chip-btn" data-cmd="shutdown /h">Windows Ruhezustand</button>
+            <button type="button" class="chip-btn" data-cmd="shutdown /s /t 0">Windows Aus</button>
+          </div>
+          <p class="hint small">Der öffentliche SSH-Schlüssel des WOL-Servers steht unter <em>System</em>.</p>
+        </div>
+
+        <div class="method-panel" data-method="http" hidden>
+          <div class="form-grid">
+            <label class="field">
+              <span>Methode</span>
+              <select name="http_method">
+                <option>POST</option>
+                <option>GET</option>
+                <option>PUT</option>
+              </select>
+            </label>
+            <label class="field span2">
+              <span>URL</span>
+              <input name="http_url" class="mono" placeholder="http://192.168.178.20:8009/sleep" spellcheck="false">
+            </label>
+            <label class="field span2">
+              <span>Body <em class="opt">optional</em></span>
+              <textarea name="http_body" rows="2" class="mono" spellcheck="false"></textarea>
+            </label>
+          </div>
+        </div>
+
+        <div class="method-panel" data-method="sol" hidden>
+          <p class="hint small">Sendet ein Magic Packet mit umgekehrter MAC-Adresse an Broadcast und Port wie oben. Auf dem Zielgerät muss ein Sleep-on-LAN-Dienst laufen, z. B. <em>sleep-on-lan</em> (Windows/Linux).</p>
+        </div>
+      </fieldset>
+      <p class="form-error" hidden></p>
+    </div>
+    <footer class="dialog-foot">
+      <button type="button" class="btn danger ghost" id="delete-device">Löschen</button>
+      <span class="spacer"></span>
+      <button type="button" class="btn ghost" data-close>Abbrechen</button>
+      <button type="submit" class="btn primary">Speichern</button>
+    </footer>
+  </form>
+</dialog>
+
+<dialog id="schedule-dialog" class="dialog">
+  <form id="schedule-form" class="dialog-body" novalidate>
+    <header class="dialog-head">
+      <h2 id="schedule-dialog-title">Zeitplan</h2>
+      <button type="button" class="icon-btn" data-close aria-label="Schließen">×</button>
+    </header>
+    <div class="dialog-content">
+      <div class="form-grid">
+        <label class="field span2">
+          <span>Gerät</span>
+          <select name="device_id" required></select>
+        </label>
+        <div class="field span2">
+          <span>Aktion</span>
+          <div class="segmented" role="radiogroup">
+            <label><input type="radio" name="action" value="wake"><span>Aufwecken</span></label>
+            <label><input type="radio" name="action" value="sleep"><span>Schlafen legen</span></label>
+          </div>
+        </div>
+        <label class="field">
+          <span>Uhrzeit</span>
+          <input name="time" type="time" required>
+        </label>
+        <label class="field">
+          <span>Bezeichnung <em class="opt">optional</em></span>
+          <input name="label" maxlength="80" placeholder="z. B. Backup-Fenster">
+        </label>
+        <div class="field span2">
+          <span>Wochentage</span>
+          <div class="daypicker" id="daypicker"></div>
+          <div class="presets">
+            <button type="button" class="chip-btn" data-days="0,1,2,3,4">Werktags</button>
+            <button type="button" class="chip-btn" data-days="5,6">Wochenende</button>
+            <button type="button" class="chip-btn" data-days="0,1,2,3,4,5,6">Täglich</button>
+          </div>
+        </div>
+        <label class="check span2">
+          <input type="checkbox" name="enabled"> <span>Aktiv</span>
+        </label>
+      </div>
+      <p class="form-error" hidden></p>
+    </div>
+    <footer class="dialog-foot">
+      <button type="button" class="btn danger ghost" id="delete-schedule">Löschen</button>
+      <span class="spacer"></span>
+      <button type="button" class="btn ghost" data-close>Abbrechen</button>
+      <button type="submit" class="btn primary">Speichern</button>
+    </footer>
+  </form>
+</dialog>
+
+<dialog id="confirm-dialog" class="dialog small">
+  <form method="dialog" class="dialog-body">
+    <div class="dialog-content">
+      <h2 id="confirm-title"></h2>
+      <p id="confirm-text" class="muted"></p>
+    </div>
+    <footer class="dialog-foot">
+      <span class="spacer"></span>
+      <button value="cancel" class="btn ghost">Abbrechen</button>
+      <button value="ok" class="btn primary" id="confirm-ok">OK</button>
+    </footer>
+  </form>
+</dialog>
+
+<div id="toasts" class="toasts" aria-live="polite"></div>
+</body>
+</html>
