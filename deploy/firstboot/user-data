@@ -1,0 +1,12 @@
+#cloud-config
+# WOL-Server: richtet den Pi beim ersten Start automatisch ein.
+# Die Einstellungen stehen in wol-setup.txt, nicht hier.
+#
+# Wichtig: Beim Schreiben mit dem Raspberry Pi Imager die "OS-Anpassungen" NICHT
+# verwenden – der Imager würde diese Datei sonst durch seine eigene ersetzen.
+
+# Den Hostnamen setzt firstboot.sh; cloud-init soll ihn nicht wieder ändern.
+preserve_hostname: true
+
+runcmd:
+  - [bash, /boot/firmware/wol-server/deploy/firstboot.sh]

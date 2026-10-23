@@ -153,7 +153,11 @@ if [ "$HW_WATCHDOG" -eq 1 ]; then
 RuntimeWatchdogSec=14s
 RebootWatchdogSec=2min
 EOF
-    systemctl daemon-reexec
+    if [ -n "${WOL_FIRSTBOOT:-}" ]; then
+        echo "    wird beim nächsten Start aktiv"   # kein daemon-reexec mitten im ersten Boot
+    else
+        systemctl daemon-reexec
+    fi
 fi
 
 say "WLAN-Absicherung eingerichtet"

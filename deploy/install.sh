@@ -53,9 +53,11 @@ install -d -o wol -g wol -m 0750 "$DATA_DIR"
 
 say "Programm nach $APP_DIR kopieren"
 install -d -m 0755 "$APP_DIR"
-rm -rf "$APP_DIR/wolserver"
-cp -r "$SRC/wolserver" "$APP_DIR/"
-cp "$SRC/README.md" "$APP_DIR/" 2>/dev/null || true
+if [ "$SRC" != "$APP_DIR" ]; then
+    rm -rf "$APP_DIR/wolserver" "$APP_DIR/deploy"
+    cp -r "$SRC/wolserver" "$SRC/deploy" "$APP_DIR/"   # deploy/: Skripte für spätere Änderungen
+    cp "$SRC/README.md" "$APP_DIR/" 2>/dev/null || true
+fi
 find "$APP_DIR" -name '__pycache__' -prune -exec rm -rf {} +
 python3 -m compileall -q "$APP_DIR/wolserver"   # vorkompilieren: schnellerer Start auf dem Zero
 chown -R root:root "$APP_DIR"

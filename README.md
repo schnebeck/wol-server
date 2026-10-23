@@ -30,6 +30,54 @@ Heimnetz und schickt das Paket dort stellvertretend ab. Dafür baut er selbst de
 
 ## 1. SD-Karte vorbereiten
 
+Es gibt zwei Wege:
+- **Variante A: fertiges Image.** Karte schreiben, Pi einstecken, fertig. Kein SSH, keine Tastatur, keine
+  Imager-Einstellungen. Empfohlen.
+- **Variante B: Imager und SSH.** Raspberry Pi OS installieren, danach den WOL-Server per SSH aufspielen.
+
+### Variante A: fertiges Image (ohne SSH)
+
+Auf einem Linux-PC (ohne root; benötigt `mtools`, `xz-utils`, `fdisk` und `curl`):
+
+```bash
+cp deploy/firstboot/wol-setup.txt meine-einstellungen.txt   # anpassen: GUI-Passwort, Hostname, ggf. WLAN
+./deploy/make-image.sh -c meine-einstellungen.txt \
+    --ovpn client.ovpn --ovpn-auth vpn-zugang.txt \
+    --xz -o wol-server.img                                   # VPN-Optionen weglassen, wenn nicht gebraucht
+```
+
+Das Skript lädt das aktuelle **Raspberry Pi OS Lite (32-bit)** und prüft seine Prüfsumme. Anschließend legt es
+WOL-Server, Einstellungen und ggf. VPN-Konfiguration auf die Boot-Partition. Das Ergebnis `wol-server.img.xz`
+mit einem beliebigen Programm auf die Karte schreiben:
+- **Raspberry Pi Imager:** *Eigenes Image* wählen und die Frage nach **OS-Anpassungen mit „Nein“**
+  beantworten. Sonst ersetzt der Imager die Startkonfiguration.
+- **balenaEtcher** oder `xzcat wol-server.img.xz | sudo dd of=/dev/sdX bs=4M conv=fsync`
+
+Karte in den Pi, Strom an. Beim ersten Start richtet sich der Pi selbst ein, das dauert auf dem Zero W etwa
+5–10 Minuten. Danach startet er einmal neu (Stromsparmodus) und öffnet den Hotspot **`WOL-Setup-XXXX`**, über
+den das Heim-WLAN gewählt wird (siehe [WLAN einrichten](#wlan-einrichten-und-wechseln-einrichtungs-hotspot)).
+War in den Einstellungen ein WLAN eingetragen, ist er direkt unter `http://wol.local/` erreichbar.
+
+Was beim ersten Start passiert (`deploy/firstboot.sh`, gestartet von cloud-init):
+- Es setzt Hostname, Zeitzone und WLAN-Land und richtet optional den Wartungszugang ein (`SSH=yes`, Schlüssel
+  per `--ssh-key`).
+- Es installiert den WOL-Server samt WLAN-Absicherung und Hotspot. Raspberry Pi OS Lite bringt dafür alle Pakete
+  mit, Internet ist nicht nötig.
+- Es setzt das GUI-Passwort aus den Einstellungen.
+- OpenVPN wird automatisch nachinstalliert, sobald der Pi über das WLAN Internet hat.
+- Danach löscht es Einstellungen, VPN-Schlüssel und Quellen von der Boot-Partition. Das Protokoll liegt dort als
+  `wol-setup.log`, auf dem Pi unter `/var/log/wol-firstboot.log`.
+
+> **Ohne Linux-PC:** Das offizielle Raspberry Pi OS Lite (32-bit) ohne OS-Anpassungen schreiben. Dann auf die
+> Boot-Partition (`bootfs`) kopieren: den Inhalt von `deploy/firstboot/` (`user-data`, `userconf.txt`,
+> `wol-setup.txt` zum Anpassen) und dieses Projektverzeichnis als Ordner **`wol-server`**. Optional kommen
+> `openvpn.ovpn`, `openvpn.auth` und `ssh_authorized_keys` dazu.
+
+**Achtung:** Image und Karte enthalten bis zum ersten Start Passwörter und ggf. den privaten VPN-Schlüssel.
+Das Image deshalb nicht weitergeben und nach dem Schreiben löschen.
+
+### Variante B: Imager und SSH
+
 Mit dem **Raspberry Pi Imager**:
 
 1. Gerät: *Raspberry Pi Zero* · Betriebssystem: **Raspberry Pi OS Lite (32-bit)**
@@ -48,7 +96,7 @@ Der Imager wird nur dieses eine Mal gebraucht. Nach der Installation richtet der
 > **Tipp:** Im Router dem Pi eine feste IP zuweisen (z. B. FRITZ!Box: *Heimnetz → Netzwerk → Gerät → „Diesem
 > Netzwerkgerät immer die gleiche IPv4-Adresse zuweisen“*).
 
-## 2. Installieren
+## 2. Installieren (Variante B)
 
 Vom eigenen Rechner aus:
 
@@ -319,6 +367,8 @@ Dateien:
 /etc/openvpn/client/wol.conf     OpenVPN-Client (Dienst openvpn-client@wol)
 /etc/default/wol-wlan-watchdog   Einstellungen des WLAN-Watchdogs
 /var/lib/wol-wifi/hotspot.json   Hotspot-Passwort (nur root)
+/var/log/wol-firstboot.log       Protokoll der Einrichtung beim ersten Start (Variante A)
+/opt/wol-server/deploy/          Skripte für spätere Änderungen (openvpn-setup.sh, lowpower.sh, …)
 /etc/NetworkManager/system-connections/   gespeicherte WLANs (NetworkManager)
 /etc/NetworkManager/dnsmasq-shared.d/60-wol-server-captive.conf   DNS-Umleitung im Hotspot
 ```
@@ -367,6 +417,7 @@ POST   /api/wifi/forget {ssid}      PUT  /api/wifi/hotspot {password}
 ```bash
 python3 -m wolserver -c config.dev.json      # http://localhost:8080, Daten in ./data
 python3 -m unittest discover -s tests -t .   # Tests
+./deploy/make-image.sh --image raspios.img.xz -o test.img   # Image aus vorhandenem OS-Image bauen
 ```
 
 ## 9. Fehlersuche
@@ -382,6 +433,8 @@ python3 -m unittest discover -s tests -t .   # Tests
 | VPN verbindet nicht | `journalctl -u openvpn-client@wol -e`; Zugangsdaten in `/etc/openvpn/client/wol.auth` prüfen |
 | VPN steht, GUI über VPN nicht erreichbar | Auf dem Server `client-to-client`/Routing prüfen; VPN-Subnetz in `allowed_networks`? |
 | Pi zeitweise weg | `journalctl -t wlan-watchdog`; Signal unter *System* prüfen (schlechter als −75 dBm: Pi näher an den Router oder Repeater nutzen) |
+| Image: Pi richtet sich nicht ein | Karte am PC öffnen und `wol-setup.log` auf der Boot-Partition lesen; fehlt sie, lief der Erststart nicht (Imager-OS-Anpassungen benutzt? Dann `user-data` ersetzt) |
+| Image: VPN kommt nicht | Erst nach dem WLAN: `journalctl -u wol-openvpn-pending` – OpenVPN wird installiert, sobald Internet da ist |
 | Hotspot erscheint nicht | `journalctl -u wol-wifi -e`; WLAN-Land gesetzt (`sudo raspi-config nonint do_wifi_country DE`)? `rfkill list` |
 | Handy öffnet die Einrichtungsseite nicht | `http://10.42.0.1/` von Hand aufrufen; manche Handys trennen WLANs ohne Internet, dann „Verbunden bleiben“ wählen |
 | *System → WLAN*: „nicht erreichbar“ | `systemctl status wol-wifi`; erneut einrichten mit `sudo ./deploy/hotspot-setup.sh` |

@@ -1,0 +1,38 @@
+# WOL-Server – Einstellungen für die automatische Einrichtung beim ersten Start
+#
+# Diese Datei liegt auf der Boot-Partition der SD-Karte ("bootfs"). Beim ersten Start
+# übernimmt der Pi die Werte und löscht die Datei danach, weil sie Passwörter enthält.
+# Das Ergebnis steht anschließend in wol-setup.log auf derselben Partition.
+#
+# Format: SCHLÜSSEL=Wert (ohne Leerzeichen um das "="). Leerer Wert = Standard.
+
+# Name im Netz. Die GUI ist später unter http://<HOSTNAME>.local/ erreichbar.
+HOSTNAME=wol
+
+# Zeitzone, wichtig für die Zeitpläne
+TIMEZONE=Europe/Berlin
+
+# WLAN-Land (erlaubte Kanäle und Sendeleistung)
+COUNTRY=DE
+
+# Passwort für die Web-GUI (mindestens 8 Zeichen). Dringend empfohlen: Ohne Passwort
+# kann beim ersten Start jeder in Funkreichweite über den offenen Hotspot die GUI nutzen.
+GUI_PASSWORD=
+
+# Optional: WLAN gleich vorgeben. Leer lassen = Einrichtung über den Hotspot "WOL-Setup-XXXX".
+WIFI_SSID=
+WIFI_PASSWORD=
+
+# Stromsparmodus: HDMI, Bluetooth und Audio aus. Danach startet der Pi einmal neu.
+LOWPOWER=yes
+
+# Wartungszugang. Standard: kein Login, das Gerät braucht keinen.
+# SSH=yes aktiviert den SSH-Server. Angemeldet wird mit einem Schlüssel aus der Datei
+# ssh_authorized_keys (neben diese Datei legen) oder mit ADMIN_PASSWORD.
+ADMIN_USER=admin
+ADMIN_PASSWORD=
+SSH=no
+
+# OpenVPN: die Client-Konfiguration als "openvpn.ovpn" neben diese Datei legen,
+# Zugangsdaten (falls nötig) als "openvpn.auth" (Zeile 1: Benutzer, Zeile 2: Passwort).
+# Der Pi installiert OpenVPN, sobald er über das WLAN Internet hat.
