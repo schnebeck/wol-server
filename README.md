@@ -171,12 +171,42 @@ Das Skript erledigt Folgendes:
   die WLAN-Adresse bindet.
 - zeigt am Ende die URL im VPN an, z. B. `http://10.8.0.6/`
 
-**Auf dem OpenVPN-Server** sollte man:
-- dem Pi eine **feste VPN-Adresse** geben (`client-config-dir` + `ifconfig-push 10.8.0.6 255.255.255.0`),
-  damit die URL stabil bleibt
-- **`client-to-client`** aktivieren oder passend routen, damit andere VPN-Clients den Pi erreichen
-- darauf achten, dass sich das VPN-Subnetz nicht mit dem Heimnetz überschneidet (z. B. VPN `10.8.0.0/24`,
-  Heimnetz `192.168.178.0/24`)
+### Externer OpenVPN-Server (VPS o. ä.)
+
+Pi und Handy/Laptop sind beide **Clients** desselben Servers. Damit sie sich gegenseitig erreichen, braucht die
+Server-Konfiguration (z. B. `/etc/openvpn/server/server.conf`) diese Einstellungen:
+
+```
+topology subnet
+server 10.8.0.0 255.255.255.0
+client-to-client                 # Clients dürfen untereinander sprechen (ohne Kernel-Forwarding)
+client-config-dir /etc/openvpn/ccd
+keepalive 10 60                  # Abbrüche (WLAN!) schnell erkennen, Client verbindet neu
+```
+
+Feste Adresse für den Pi, damit die URL stabil bleibt. Der Dateiname ist der **Common Name** des
+Pi-Zertifikats bzw. bei `username-as-common-name` der VPN-Benutzername:
+
+```
+# /etc/openvpn/ccd/wol-pi
+ifconfig-push 10.8.0.6 255.255.255.0
+```
+
+Danach den Server neu starten. Die GUI ist dann von jedem VPN-Client aus unter `http://10.8.0.6/` erreichbar.
+
+Hinweise:
+- **Jeder Client braucht ein eigenes Zertifikat** bzw. einen eigenen Benutzer. Bei geteilten Zertifikaten
+  (`duplicate-cn`) funktioniert die feste Adresse nicht zuverlässig.
+- **Kommerzielle VPN-Dienste** (NordVPN, ProtonVPN usw.) eignen sich nicht: Sie isolieren Clients
+  voneinander, der Pi wäre über sie nicht erreichbar.
+- Der Pi kann über das VPN nur sich selbst anbieten. Die Geräte im Heimnetz sind über das VPN nicht direkt
+  erreichbar, und das ist für den WOL-Server auch nicht nötig. Wer das trotzdem will, braucht auf dem Server
+  `route`/`iroute` für das Heimnetz und auf dem Pi IP-Forwarding mit NAT. Das ist nicht Teil dieses Projekts.
+- Das VPN-Subnetz darf sich nicht mit dem Heimnetz oder dem Netz unterwegs überschneiden (z. B. VPN
+  `10.8.0.0/24`, Heimnetz `192.168.178.0/24`).
+- Firewall des VPS: Nur der OpenVPN-Port (Standard UDP 1194) muss offen sein.
+- Pi-Zertifikat widerrufen bei Verlust der SD-Karte: Die Schlüssel liegen dort unverschlüsselt in
+  `/etc/openvpn/client/`.
 
 Die GUI ist nur aus den Netzen in `allowed_networks` erreichbar. Standardmäßig sind das alle privaten Netze
 (RFC 1918, damit auch die üblichen OpenVPN-Netze `10.8.0.0/24` …), `100.64.0.0/10`, IPv6-ULA und Link-Local.
