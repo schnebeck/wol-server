@@ -902,6 +902,8 @@ function bind() {
   setInterval(() => {
     if (document.visibilityState !== "visible" || $("#app").hidden) return;
     if (state.view === "devices") refreshStatus();
+    // Neue Einträge (z. B. von Zeitplänen) auch bei offenem Protokoll anzeigen
+    if (state.view === "events") renderEvents().catch(() => {});
     // WLAN-Status nur nachziehen, solange sich etwas tut (Hotspot, Verbindungsaufbau)
     if (state.view === "system" && state.wifi && (state.wifi.mode !== "client" || state.wifi.pending)) {
       renderWifi().catch(() => {});

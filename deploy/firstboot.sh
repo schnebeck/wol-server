@@ -7,6 +7,10 @@
 #
 # Danach werden Einstellungen, VPN-Schlüssel und Quellen von der Boot-Partition gelöscht
 # und das Protokoll als wol-setup.log dort abgelegt.
+#
+# cloud-init startet das Skript nur einmal. Bricht der Pi mittendrin ab (Stromausfall, Hänger
+# und Hardware-Watchdog), setzt wol-firstboot.service die Einrichtung beim nächsten Start
+# fort; alle Schritte vertragen deshalb eine Wiederholung.
 set -uo pipefail
 
 BOOT=/boot/firmware
@@ -14,25 +18,74 @@ SRC_BOOT="$BOOT/wol-server"
 WORK=/var/tmp/wol-server-src
 LOG=/var/log/wol-firstboot.log
 STATUS="FEHLGESCHLAGEN"
+MARKER=/run/wol-firstboot  # solange er existiert, blinkt die LED schnell (auch über wol-wifi)
+RETRY_UNIT=/etc/systemd/system/wol-firstboot.service
 
 exec > >(tee -a "$LOG") 2>&1
 log() { printf '[%s] %s\n' "$(date '+%F %T')" "$*"; }
+
+# Status-LED: "fast" = schnelles Blinken, "normal" = Standardanzeige (SD-Zugriffe)
+led() {
+    local dir trigger
+    for dir in /sys/class/leds/ACT /sys/class/leds/led0; do
+        [ -w "$dir/trigger" ] || continue
+        if [ "$1" = fast ]; then
+            echo timer > "$dir/trigger" && echo 100 > "$dir/delay_on" && echo 100 > "$dir/delay_off"
+        else
+            for trigger in actpwr mmc0 default-on; do
+                grep -qw "$trigger" "$dir/trigger" && { echo "$trigger" > "$dir/trigger"; break; }
+            done
+        fi
+        return 0
+    done
+} 2>/dev/null
 
 # shellcheck disable=SC2317  # wird über trap aufgerufen
 finish() {
     # Geheimnisse von der FAT-Partition entfernen – auch wenn etwas schiefging
     rm -f "$BOOT/wol-setup.txt" "$BOOT/openvpn.ovpn" "$BOOT/openvpn.auth" "$BOOT/ssh_authorized_keys"
     rm -rf "$SRC_BOOT" "$WORK"
+    rm -f "$MARKER"
+    systemctl disable --no-reload wol-firstboot.service >/dev/null 2>&1
+    rm -f "$RETRY_UNIT" /etc/systemd/system/multi-user.target.wants/wol-firstboot.service
+    # Läuft wol-wifi, übernimmt er die LED beim nächsten Durchlauf; sonst Standardanzeige
+    systemctl is-active -q wol-wifi || led normal
     log "Einrichtung beendet: $STATUS"
     sleep 1
-    cp "$LOG" "$BOOT/wol-setup.log" 2>/dev/null || true
+    # Nach einem Absturz stehen ggf. Nullbytes im Protokoll (nie geschriebene Blöcke)
+    tr -d '\000' < "$LOG" > "$BOOT/wol-setup.log" 2>/dev/null || true
     sync
 }
+
+[ "$(id -u)" -eq 0 ] || { log "Muss als root laufen"; exit 1; }
+exec 9> /run/wol-firstboot.lock
+flock -n 9 || { log "Einrichtung läuft bereits"; exit 0; }
 trap finish EXIT
 
 log "WOL-Server: Einrichtung beim ersten Start"
-[ "$(id -u)" -eq 0 ] || { log "Muss als root laufen"; exit 1; }
 [ -d "$SRC_BOOT/wolserver" ] || { log "$SRC_BOOT fehlt – nichts zu tun"; exit 1; }
+touch "$MARKER"
+led fast
+
+# Wiederanlauf nach einem Abbruch: beim nächsten Start erneut ausführen, bis finish() die
+# Einheit entfernt. sync, damit die Datei einen harten Reset sicher übersteht.
+cat > "$RETRY_UNIT" <<EOF
+[Unit]
+Description=WOL-Server: Einrichtung nach Abbruch fortsetzen
+ConditionPathExists=$SRC_BOOT/deploy/firstboot.sh
+Wants=network-online.target
+After=network-online.target NetworkManager.service userconfig.service
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash $SRC_BOOT/deploy/firstboot.sh
+TimeoutStartSec=infinity
+
+[Install]
+WantedBy=multi-user.target
+EOF
+systemctl enable --no-reload wol-firstboot.service >/dev/null 2>&1 || log "Wiederanlauf nicht einrichtbar"
+sync
 
 # ---------------------------------------------------------------- Einstellungen lesen
 declare -A CFG=()
@@ -117,11 +170,19 @@ for _ in $(seq 60); do
     sleep 2
 done
 first_user=$(getent passwd 1000 | cut -d: -f1)
-if [[ "$ADMIN" =~ ^[a-z][a-z0-9-]{0,31}$ ]] && [ -n "$first_user" ] && [ "$first_user" != "$ADMIN" ]; then
-    log "Benutzer $first_user → $ADMIN"
-    /usr/lib/userconf-pi/userconf "$ADMIN" "" || log "Umbenennen fehlgeschlagen"
+if [ "$ADMIN" = root ]; then
+    # Wartung direkt als root: kein Umbenennen, Schlüssel und Passwort gelten für root.
+    # SSH erlaubt root nur mit Schlüssel (Debian-Standard PermitRootLogin prohibit-password).
+    log "Wartungszugang als root"
+elif [[ "$ADMIN" =~ ^[a-z][a-z0-9-]{0,31}$ ]] && [ -n "$first_user" ] && [ "$first_user" != "$ADMIN" ]; then
+    if getent passwd "$ADMIN" >/dev/null; then
+        log "Benutzer $ADMIN existiert schon als Systembenutzer – bleibe bei $first_user"
+    else
+        log "Benutzer $first_user → $ADMIN"
+        /usr/lib/userconf-pi/userconf "$ADMIN" "" || log "Umbenennen fehlgeschlagen"
+    fi
 fi
-ADMIN=$(getent passwd 1000 | cut -d: -f1)
+[ "$ADMIN" = root ] || ADMIN=$(getent passwd 1000 | cut -d: -f1)
 if [ -n "$ADMIN_PASSWORD" ]; then
     printf '%s:%s\n' "$ADMIN" "$ADMIN_PASSWORD" | chpasswd && log "Passwort für $ADMIN gesetzt"
 fi
@@ -134,9 +195,11 @@ if [ -s "$BOOT/ssh_authorized_keys" ]; then
     log "SSH-Schlüssel für $ADMIN übernommen ($(grep -c . "$home/.ssh/authorized_keys") Schlüssel)"
 fi
 if yes_no SSH no; then
-    systemctl enable --now ssh >/dev/null 2>&1 && log "SSH-Server aktiviert (Benutzer $ADMIN)"
+    systemctl enable --no-reload --now ssh >/dev/null 2>&1 && log "SSH-Server aktiviert (Benutzer $ADMIN)"
     if [ ! -s "$BOOT/ssh_authorized_keys" ] && [ -z "$ADMIN_PASSWORD" ]; then
         log "Hinweis: SSH ist an, aber weder Schlüssel noch ADMIN_PASSWORD gesetzt – Login nicht möglich"
+    elif [ "$ADMIN" = root ] && [ ! -s "$BOOT/ssh_authorized_keys" ]; then
+        log "Hinweis: root darf sich per SSH nur mit Schlüssel anmelden – ADMIN_PASSWORD gilt nur an der Konsole"
     fi
 fi
 
@@ -144,18 +207,25 @@ fi
 # Vor install.sh, damit der Hotspot-Dienst das WLAN beim Start schon kennt.
 if [ -n "$WIFI_SSID" ]; then
     log "WLAN '$WIFI_SSID' eintragen"
-    args=(connection add type wifi ifname wlan0 con-name "$WIFI_SSID" ssid "$WIFI_SSID"
-          connection.autoconnect yes 802-11-wireless.powersave 2)
-    [ -n "$WIFI_PASSWORD" ] && args+=(wifi-sec.key-mgmt wpa-psk wifi-sec.psk "$WIFI_PASSWORD")
+    settings=(connection.autoconnect yes 802-11-wireless.powersave 2
+              802-11-wireless.cloned-mac-address permanent)
+    [ -n "$WIFI_PASSWORD" ] && settings+=(wifi-sec.key-mgmt wpa-psk wifi-sec.psk "$WIFI_PASSWORD")
+    if nmcli connection show id "$WIFI_SSID" >/dev/null 2>&1; then
+        # Wiederanlauf: Profil besteht schon (und trägt evtl. gerade die Verbindung)
+        args=(connection modify id "$WIFI_SSID" "${settings[@]}")
+    else
+        args=(connection add type wifi ifname wlan0 con-name "$WIFI_SSID" ssid "$WIFI_SSID" "${settings[@]}")
+    fi
     nmcli "${args[@]}" >/dev/null || log "WLAN-Profil konnte nicht angelegt werden – Einrichtung dann über den Hotspot"
 fi
 
 # ---------------------------------------------------------------- WOL-Server
 log "Installiere den WOL-Server"
-if ! WOL_FIRSTBOOT=1 bash "$WORK/deploy/install.sh" --no-password --country "$COUNTRY"; then
+if ! bash "$WORK/deploy/install.sh" --no-password --country "$COUNTRY"; then
     log "install.sh ist fehlgeschlagen"
     exit 1
 fi
+sync
 if [ -n "$GUI_PASSWORD" ]; then
     if printf '%s\n' "$GUI_PASSWORD" | /usr/local/bin/wol-server passwd --stdin >/dev/null; then
         log "GUI-Passwort gesetzt"
@@ -205,8 +275,7 @@ RestartSec=120
 [Install]
 WantedBy=multi-user.target
 EOF
-    systemctl daemon-reload
-    systemctl enable wol-openvpn-pending.service >/dev/null
+    systemctl enable wol-openvpn-pending.service >/dev/null   # lädt selbst neu
     systemctl start --no-block wol-openvpn-pending.service
 fi
 

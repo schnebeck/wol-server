@@ -5,6 +5,8 @@
 #
 # - WLAN-Powersave aus: Mit Powersave verpasst der Zero eingehende Verbindungen
 #   und Broadcasts. Das kostet nur wenige mA.
+# - Feste MAC-Adresse: NetworkManager meldet sich in jedem WLAN mit der Hardware-MAC an,
+#   nie mit einer zufälligen – sonst passen DHCP-Reservierung und Router-Freigaben nicht.
 # - WLAN-Watchdog: Er prüft jede Minute das Gateway. Nach 3 Fehlschlägen wird das WLAN
 #   neu verbunden, nach --reboot-after Minuten ohne Netz startet der Pi neu (0 = nie).
 # - Hardware-Watchdog: Er startet den Pi neu, falls das System komplett hängt.
@@ -34,6 +36,11 @@ if [ -d /etc/NetworkManager/conf.d ]; then
 [connection]
 wifi.powersave = 2
 EOF
+    say "Feste MAC-Adresse für alle WLAN-Verbindungen"
+    cat > /etc/NetworkManager/conf.d/61-wol-server-wifi-mac.conf <<'EOF'
+[connection]
+wifi.cloned-mac-address = permanent
+EOF
 fi
 cat > /etc/systemd/system/wifi-powersave-off@.service <<'EOF'
 [Unit]
@@ -53,8 +60,8 @@ if [ -f /etc/systemd/system/wifi-powersave-off.service ]; then
     systemctl disable wifi-powersave-off.service >/dev/null 2>&1 || true
     rm -f /etc/systemd/system/wifi-powersave-off.service
 fi
-systemctl daemon-reload
-systemctl enable "wifi-powersave-off@$IFACE.service" >/dev/null
+# 2>/dev/null: Hinweis "dependency to a non-existent unit", solange udev das Gerät noch nicht gemeldet hat
+systemctl enable --no-reload "wifi-powersave-off@$IFACE.service" >/dev/null 2>&1
 if command -v iw >/dev/null; then
     iw dev "$IFACE" set power_save off 2>/dev/null || true
 fi
@@ -140,8 +147,10 @@ AccuracySec=15s
 [Install]
 WantedBy=timers.target
 EOF
+# Ein einziges Neuladen für alle Units dieses Skripts (dauert auf dem Zero 12–20 s)
 systemctl daemon-reload
-systemctl enable --now wol-wlan-watchdog.timer >/dev/null
+systemctl enable --no-reload wol-wlan-watchdog.timer >/dev/null
+systemctl start wol-wlan-watchdog.timer
 
 # ---------------------------------------------------------------- Hardware-Watchdog
 if [ "$HW_WATCHDOG" -eq 1 ]; then
@@ -149,15 +158,15 @@ if [ "$HW_WATCHDOG" -eq 1 ]; then
     install -d /etc/systemd/system.conf.d
     cat > /etc/systemd/system.conf.d/60-wol-server-watchdog.conf <<'EOF'
 [Manager]
-# BCM2835-Watchdog: maximal ca. 15 s
-RuntimeWatchdogSec=14s
+# Wie die Vorgabe von Raspberry Pi OS. Nicht kürzer: Unter Volllast auf der SD-Karte (fstrim,
+# apt) kann systemd auf dem Zero über 10 s blockieren – ein knapper Watchdog setzt den Pi dann
+# mitten in der Arbeit zurück. Die 15-s-Grenze der BCM2835-Hardware überbrückt der Kernel.
+RuntimeWatchdogSec=1min
 RebootWatchdogSec=2min
 EOF
-    if [ -n "${WOL_FIRSTBOOT:-}" ]; then
-        echo "    wird beim nächsten Start aktiv"   # kein daemon-reexec mitten im ersten Boot
-    else
-        systemctl daemon-reexec
-    fi
+    # Kein daemon-reexec: Schon das nächste daemon-reload (oder der nächste Start) liest die
+    # Einstellung ein; einen laufenden ersten Start soll das nicht stören.
+    sync
 fi
 
 say "WLAN-Absicherung eingerichtet"

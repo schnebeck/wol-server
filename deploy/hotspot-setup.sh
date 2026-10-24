@@ -59,8 +59,7 @@ EOF
 
 say "Dienst wol-wifi"
 install -m 0644 "$SRC/deploy/wol-wifi.service" /etc/systemd/system/wol-wifi.service
-systemctl daemon-reload
-systemctl enable wol-wifi.service >/dev/null
+systemctl enable wol-wifi.service >/dev/null   # lädt selbst neu (siehe install.sh)
 systemctl restart wol-wifi.service
 sleep 2
 if systemctl is-active --quiet wol-wifi.service; then

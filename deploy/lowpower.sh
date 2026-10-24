@@ -31,12 +31,16 @@ CONFIG=/boot/firmware/config.txt
 # ---------------------------------------------------------------- config.txt
 say "Firmware-Einstellungen in $CONFIG"
 cp -a "$CONFIG" "$CONFIG.bak-$(date +%Y%m%d-%H%M%S)"
-sed -i '/^# >>> wol-server lowpower/,/^# <<< wol-server lowpower/d' "$CONFIG"
+# Auf einer Kopie arbeiten und erst fertig geschrieben austauschen: Ein Reset mitten im
+# Schreiben hinterließ sonst eine leere config.txt auf der FAT-Partition.
+NEW="$CONFIG.wol-neu"
+cp "$CONFIG" "$NEW"
+sed -i '/^# >>> wol-server lowpower/,/^# <<< wol-server lowpower/d' "$NEW"
 
 if [ "$KEEP_HDMI" -eq 0 ]; then
     # Headless braucht keinen KMS-Grafiktreiber: spart RAM und erlaubt das Abschalten von HDMI.
-    sed -i 's/^dtoverlay=vc4-kms-v3d/#dtoverlay=vc4-kms-v3d  # deaktiviert von wol-server lowpower/' "$CONFIG"
-    sed -i 's/^max_framebuffers=/#max_framebuffers=/' "$CONFIG"
+    sed -i 's/^dtoverlay=vc4-kms-v3d/#dtoverlay=vc4-kms-v3d  # deaktiviert von wol-server lowpower/' "$NEW"
+    sed -i 's/^max_framebuffers=/#max_framebuffers=/' "$NEW"
 fi
 
 {
@@ -52,7 +56,10 @@ fi
         echo "dtparam=act_led_activelow=on"
     fi
     echo "# <<< wol-server lowpower"
-} >> "$CONFIG"
+} >> "$NEW"
+sync
+mv -f "$NEW" "$CONFIG"
+sync
 
 # ---------------------------------------------------------------- HDMI aus
 if [ "$KEEP_HDMI" -eq 0 ]; then
@@ -69,8 +76,7 @@ ExecStart=/bin/sh -c 'command -v vcgencmd >/dev/null && vcgencmd display_power 0
 [Install]
 WantedBy=multi-user.target
 EOF
-    systemctl daemon-reload
-    systemctl enable hdmi-off.service >/dev/null
+    systemctl enable --no-reload hdmi-off.service >/dev/null
 fi
 
 # ---------------------------------------------------------------- Dienste
@@ -79,7 +85,7 @@ services=(triggerhappy.service ModemManager.service)
 [ "$KEEP_BT" -eq 0 ] && services+=(hciuart.service bluetooth.service)
 for svc in "${services[@]}"; do
     if systemctl list-unit-files "$svc" >/dev/null 2>&1 && systemctl cat "$svc" >/dev/null 2>&1; then
-        systemctl disable --now "$svc" >/dev/null 2>&1 || true
+        systemctl disable --no-reload --now "$svc" >/dev/null 2>&1 || true
         echo "    $svc deaktiviert"
     fi
 done
@@ -97,8 +103,11 @@ systemctl restart systemd-journald
 if systemctl cat dphys-swapfile.service >/dev/null 2>&1; then
     say "Swap-Datei auf der SD-Karte abschalten"
     dphys-swapfile swapoff >/dev/null 2>&1 || true
-    systemctl disable --now dphys-swapfile.service >/dev/null 2>&1 || true
+    systemctl disable --no-reload --now dphys-swapfile.service >/dev/null 2>&1 || true
 fi
+
+# Ein einziges Neuladen für alle Änderungen oben (dauert auf dem Zero 12–20 s)
+systemctl daemon-reload
 
 # WLAN-Powersave bleibt bewusst AUS – das erledigt wlan-setup.sh (Erreichbarkeit geht vor).
 

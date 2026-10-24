@@ -33,6 +33,7 @@ DEFAULTS = {
     "hotspot_delay_minutes": 5,  # so lange ohne WLAN, bis der Hotspot startet
     "hotspot_retry_minutes": 5,  # Abstand, in dem der Hotspot nach bekannten WLANs sucht
     "wifi_socket": "/run/wol-wifi/control.sock",
+    "status_led": True,
     "session_days": 30,
     "status_cache_seconds": 5,
     "log_level": "INFO",

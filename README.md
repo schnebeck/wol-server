@@ -14,6 +14,7 @@ aus dem Intranet und über VPN.
   nie in den Tunnel
 - **Einrichtungs-Hotspot wie bei einer Appliance:** Findet der Pi kein bekanntes WLAN, öffnet er einen eigenen
   Hotspot mit Einrichtungsseite. WLAN wechseln geht ohne Imager, Tastatur oder SD-Karte.
+- **Status-LED:** Die grüne LED zeigt, ob die Einrichtung läuft, der Hotspot aktiv ist oder das Netz fehlt.
 - **Zugriff nur aus LAN/VPN** (Netz-Allowlist), Passwort-Login, CSRF-Schutz, gehärteter systemd-Dienst
 - **Keine Abhängigkeiten** außer Python 3 (Standardbibliothek) – kein pip, kein Node, keine Datenbank, kein CDN
 
@@ -57,6 +58,7 @@ Karte in den Pi, Strom an. Beim ersten Start richtet sich der Pi selbst ein, das
 5–10 Minuten. Danach startet er einmal neu (Stromsparmodus) und öffnet den Hotspot **`WOL-Setup-XXXX`**, über
 den das Heim-WLAN gewählt wird (siehe [WLAN einrichten](#wlan-einrichten-und-wechseln-einrichtungs-hotspot)).
 War in den Einstellungen ein WLAN eingetragen, ist er direkt unter `http://wol.local/` erreichbar.
+Solange die Einrichtung läuft, blinkt die grüne LED schnell (siehe [Status-LED](#status-led)).
 
 Was beim ersten Start passiert (`deploy/firstboot.sh`, gestartet von cloud-init):
 - Es setzt Hostname, Zeitzone und WLAN-Land und richtet optional den Wartungszugang ein (`SSH=yes`, Schlüssel
@@ -67,6 +69,8 @@ Was beim ersten Start passiert (`deploy/firstboot.sh`, gestartet von cloud-init)
 - OpenVPN wird automatisch nachinstalliert, sobald der Pi über das WLAN Internet hat.
 - Danach löscht es Einstellungen, VPN-Schlüssel und Quellen von der Boot-Partition. Das Protokoll liegt dort als
   `wol-setup.log`, auf dem Pi unter `/var/log/wol-firstboot.log`.
+- Bricht der Pi mittendrin ab (Stromausfall, Hänger), setzt er die Einrichtung beim nächsten Start fort
+  (`wol-firstboot.service`).
 
 > **Ohne Linux-PC:** Das offizielle Raspberry Pi OS Lite (32-bit) ohne OS-Anpassungen schreiben. Dann auf die
 > Boot-Partition (`bootfs`) kopieren: den Inhalt von `deploy/firstboot/` (`user-data`, `userconf.txt`,
@@ -131,6 +135,7 @@ automatisch Folgendes ein. Einzeln lässt es sich mit `sudo ./deploy/wlan-setup.
 | Maßnahme | Wirkung |
 |---|---|
 | WLAN-Powersave aus | Ohne diese Einstellung verpasst der Zero eingehende Verbindungen und Broadcasts. Kostet nur wenige mA. |
+| Feste MAC-Adresse | Der Pi meldet sich in jedem WLAN mit seiner Hardware-MAC an, nie mit einer zufälligen. Damit greifen DHCP-Reservierung und Freigaben im Router. |
 | WLAN-Watchdog (Timer, jede Minute) | Pingt das Gateway. Nach 3 Fehlschlägen wird das WLAN neu verbunden, nach 30 min ohne Netz startet der Pi neu (frühestens 1 h nach dem Boot). Läuft der Einrichtungs-Hotspot, hält sich der Watchdog heraus. Einstellbar in `/etc/default/wol-wlan-watchdog`. |
 | Hardware-Watchdog | Startet den Pi neu, falls das System komplett hängt |
 
@@ -169,6 +174,19 @@ Gut zu wissen:
   spricht mit ihm über einen Unix-Socket und braucht selbst keine Rechte am Netzwerk. Einzeln einrichten:
   `sudo ./deploy/hotspot-setup.sh --country DE`.
 
+### Status-LED
+
+Der Zero hat keinen Bildschirm, deshalb zeigt die grüne Aktivitäts-LED den Zustand:
+
+| LED | Bedeutung |
+|---|---|
+| schnelles Blinken | Einrichtung beim ersten Start läuft, oder der Pi verbindet sich gerade mit einem WLAN |
+| Herzschlag (Doppelblitz) | Einrichtungs-Hotspot `WOL-Setup-XXXX` ist aktiv: Handy damit verbinden |
+| langsames Blinken (1 s an, 1 s aus) | kein Netz; nach 5 Minuten startet der Hotspot |
+| normales Flackern bei SD-Zugriffen | im WLAN, alles in Ordnung (mit `lowpower.sh --led-off`: aus) |
+
+Die Muster laufen im Kernel und kosten keine CPU. Abschalten mit `"status_led": false` in der Konfiguration.
+
 **Als fertiges Gerät weitergeben oder ein Image erstellen:** Nach der Installation die gespeicherten WLANs löschen
 (`sudo nmcli connection delete <Name>`, Namen mit `nmcli connection show`) und den Pi herunterfahren. Beim nächsten
 Start öffnet er sofort den Hotspot. Die SD-Karte lässt sich in diesem Zustand auch als Image für weitere Geräte
@@ -183,7 +201,7 @@ sichern.
 | Audio, Kamera-/Display-Autoerkennung aus | weniger Treiber |
 | `triggerhappy`, `ModemManager` aus | weniger Hintergrundprozesse |
 | Journal nur im RAM, SD-Swap aus | schont die SD-Karte |
-| `--led-off` | grüne Aktivitäts-LED aus |
+| `--led-off` | grüne Aktivitäts-LED im Normalbetrieb aus (Statusmuster bleiben) |
 
 Vorher wird `config.txt` gesichert (`config.txt.bak-<datum>`). Mit `--keep-hdmi` / `--keep-bluetooth`
 lassen sich einzelne Maßnahmen überspringen.
@@ -352,6 +370,7 @@ sudo systemctl restart wol-server            # nach Änderung der config.json
 | `hotspot_delay_minutes` | `5` | Minuten ohne WLAN, bis der Hotspot startet |
 | `hotspot_retry_minutes` | `5` | Abstand, in dem der Hotspot nach den gespeicherten WLANs sucht |
 | `wifi_socket` | `/run/wol-wifi/control.sock` | Socket zwischen Web-Server und `wol-wifi` |
+| `status_led` | `true` | grüne LED als [Statusanzeige](#status-led) |
 | `session_days` | `30` | Gültigkeit des Login-Cookies |
 | `status_cache_seconds` | `5` | Cache für Online-Prüfungen |
 | `log_level` | `INFO` | `DEBUG` loggt jede Anfrage |
@@ -434,6 +453,7 @@ python3 -m unittest discover -s tests -t .   # Tests
 | VPN steht, GUI über VPN nicht erreichbar | Auf dem Server `client-to-client`/Routing prüfen; VPN-Subnetz in `allowed_networks`? |
 | Pi zeitweise weg | `journalctl -t wlan-watchdog`; Signal unter *System* prüfen (schlechter als −75 dBm: Pi näher an den Router oder Repeater nutzen) |
 | Image: Pi richtet sich nicht ein | Karte am PC öffnen und `wol-setup.log` auf der Boot-Partition lesen; fehlt sie, lief der Erststart nicht (Imager-OS-Anpassungen benutzt? Dann `user-data` ersetzt) |
+| Pi startet unter Last von selbst neu | Netzteil prüfen (mind. 1,2 A, kurzes Kabel; kein Laptop-USB-Port). `vcgencmd get_throttled` ≠ `0x0` heißt Unterspannung |
 | Image: VPN kommt nicht | Erst nach dem WLAN: `journalctl -u wol-openvpn-pending` – OpenVPN wird installiert, sobald Internet da ist |
 | Hotspot erscheint nicht | `journalctl -u wol-wifi -e`; WLAN-Land gesetzt (`sudo raspi-config nonint do_wifi_country DE`)? `rfkill list` |
 | Handy öffnet die Einrichtungsseite nicht | `http://10.42.0.1/` von Hand aufrufen; manche Handys trennen WLANs ohne Internet, dann „Verbunden bleiben“ wählen |

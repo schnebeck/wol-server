@@ -19,6 +19,7 @@
   "hotspot_delay_minutes": 5,
   "hotspot_retry_minutes": 5,
   "wifi_socket": "/run/wol-wifi/control.sock",
+  "status_led": true,
   "session_days": 30,
   "status_cache_seconds": 5,
   "log_level": "INFO"

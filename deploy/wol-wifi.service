@@ -27,6 +27,8 @@ ProtectSystem=strict
 ProtectHome=yes
 PrivateTmp=yes
 ProtectKernelTunables=yes
+# Ausnahme: Status-LED (/sys/class/leds/ACT zeigt dorthin)
+ReadWritePaths=-/sys/devices/platform/leds
 ProtectKernelModules=yes
 ProtectControlGroups=yes
 ProtectClock=yes

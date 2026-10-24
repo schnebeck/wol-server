@@ -221,6 +221,7 @@ class ManagerTest(unittest.TestCase):
         res = self.job(mgr, "connect", ssid="Heim", password="geheim123")
         self.assertEqual(res, {"ok": True, "switching": True, "message": "Verbinde mit „Heim“ …"})
         self.assertTrue(fake.ran("connection", "down", wifi.HOTSPOT_PROFILE))
+        self.assertTrue(fake.ran("connection", "add", "802-11-wireless.cloned-mac-address", "permanent"))
         self.assertEqual(fake.address, CLIENT_IP)
         mgr.tick()
         snap = mgr.snapshot()
@@ -252,6 +253,7 @@ class ManagerTest(unittest.TestCase):
         # Passwort eines bestehenden Profils wird geändert, nicht neu angelegt
         self.job(mgr, "connect", ssid="Heim", password="neuespasswort")
         self.assertTrue(fake.ran("connection", "modify", "wifi-sec.psk", "neuespasswort"))
+        self.assertTrue(fake.ran("connection", "modify", "802-11-wireless.cloned-mac-address", "permanent"))
         self.assertEqual(len(fake.profiles), 2)
         res = self.job(mgr, "connect", ssid="x", password="kurz")
         self.assertFalse(res["ok"])

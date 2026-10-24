@@ -29,6 +29,7 @@ LOWPOWER=yes
 # Wartungszugang. Standard: kein Login, das Gerät braucht keinen.
 # SSH=yes aktiviert den SSH-Server. Angemeldet wird mit einem Schlüssel aus der Datei
 # ssh_authorized_keys (neben diese Datei legen) oder mit ADMIN_PASSWORD.
+# ADMIN_USER=root: Wartung direkt als root – per SSH dann nur mit Schlüssel.
 ADMIN_USER=admin
 ADMIN_PASSWORD=
 SSH=no

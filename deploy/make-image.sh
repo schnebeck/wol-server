@@ -57,7 +57,8 @@ elif [ ${#gui_pw} -lt 8 ]; then
 fi
 unset gui_pw
 admin=$(value ADMIN_USER | tr -d ' ')
-[[ "$admin" =~ ^[a-z][a-z0-9-]{0,31}$ ]] || admin="admin"
+# Den ersten Benutzer legt Raspberry Pi OS immer an; bei ADMIN_USER=root heißt er "admin"
+[[ "$admin" =~ ^[a-z][a-z0-9-]{0,31}$ ]] && [ "$admin" != root ] || admin="admin"
 
 # ---------------------------------------------------------------- Raspberry Pi OS besorgen
 if [ -z "$IMAGE" ]; then

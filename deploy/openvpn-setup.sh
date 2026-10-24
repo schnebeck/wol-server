@@ -112,8 +112,7 @@ Restart=always
 RestartSec=20
 Nice=5
 EOF
-systemctl daemon-reload
-systemctl enable "$UNIT" >/dev/null
+systemctl enable "$UNIT" >/dev/null   # lädt selbst neu, auch das Drop-in
 systemctl restart "$UNIT"
 
 say "Warte auf den Tunnel (max. 45 s)"

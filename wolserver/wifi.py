@@ -22,7 +22,7 @@ import subprocess
 import threading
 import time
 
-from . import netinfo
+from . import led, netinfo
 
 log = logging.getLogger("wolserver.wifi")
 
@@ -156,7 +156,7 @@ class WifiManager:
     Modi: client (mit WLAN verbunden), hotspot (eigener Hotspot aktiv), offline.
     """
 
-    def __init__(self, cfg, state_dir, runner=None, probe=None, clock=time.monotonic):
+    def __init__(self, cfg, state_dir, runner=None, probe=None, clock=time.monotonic, led=None):
         self.iface = cfg["wifi_interface"]
         self.enabled = bool(cfg["hotspot_enabled"])
         self.hotspot_ssid = cfg["hotspot_ssid"] or default_hotspot_ssid(self.iface)
@@ -165,6 +165,7 @@ class WifiManager:
         self.runner = runner or _run
         self.probe = probe or self._probe_address
         self.clock = clock
+        self.led = led
         self.state_file = os.path.join(state_dir, "hotspot.json")
         self.jobs = queue.Queue()
         self.last_request = None  # gesetzt vom Control-Thread bei GUI-Zugriffen
@@ -246,6 +247,8 @@ class WifiManager:
         }
         with self._lock:
             self._snapshot = snap
+        if self.led is not None:
+            self.led.update(snap["mode"], self.pending)
 
     # -- NetworkManager --
 
@@ -395,7 +398,8 @@ class WifiManager:
         if existing and psk:
             uuid = existing[0]["uuid"]
             self.nm("connection", "modify", "uuid", uuid, "802-11-wireless.hidden", hidden,
-                    "connection.autoconnect", "yes", "wifi-sec.key-mgmt", "wpa-psk", "wifi-sec.psk", psk)
+                    "connection.autoconnect", "yes", "802-11-wireless.cloned-mac-address", "permanent",
+                    "wifi-sec.key-mgmt", "wpa-psk", "wifi-sec.psk", psk)
         else:
             if existing and active:
                 raise WifiError("„%s“ ist gerade verbunden – zum Umstellen auf ein offenes Netz bitte "
@@ -404,7 +408,9 @@ class WifiManager:
                 self.nm("connection", "delete", "uuid", profile["uuid"])
             args = ["connection", "add", "type", "wifi", "ifname", self.iface, "con-name", ssid, "ssid", ssid,
                     "connection.autoconnect", "yes", "802-11-wireless.hidden", hidden,
-                    "802-11-wireless.powersave", "2"]
+                    "802-11-wireless.powersave", "2",
+                    # Immer die Hardware-MAC – sonst passen DHCP-Reservierung und Freigaben nicht
+                    "802-11-wireless.cloned-mac-address", "permanent"]
             if psk:
                 args += ["wifi-sec.key-mgmt", "wpa-psk", "wifi-sec.psk", psk]
             out = self.nm(*args)
@@ -615,7 +621,8 @@ def run_daemon(cfg):
         log.warning("Läuft nicht als root – NetworkManager wird Änderungen ablehnen")
     state_dir = os.environ.get("STATE_DIRECTORY", "/var/lib/wol-wifi").split(":")[0]
     os.makedirs(state_dir, mode=0o700, exist_ok=True)
-    manager = WifiManager(cfg, state_dir)
+    status_led = led.StatusLed() if cfg["status_led"] else None
+    manager = WifiManager(cfg, state_dir, led=status_led)
     allowed = {0, os.geteuid()}
     try:
         allowed.add(pwd.getpwnam("wol").pw_uid)
@@ -630,4 +637,6 @@ def run_daemon(cfg):
              "aktiv" if manager.enabled else "aus", manager.hotspot_ssid)
     threading.Thread(target=manager.run, args=(stop,), daemon=True).start()
     server.serve(stop)
+    if status_led is not None:
+        status_led.set("normal")
     return 0

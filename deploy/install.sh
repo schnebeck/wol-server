@@ -64,7 +64,7 @@ chown -R root:root "$APP_DIR"
 
 say "Konfiguration"
 install -d -m 0755 "$CONF_DIR"
-if [ ! -f "$CONF_DIR/config.json" ]; then
+if [ ! -s "$CONF_DIR/config.json" ]; then   # -s: auch eine nach Absturz leere Datei ersetzen
     sed "s/\"port\": 80/\"port\": $PORT/" "$SRC/deploy/config.json" > "$CONF_DIR/config.json"
     chmod 0644 "$CONF_DIR/config.json"
 else
@@ -109,7 +109,8 @@ fi
 
 say "systemd-Dienst"
 install -m 0644 "$SRC/deploy/wol-server.service" "$UNIT"
-systemctl daemon-reload
+# enable lädt die Unit-Dateien selbst neu. Kein zusätzliches daemon-reload: Jedes dauert auf dem
+# Zero 12–20 s, in denen systemd blockiert (und den Hardware-Watchdog nicht bedient).
 systemctl enable wol-server.service >/dev/null
 systemctl restart wol-server.service
 sleep 2
