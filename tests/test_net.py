@@ -305,7 +305,7 @@ class ImportTest(unittest.TestCase):
         preview = netcfg.annotate_import(cfg, netcfg.import_dhcpd(DHCPD_CONF), "b8:27:eb:50:a8:f0")
         by_orig = {r["original_name"]: r for r in preview["reservations"]}
         self.assertTrue(any("WOL-Server selbst" in p for p in by_orig["wol"]["problems"]))
-        self.assertIn("ersetzt", by_orig["office"]["exists"])
+        self.assertEqual(by_orig["office"]["exists"], "ändert IP 192.168.7.50 → 192.168.7.9, Name alt → office")
         new, stats = netcfg.merge_import(cfg, preview)
         self.assertEqual(stats, {"added": 3, "updated": 1, "skipped": 3})
         self.assertEqual(new["dhcp"]["lease_time"], 600)

@@ -858,7 +858,7 @@ def import_dhcpd(text):
             entry["problems"].append("keine feste Adresse")
         name = normalize_name(host.get("host-name") or host["name"])
         entry["name"] = name
-        if name != host["name"]:
+        if name != host["name"].lower():  # reine Kleinschreibung ist keine Erwähnung wert
             entry["comment"] = "importiert als „%s“" % host["name"]
         if entry["mac"] in seen_macs:
             entry["problems"].append("MAC doppelt")
@@ -886,7 +886,11 @@ def annotate_import(cfg, preview, server_mac=None):
         elif item["ip"] and net is not None and ipaddress.IPv4Address(item["ip"]) not in net:
             item["problems"].append("IP liegt nicht im Netz %s" % net)
         if item["mac"] in existing:
-            item["exists"] = "ersetzt %s (%s)" % (existing[item["mac"]]["name"] or item["mac"], existing[item["mac"]]["ip"])
+            old = existing[item["mac"]]
+            changes = [label for label, key in (("IP %s → %s" % (old["ip"], item["ip"]), "ip"),
+                                                ("Name %s → %s" % (old["name"] or "–", item["name"]), "name"))
+                       if old[key] != item[key]]
+            item["exists"] = "ändert %s" % ", ".join(changes) if changes else "schon vorhanden"
         elif item["ip"] in ips:
             item["problems"].append("IP schon vergeben an %s" % (ips[item["ip"]]["name"] or ips[item["ip"]]["mac"]))
     return preview
