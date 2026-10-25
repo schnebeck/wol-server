@@ -57,10 +57,14 @@ cat > /etc/NetworkManager/dnsmasq-shared.d/60-wol-server-captive.conf <<'EOF'
 address=/#/10.42.0.1
 EOF
 
-say "Dienst wol-wifi"
+say "Dienst wol-wifi (WLAN und VPN aus der Web-GUI)"
 install -m 0644 "$SRC/deploy/wol-wifi.service" /etc/systemd/system/wol-wifi.service
-systemctl enable wol-wifi.service >/dev/null   # lädt selbst neu (siehe install.sh)
+install -m 0644 "$SRC/deploy/wol-vpn.path" "$SRC/deploy/wol-vpn.service" /etc/systemd/system/
+install -d -m 0700 /var/lib/wol-wifi /var/lib/wol-wifi/vpn
+# Ein enable für alle: lädt einmal neu (siehe install.sh)
+systemctl enable wol-wifi.service wol-vpn.path >/dev/null
 systemctl restart wol-wifi.service
+systemctl start wol-vpn.path
 sleep 2
 if systemctl is-active --quiet wol-wifi.service; then
     say "WLAN-Verwaltung läuft"

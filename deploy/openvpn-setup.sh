@@ -2,22 +2,29 @@
 # Richtet den Pi als OpenVPN-Client ein, damit die WOL-GUI über das VPN erreichbar ist.
 #
 #   sudo ./deploy/openvpn-setup.sh <client.ovpn> [--name wol] [--allow-redirect-gateway]
+#                                  [--auth zugang.txt] [--no-wait]
 #
 # - installiert openvpn, legt die Konfiguration als /etc/openvpn/client/<name>.conf ab
 # - fragt Benutzer/Passwort ab, falls die Konfiguration "auth-user-pass" ohne Datei nutzt
 # - ignoriert standardmäßig "redirect-gateway": Der Pi soll nur über das VPN *erreichbar*
 #   sein, nicht seinen ganzen Verkehr durch den Tunnel schicken (spart CPU auf dem Zero)
 # - verbindet sich nach WLAN- oder Server-Ausfällen automatisch neu
+# --auth: Zugangsdaten aus Datei (Zeile 1: Benutzer, Zeile 2: Passwort) statt Abfrage
+# --no-wait: nicht auf den Tunnel warten (für die Einrichtung aus der Web-GUI)
 set -euo pipefail
 
 NAME=wol
 ALLOW_REDIRECT=0
 OVPN=""
+AUTH_FILE=""
+WAIT=1
 while [ $# -gt 0 ]; do
     case "$1" in
         --name) NAME="$2"; shift 2 ;;
         --allow-redirect-gateway) ALLOW_REDIRECT=1; shift ;;
-        -h|--help) sed -n '2,11p' "$0"; exit 0 ;;
+        --auth) AUTH_FILE="$2"; shift 2 ;;
+        --no-wait) WAIT=0; shift ;;
+        -h|--help) sed -n '2,14p' "$0"; exit 0 ;;
         -*) echo "Unbekannte Option: $1" >&2; exit 1 ;;
         *) OVPN="$1"; shift ;;
     esac
@@ -28,6 +35,7 @@ if [ -z "$OVPN" ] || [ ! -f "$OVPN" ]; then
     echo "Aufruf: sudo $0 <client.ovpn> [--name wol]" >&2; exit 1
 fi
 [[ "$NAME" =~ ^[A-Za-z0-9_-]+$ ]] || { echo "Ungültiger Name: $NAME" >&2; exit 1; }
+[ -z "$AUTH_FILE" ] || [ -f "$AUTH_FILE" ] || { echo "--auth: Datei nicht gefunden: $AUTH_FILE" >&2; exit 1; }
 
 say() { printf '\033[1;32m==>\033[0m %s\n' "$*"; }
 DIR=/etc/openvpn/client
@@ -48,7 +56,9 @@ tr -d '\r' < "$OVPN" | sed '/^# >>> wol-server/,/^# <<< wol-server/d' > "$CONF.n
 
 # auth-user-pass ohne Datei würde interaktiv fragen – headless unmöglich
 if grep -Eq '^[[:space:]]*auth-user-pass[[:space:]]*$' "$CONF.new"; then
-    if [ -t 0 ]; then
+    if [ -n "$AUTH_FILE" ]; then
+        (umask 077; tr -d '\r' < "$AUTH_FILE" > "$AUTH")
+    elif [ -t 0 ]; then
         say "Der VPN-Zugang braucht Benutzername und Passwort"
         read -r -p "    Benutzername: " vpn_user
         read -r -s -p "    Passwort: " vpn_pass; echo
@@ -114,6 +124,10 @@ Nice=5
 EOF
 systemctl enable "$UNIT" >/dev/null   # lädt selbst neu, auch das Drop-in
 systemctl restart "$UNIT"
+if [ "$WAIT" -eq 0 ]; then
+    say "Dienst $UNIT gestartet"
+    exit 0
+fi
 
 say "Warte auf den Tunnel (max. 45 s)"
 vpn_ip=""

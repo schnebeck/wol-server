@@ -129,6 +129,10 @@ class App:
             R("POST", r"/api/wifi/connect", self.api_wifi_connect),
             R("POST", r"/api/wifi/forget", self.api_wifi_forget),
             R("PUT", r"/api/wifi/hotspot", self.api_wifi_hotspot),
+            R("GET", r"/api/vpn", self.api_vpn),
+            R("POST", r"/api/vpn/config", self.api_vpn_config),
+            R("PUT", r"/api/vpn", self.api_vpn_enable),
+            R("DELETE", r"/api/vpn", self.api_vpn_remove),
         ]
 
     @staticmethod
@@ -388,6 +392,29 @@ class App:
 
     def api_wifi_hotspot(self, req):
         return 200, self._wifi({"cmd": "hotspot_password", "password": req.body.get("password") or ""})
+
+    # -- VPN (ebenfalls über wol-wifi, der die Einrichtung an wol-vpn.service übergibt) --
+
+    def api_vpn(self, req):
+        return 200, self._wifi({"cmd": "vpn_status"}, timeout=10)["status"]
+
+    def api_vpn_config(self, req):
+        b = req.body
+        res = self._wifi({"cmd": "vpn_upload", "config": b.get("config"),
+                          "username": b.get("username") or "", "password": b.get("password") or ""}, timeout=15)
+        log.info("VPN-Konfiguration hochgeladen von %s", req.client)
+        return 200, res
+
+    def api_vpn_enable(self, req):
+        enabled = bool(req.body.get("enabled"))
+        res = self._wifi({"cmd": "vpn_enable", "enabled": enabled}, timeout=10)
+        log.info("VPN %s von %s", "eingeschaltet" if enabled else "ausgeschaltet", req.client)
+        return 200, res
+
+    def api_vpn_remove(self, req):
+        res = self._wifi({"cmd": "vpn_remove"}, timeout=10)
+        log.info("VPN-Konfiguration entfernt von %s", req.client)
+        return 200, res
 
     # -- statische Dateien --
 

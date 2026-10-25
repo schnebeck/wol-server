@@ -265,6 +265,18 @@ Der Pi verbindet sich als **OpenVPN-Client** mit einem OpenVPN-Server, z. B. auf
 einem NAS. Andere VPN-Teilnehmer (Handy, Laptop) erreichen ihn dann über seine VPN-Adresse. Weil der Tunnel vom
 Pi nach außen aufgebaut wird, braucht es zu Hause keine Portfreigabe; das funktioniert auch hinter DS-Lite/CGNAT.
 
+**Über die Web-GUI:** *System → VPN → Konfiguration hochladen*, die `.ovpn`-Datei wählen, bei Bedarf Benutzername
+und Passwort eingeben. Der Pi installiert OpenVPN (braucht Internet, dauert auf dem Zero ein paar Minuten),
+richtet den Client ein und schaltet ihn ein. Danach zeigt die GUI Status, VPN-Adresse und Server; Ein/Aus und
+Entfernen gehen ebenfalls dort.
+- Die Datei muss die Zertifikate eingebettet enthalten (`<ca>`, `<cert>`, `<key>`, `<tls-auth>` …).
+- Optionen, die Programme ausführen oder Dateien schreiben (`up`, `down`, `script-security`, `plugin`, `log`,
+  `management` …), lehnt der Pi ab, denn OpenVPN läuft als root.
+- Technik: Die GUI übergibt die Datei an den Root-Dienst `wol-wifi`, der sie prüft und einen Auftrag schreibt.
+  Den führt `wol-vpn.service` aus (gestartet von `wol-vpn.path`) und ruft dafür `openvpn-setup.sh` auf.
+
+Auf der Kommandozeile geht es genauso:
+
 ```bash
 sudo ./deploy/openvpn-setup.sh ~/client.ovpn      # oder gleich: install.sh --openvpn ~/client.ovpn
 ```
@@ -386,6 +398,7 @@ Dateien:
 /etc/openvpn/client/wol.conf     OpenVPN-Client (Dienst openvpn-client@wol)
 /etc/default/wol-wlan-watchdog   Einstellungen des WLAN-Watchdogs
 /var/lib/wol-wifi/hotspot.json   Hotspot-Passwort (nur root)
+/var/lib/wol-wifi/vpn/           hochgeladene VPN-Konfiguration, Aufträge und deren Ergebnis (nur root)
 /var/log/wol-firstboot.log       Protokoll der Einrichtung beim ersten Start (Variante A)
 /opt/wol-server/deploy/          Skripte für spätere Änderungen (openvpn-setup.sh, lowpower.sh, …)
 /etc/NetworkManager/system-connections/   gespeicherte WLANs (NetworkManager)
@@ -429,6 +442,8 @@ GET    /api/events                  DELETE /api/events
 GET    /api/info                    POST /api/password {current, new}
 GET    /api/wifi                    POST /api/wifi/scan             POST /api/wifi/connect {ssid, password, hidden}
 POST   /api/wifi/forget {ssid}      PUT  /api/wifi/hotspot {password}
+GET    /api/vpn                     POST /api/vpn/config {config, username, password}
+PUT    /api/vpn {enabled}           DELETE /api/vpn
 ```
 
 ## 8. Entwicklung

@@ -111,6 +111,26 @@
             </details>
           </div>
         </div>
+        <div class="panel wide" id="vpn-panel">
+          <div class="panel-head">
+            <h3>VPN (OpenVPN)</h3>
+            <button type="button" class="btn small" id="vpn-upload" hidden>Konfiguration hochladen</button>
+          </div>
+          <p class="muted small" id="vpn-unavailable" hidden>Die VPN-Verwaltung ist nicht erreichbar. Läuft der Dienst <code>wol-wifi</code>? Einrichten mit <code>sudo ./deploy/hotspot-setup.sh</code>.</p>
+          <div id="vpn-body" class="stack" hidden>
+            <dl class="kv" id="vpn-info"></dl>
+            <p class="form-error" id="vpn-error" hidden></p>
+            <div class="card-actions" id="vpn-actions">
+              <button type="button" class="btn" id="vpn-toggle"></button>
+              <button type="button" class="btn danger" id="vpn-remove">Entfernen</button>
+            </div>
+            <details class="howto">
+              <summary>Hinweise zum VPN</summary>
+              <p class="small">Der WOL-Server verbindet sich als Client mit deinem OpenVPN-Server und ist dann über das VPN erreichbar, ohne Portfreigabe zu Hause. Er leitet keinen Internetverkehr durch den Tunnel, Magic Packets gehen immer ins WLAN.</p>
+              <p class="small">Am besten bekommt der Pi ein <strong>eigenes Client-Zertifikat</strong> und auf dem Server per <code>client-config-dir</code> eine feste Adresse. Damit andere VPN-Clients (z. B. das Handy) ihn erreichen, braucht der Server <code>client-to-client</code>. Die Datei muss die Zertifikate eingebettet enthalten (<code>&lt;ca&gt;</code>, <code>&lt;cert&gt;</code>, <code>&lt;key&gt;</code> …); aus Sicherheitsgründen werden Skripte (<code>up</code>, <code>script-security</code> …) nicht übernommen.</p>
+            </details>
+          </div>
+        </div>
         <div class="panel">
           <h3>Server</h3>
           <dl class="kv" id="sys-info"></dl>
@@ -363,6 +383,39 @@ echo "$USER ALL=(root) NOPASSWD: /usr/bin/systemctl suspend, /usr/bin/systemctl 
       <span class="spacer"></span>
       <button type="button" class="btn ghost" data-close id="wifi-cancel">Abbrechen</button>
       <button type="submit" class="btn primary" id="wifi-submit">Verbinden</button>
+    </footer>
+  </form>
+</dialog>
+
+<dialog id="vpn-dialog" class="dialog">
+  <form id="vpn-form" class="dialog-body" novalidate>
+    <header class="dialog-head">
+      <h2>VPN-Konfiguration hochladen</h2>
+      <button type="button" class="icon-btn" data-close aria-label="Schließen">×</button>
+    </header>
+    <div class="dialog-content">
+      <div class="form-grid">
+        <label class="field span2">
+          <span>OpenVPN-Client-Datei (<code>.ovpn</code>)</span>
+          <input type="file" name="file" accept=".ovpn,.conf,text/plain" required>
+          <small id="vpn-file-info">Die Datei vom VPN-Server mit eingebetteten Zertifikaten.</small>
+        </label>
+        <label class="field" data-auth hidden>
+          <span>VPN-Benutzername</span>
+          <input name="username" autocomplete="off" spellcheck="false" autocapitalize="off" maxlength="256">
+        </label>
+        <label class="field" data-auth hidden>
+          <span>VPN-Passwort</span>
+          <input name="password" type="password" autocomplete="off" maxlength="256">
+        </label>
+      </div>
+      <p class="hint small">Eine vorhandene Konfiguration wird ersetzt. Der WOL-Server installiert OpenVPN bei Bedarf, das dauert auf dem Pi Zero ein paar Minuten.</p>
+      <p class="form-error" hidden></p>
+    </div>
+    <footer class="dialog-foot">
+      <span class="spacer"></span>
+      <button type="button" class="btn ghost" data-close>Abbrechen</button>
+      <button type="submit" class="btn primary" id="vpn-submit">Hochladen und einschalten</button>
     </footer>
   </form>
 </dialog>

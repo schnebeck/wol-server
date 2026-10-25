@@ -543,7 +543,7 @@ async function onClearEvents() {
 // ---------- System ----------
 
 async function renderSystem() {
-  const [info] = await Promise.all([api("GET", "/api/info"), renderWifi()]);
+  const [info] = await Promise.all([api("GET", "/api/info"), renderWifi(), renderVpn()]);
   state.info = info;
   const rows = [
     ["Hostname", info.hostname],
@@ -790,6 +790,156 @@ async function onHotspotSubmit(event) {
   });
 }
 
+// ---------- VPN ----------
+
+const VPN_STATES = { active: "verbunden", activating: "verbindet …", reloading: "verbindet …", deactivating: "trennt …" };
+
+function vpnBusy(vpn) {
+  return Boolean(vpn && ((vpn.job && vpn.job.state === "running") || (vpn.enabled && !vpn.address)));
+}
+
+async function renderVpn() {
+  let vpn;
+  try {
+    vpn = await api("GET", "/api/vpn");
+  } catch (e) {
+    if (e.status === 401) throw e;
+    state.vpn = null;
+    $("#vpn-unavailable").hidden = false;
+    $("#vpn-body").hidden = true;
+    $("#vpn-upload").hidden = true;
+    return;
+  }
+  state.vpn = vpn;
+  $("#vpn-unavailable").hidden = true;
+  $("#vpn-body").hidden = false;
+  $("#vpn-upload").hidden = false;
+  const job = vpn.job && vpn.job.state === "running" ? vpn.job : null;
+  let status;
+  if (job) status = el("span", {}, "wird eingerichtet …");
+  else if (!vpn.configured) status = el("span", { class: "muted" }, "nicht eingerichtet");
+  else if (vpn.address) status = el("span", { class: "signal good" }, `verbunden · ${vpn.address}`);
+  else if (vpn.enabled) status = el("span", { class: "signal fair" }, VPN_STATES[vpn.state] || "verbindet …");
+  else status = el("span", { class: "muted" }, "ausgeschaltet");
+  const rows = [["Status", status]];
+  if (vpn.remote) rows.push(["Server", el("span", { class: "mono" }, vpn.remote)]);
+  if (vpn.address) {
+    const port = state.info && state.info.network && state.info.network.port !== 80 ? `:${state.info.network.port}` : "";
+    rows.push(["GUI über VPN", el("a", { class: "mono", href: `http://${vpn.address}${port}/` }, `http://${vpn.address}${port}/`)]);
+  }
+  if (vpn.uploaded) rows.push(["Hochgeladen", fmtDateTime(vpn.uploaded)]);
+  $("#vpn-info").replaceChildren(...rows.map(([k, v]) => el("div", {}, el("dt", {}, k), el("dd", {}, v))));
+
+  const error = $("#vpn-error");
+  const failed = vpn.job && vpn.job.state === "failed" ? vpn.job : null;
+  error.hidden = !failed;
+  if (failed) error.textContent = `${fmtDateTime(failed.ts)}: ${failed.message}`;
+
+  $("#vpn-actions").hidden = !vpn.configured;
+  const toggle = $("#vpn-toggle");
+  toggle.textContent = vpn.enabled ? "Ausschalten" : "Einschalten";
+  toggle.disabled = Boolean(job);
+  $("#vpn-remove").disabled = Boolean(job);
+  $("#vpn-upload").disabled = Boolean(job);
+}
+
+// Nur Vorschau im Browser – geprüft wird auf dem Pi.
+function inspectOvpn(text) {
+  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !/^[#;]/.test(l));
+  const remote = lines.find((l) => /^remote\s/.test(l));
+  return {
+    remote: remote ? remote.split(/\s+/).slice(1, 3).join(":") : null,
+    needsAuth: lines.some((l) => /^auth-user-pass(\s|$)/.test(l)),
+    client: lines.some((l) => /^(client|tls-client)$/.test(l)),
+  };
+}
+
+function openVpnDialog() {
+  const form = $("#vpn-form");
+  form.reset();
+  showError(form, "");
+  state.vpnFile = null;
+  $("#vpn-file-info").textContent = "Die Datei vom VPN-Server mit eingebetteten Zertifikaten.";
+  for (const field of $$("[data-auth]", form)) field.hidden = true;
+  $("#vpn-dialog").showModal();
+}
+
+async function onVpnFile(event) {
+  const form = $("#vpn-form");
+  showError(form, "");
+  const file = event.target.files[0];
+  state.vpnFile = null;
+  if (!file) return;
+  if (file.size > 48 * 1024) return showError(form, "Die Datei ist zu groß (max. 48 KB).");
+  const text = await file.text();
+  const info = inspectOvpn(text);
+  if (!info.client || !info.remote) {
+    return showError(form, "Das sieht nicht nach einer OpenVPN-Client-Konfiguration aus (es fehlen „client“ oder „remote“).");
+  }
+  state.vpnFile = { text, info };
+  $("#vpn-file-info").textContent = `Server: ${info.remote}${info.needsAuth ? " · braucht Benutzername und Passwort" : ""}`;
+  for (const field of $$("[data-auth]", form)) field.hidden = !info.needsAuth;
+}
+
+async function onVpnSubmit(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  showError(form, "");
+  const file = state.vpnFile;
+  if (!file) return showError(form, "Bitte die .ovpn-Datei auswählen.");
+  const data = { config: file.text };
+  if (file.info.needsAuth) {
+    data.username = form.elements.username.value;
+    data.password = form.elements.password.value;
+    if (!data.username || !data.password) return showError(form, "Diese Konfiguration braucht Benutzername und Passwort.");
+  }
+  await busy($("#vpn-submit"), async () => {
+    try {
+      const res = await api("POST", "/api/vpn/config", data);
+      $("#vpn-dialog").close();
+      state.vpnFile = null;
+      toast(res.message || "Wird eingerichtet …", "success");
+      await renderVpn();
+    } catch (e) {
+      showError(form, e.message);
+    }
+  });
+}
+
+// Über das VPN geöffnet: Die Seite wurde über die VPN-Adresse des Pi aufgerufen
+function viaVpn() {
+  return Boolean(state.vpn && state.vpn.address && location.hostname === state.vpn.address);
+}
+
+async function onVpnToggle() {
+  const enable = !state.vpn.enabled;
+  if (!enable && viaVpn() && !(await confirmDialog("VPN ausschalten?",
+    "Du bist gerade über das VPN verbunden und verlierst damit den Zugriff, bis du die GUI aus dem Heimnetz öffnest.",
+    "Ausschalten", true))) return;
+  await busy($("#vpn-toggle"), async () => {
+    try {
+      const res = await api("PUT", "/api/vpn", { enabled: enable });
+      toast(res.message, "success");
+    } catch (e) {
+      toast(e.message, "error");
+    }
+    await renderVpn();
+  });
+}
+
+async function onVpnRemove() {
+  if (!(await confirmDialog("VPN-Konfiguration entfernen?",
+    "Zertifikate und Zugangsdaten werden vom WOL-Server gelöscht. Danach ist er nur noch im Heimnetz erreichbar.",
+    "Entfernen", true))) return;
+  try {
+    const res = await api("DELETE", "/api/vpn");
+    toast(res.message, "success");
+  } catch (e) {
+    toast(e.message, "error");
+  }
+  await renderVpn();
+}
+
 async function copyKey() {
   const area = $("#ssh-key");
   try {
@@ -896,6 +1046,11 @@ function bind() {
     for (const item of $$(".scan-item")) item.classList.remove("selected");
   });
   $("#hotspot-form").addEventListener("submit", onHotspotSubmit);
+  $("#vpn-upload").addEventListener("click", openVpnDialog);
+  $("#vpn-form").elements.file.addEventListener("change", onVpnFile);
+  $("#vpn-form").addEventListener("submit", onVpnSubmit);
+  $("#vpn-toggle").addEventListener("click", onVpnToggle);
+  $("#vpn-remove").addEventListener("click", onVpnRemove);
   buildDayPicker();
 
   // Status nur abfragen, solange die Seite sichtbar ist – spart Last auf dem Pi.
@@ -908,6 +1063,8 @@ function bind() {
     if (state.view === "system" && state.wifi && (state.wifi.mode !== "client" || state.wifi.pending)) {
       renderWifi().catch(() => {});
     }
+    // VPN-Status nur während Einrichtung oder Verbindungsaufbau nachziehen
+    if (state.view === "system" && vpnBusy(state.vpn)) renderVpn().catch(() => {});
   }, STATUS_INTERVAL);
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible" && !$("#app").hidden) refreshView().catch(() => {});

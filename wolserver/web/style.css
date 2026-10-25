@@ -325,6 +325,11 @@ input, select, textarea {
 }
 input:focus, select:focus, textarea:focus { outline: none; border-color: var(--wake); box-shadow: 0 0 0 3px var(--wake-soft); }
 input.mono, textarea.mono { font-family: var(--mono); font-size: 0.88rem; }
+input[type=file] { padding: 6px; cursor: pointer; }
+input[type=file]::file-selector-button {
+  font: inherit; font-size: 0.86rem; margin-right: 10px; padding: 4px 12px; cursor: pointer;
+  color: var(--text); background: var(--bg); border: 1px solid var(--border-strong); border-radius: 7px;
+}
 .check { display: flex; align-items: center; gap: 8px; cursor: pointer; }
 .check input { width: 18px; height: 18px; min-height: 0; accent-color: var(--wake); }
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }

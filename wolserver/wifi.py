@@ -22,7 +22,7 @@ import subprocess
 import threading
 import time
 
-from . import led, netinfo
+from . import led, netinfo, vpn
 
 log = logging.getLogger("wolserver.wifi")
 
@@ -33,7 +33,7 @@ TICK = 15  # s zwischen zwei Prüfungen
 BOOT_GRACE = 30  # s bis zum Hotspot, wenn gar kein WLAN gespeichert ist
 ATTEMPT_SECONDS = 90  # so lange darf ein Verbindungsversuch aus dem Hotspot heraus dauern
 BUSY_SECONDS = 300  # nach einem GUI-Zugriff den Hotspot nicht automatisch beenden
-MAX_REQUEST = 4096
+MAX_REQUEST = 160 * 1024  # VPN-Konfiguration mit eingebetteten Zertifikaten
 
 
 class WifiError(Exception):
@@ -529,10 +529,13 @@ class ControlServer:
     """Eine JSON-Zeile pro Verbindung: {"cmd": "status"|"scan"|"connect"|...} → JSON-Antwort."""
 
     WAIT = {"scan": 30, "connect": 25, "forget": 20, "hotspot_password": 10}
+    # VPN-Befehle laufen direkt (nicht in der WLAN-Warteschlange): Sie schreiben nur Dateien.
+    VPN = {"vpn_status": "status", "vpn_upload": "upload", "vpn_enable": "set_enabled", "vpn_remove": "remove"}
 
-    def __init__(self, path, manager, allowed_uids):
+    def __init__(self, path, manager, allowed_uids, vpn_manager=None):
         self.path = path
         self.manager = manager
+        self.vpn = vpn_manager
         self.allowed_uids = set(allowed_uids)
         self.sock = None
 
@@ -595,9 +598,16 @@ class ControlServer:
         self.manager.last_request = self.manager.clock()
         if cmd == "status":
             return {"ok": True, "status": self.manager.snapshot()}
+        args = {k: v for k, v in req.items() if k != "cmd"}
         if cmd in self.WAIT:
-            args = {k: v for k, v in req.items() if k != "cmd"}
             return self.manager.submit(cmd, args, self.WAIT[cmd])
+        if cmd in self.VPN and self.vpn is not None:
+            try:
+                if cmd == "vpn_status":
+                    return {"ok": True, "status": self.vpn.status()}
+                return getattr(self.vpn, self.VPN[cmd])(args)
+            except (vpn.VpnError, OSError) as e:
+                return {"ok": False, "error": str(e)}
         return {"ok": False, "error": "Unbekannter Befehl"}
 
 
@@ -628,7 +638,7 @@ def run_daemon(cfg):
         allowed.add(pwd.getpwnam("wol").pw_uid)
     except KeyError:
         pass
-    server = ControlServer(cfg["wifi_socket"], manager, allowed)
+    server = ControlServer(cfg["wifi_socket"], manager, allowed, vpn.VpnManager(state_dir))
     server.bind()
     stop = threading.Event()
     for sig in (signal.SIGTERM, signal.SIGINT):
