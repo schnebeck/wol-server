@@ -22,7 +22,7 @@ import subprocess
 import threading
 import time
 
-from . import led, netinfo, vpn
+from . import led, netinfo, netsvc, vpn
 
 log = logging.getLogger("wolserver.wifi")
 
@@ -33,7 +33,7 @@ TICK = 15  # s zwischen zwei Prüfungen
 BOOT_GRACE = 30  # s bis zum Hotspot, wenn gar kein WLAN gespeichert ist
 ATTEMPT_SECONDS = 90  # so lange darf ein Verbindungsversuch aus dem Hotspot heraus dauern
 BUSY_SECONDS = 300  # nach einem GUI-Zugriff den Hotspot nicht automatisch beenden
-MAX_REQUEST = 160 * 1024  # VPN-Konfiguration mit eingebetteten Zertifikaten
+MAX_REQUEST = 512 * 1024  # VPN-Konfiguration mit Zertifikaten, Netzwerk-Sicherungen
 
 
 class WifiError(Exception):
@@ -156,7 +156,7 @@ class WifiManager:
     Modi: client (mit WLAN verbunden), hotspot (eigener Hotspot aktiv), offline.
     """
 
-    def __init__(self, cfg, state_dir, runner=None, probe=None, clock=time.monotonic, led=None):
+    def __init__(self, cfg, state_dir, runner=None, probe=None, clock=time.monotonic, led=None, on_mode=None):
         self.iface = cfg["wifi_interface"]
         self.enabled = bool(cfg["hotspot_enabled"])
         self.hotspot_ssid = cfg["hotspot_ssid"] or default_hotspot_ssid(self.iface)
@@ -166,6 +166,7 @@ class WifiManager:
         self.probe = probe or self._probe_address
         self.clock = clock
         self.led = led
+        self.on_mode = on_mode  # z. B. NetManager: dnsmasq im Hotspot pausieren
         self.state_file = os.path.join(state_dir, "hotspot.json")
         self.jobs = queue.Queue()
         self.last_request = None  # gesetzt vom Control-Thread bei GUI-Zugriffen
@@ -354,6 +355,11 @@ class WifiManager:
             except WifiError as e:
                 log.warning("WLAN-Profile nicht lesbar: %s", e)
 
+        if self.on_mode is not None:
+            try:
+                self.on_mode(mode)
+            except Exception:  # noqa: BLE001 – WLAN-Logik darf daran nie scheitern
+                log.exception("Fehler beim Melden des WLAN-Zustands")
         if mode == "client":
             self.last_online = now
             self.hotspot_since = self.wait_until = None
@@ -531,11 +537,24 @@ class ControlServer:
     WAIT = {"scan": 30, "connect": 25, "forget": 20, "hotspot_password": 10}
     # VPN-Befehle laufen direkt (nicht in der WLAN-Warteschlange): Sie schreiben nur Dateien.
     VPN = {"vpn_status": "status", "vpn_upload": "upload", "vpn_enable": "set_enabled", "vpn_remove": "remove"}
+    # DHCP/DNS: ebenfalls direkt, Methoden von netsvc.NetManager
+    NET = {
+        "net_status": "status", "net_config": "config", "net_leases": "leases", "net_unknown": "unknown",
+        "net_settings": "settings", "net_reservation_save": "reservation_save",
+        "net_reservation_delete": "reservation_delete", "net_record_save": "record_save",
+        "net_record_delete": "record_delete", "net_discard": "discard", "net_apply": "apply",
+        "net_approve": "approve", "net_ignore": "ignore", "net_unignore": "unignore", "net_release": "release",
+        "net_restart": "restart", "net_probe": "probe", "net_import_preview": "import_preview",
+        "net_import_commit": "import_commit", "net_export": "export", "net_restore": "restore",
+        "net_history": "history", "net_history_restore": "history_restore", "net_logs": "logs",
+        "net_static_ip": "static_ip",
+    }
 
-    def __init__(self, path, manager, allowed_uids, vpn_manager=None):
+    def __init__(self, path, manager, allowed_uids, vpn_manager=None, net_manager=None):
         self.path = path
         self.manager = manager
         self.vpn = vpn_manager
+        self.net = net_manager
         self.allowed_uids = set(allowed_uids)
         self.sock = None
 
@@ -608,6 +627,12 @@ class ControlServer:
                 return getattr(self.vpn, self.VPN[cmd])(args)
             except (vpn.VpnError, OSError) as e:
                 return {"ok": False, "error": str(e)}
+        if cmd in self.NET and self.net is not None:
+            try:
+                result = getattr(self.net, self.NET[cmd])(args)
+                return result if "ok" in result else dict(result, ok=True)
+            except (netsvc.NetError, OSError, ValueError, TypeError) as e:
+                return {"ok": False, "error": str(e)}
         return {"ok": False, "error": "Unbekannter Befehl"}
 
 
@@ -632,13 +657,14 @@ def run_daemon(cfg):
     state_dir = os.environ.get("STATE_DIRECTORY", "/var/lib/wol-wifi").split(":")[0]
     os.makedirs(state_dir, mode=0o700, exist_ok=True)
     status_led = led.StatusLed() if cfg["status_led"] else None
-    manager = WifiManager(cfg, state_dir, led=status_led)
+    net_manager = netsvc.NetManager(state_dir)
+    manager = WifiManager(cfg, state_dir, led=status_led, on_mode=net_manager.wifi_changed)
     allowed = {0, os.geteuid()}
     try:
         allowed.add(pwd.getpwnam("wol").pw_uid)
     except KeyError:
         pass
-    server = ControlServer(cfg["wifi_socket"], manager, allowed, vpn.VpnManager(state_dir))
+    server = ControlServer(cfg["wifi_socket"], manager, allowed, vpn.VpnManager(state_dir), net_manager)
     server.bind()
     stop = threading.Event()
     for sig in (signal.SIGTERM, signal.SIGINT):

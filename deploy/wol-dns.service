@@ -1,0 +1,31 @@
+[Unit]
+Description=WOL-Server: DHCP und DNS (dnsmasq)
+Documentation=file:///opt/wol-server/docs/vorschlag-dhcp-dns.md
+After=network.target NetworkManager.service
+Wants=network.target
+
+[Service]
+Type=simple
+# Englische Meldungen: wol-wifi wertet das Journal aus (abgewiesene Geräte, Abfrageprotokoll)
+Environment=LC_ALL=C
+# Die Konfiguration erzeugt ausschließlich der WOL-Server (Web-GUI → Netzwerk)
+ExecStartPre=/usr/sbin/dnsmasq --test --conf-file=/etc/wol-dns/dnsmasq.conf
+ExecStart=/usr/sbin/dnsmasq --keep-in-foreground --conf-file=/etc/wol-dns/dnsmasq.conf
+# SIGHUP: Reservierungen und eigene DNS-Einträge neu einlesen, ohne Unterbrechung
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=5
+UMask=0022
+
+# dnsmasq startet als root (Ports 53/67) und wechselt dann selbst zum Benutzer dnsmasq
+ProtectHome=yes
+PrivateTmp=yes
+ProtectSystem=full
+ReadWritePaths=/var/lib/wol-dns
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+LockPersonality=yes
+MemoryMax=40M
+
+[Install]
+WantedBy=multi-user.target

@@ -14,7 +14,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit
 
-from . import __version__, models, netinfo, power, wifi, wol
+from . import __version__, dnsclient, models, netinfo, power, wifi, wol
 from .auth import Auth, LoginLimiter
 from .scheduler import Scheduler, next_run
 from .status import StatusMonitor
@@ -33,7 +33,7 @@ STATIC = {
 COOKIE = "wol_session"
 CSRF_HEADER = "X-Requested-With"
 CSRF_VALUE = "wol-server"
-MAX_BODY = 64 * 1024
+MAX_BODY = 256 * 1024  # Netzwerk-Sicherung mit vielen Reservierungen
 SECURITY_HEADERS = {
     "X-Content-Type-Options": "nosniff",
     "X-Frame-Options": "DENY",
@@ -133,7 +133,38 @@ class App:
             R("POST", r"/api/vpn/config", self.api_vpn_config),
             R("PUT", r"/api/vpn", self.api_vpn_enable),
             R("DELETE", r"/api/vpn", self.api_vpn_remove),
+            # DHCP und DNS (über wol-wifi, ausgeführt von wol-dns-apply.service)
+            R("GET", r"/api/net", self.api_net),
+            R("GET", r"/api/net/config", self.api_net_config),
+            R("PUT", r"/api/net/settings", self.api_net_settings),
+            R("POST", r"/api/net/reservations", self.api_net_reservation_save),
+            R("PUT", r"/api/net/reservations/(?P<item_id>\w+)", self.api_net_reservation_save),
+            R("DELETE", r"/api/net/reservations/(?P<item_id>\w+)", self.api_net_reservation_delete),
+            R("POST", r"/api/net/records", self.api_net_record_save),
+            R("PUT", r"/api/net/records/(?P<item_id>\w+)", self.api_net_record_save),
+            R("DELETE", r"/api/net/records/(?P<item_id>\w+)", self.api_net_record_delete),
+            R("POST", r"/api/net/apply", self.api_net_apply),
+            R("POST", r"/api/net/discard", self.api_net_discard),
+            R("GET", r"/api/net/leases", self.api_net_leases),
+            R("POST", r"/api/net/leases/(?P<mac>[0-9A-Fa-f:]{17})/release", self.api_net_release),
+            R("GET", r"/api/net/unknown", self.api_net_unknown),
+            R("POST", r"/api/net/unknown/(?P<mac>[0-9A-Fa-f:]{17})/approve", self.api_net_approve),
+            R("POST", r"/api/net/unknown/(?P<mac>[0-9A-Fa-f:]{17})/ignore", self.api_net_ignore),
+            R("DELETE", r"/api/net/ignored/(?P<mac>[0-9A-Fa-f:]{17})", self.api_net_unignore),
+            R("POST", r"/api/net/import", self.api_net_import),
+            R("POST", r"/api/net/import/commit", self.api_net_import_commit),
+            R("GET", r"/api/net/export", self.api_net_export),
+            R("POST", r"/api/net/restore", self.api_net_restore),
+            R("GET", r"/api/net/history", self.api_net_history),
+            R("POST", r"/api/net/history/(?P<item_id>\w+)/restore", self.api_net_history_restore),
+            R("POST", r"/api/net/test", self.api_net_test),
+            R("GET", r"/api/net/stats", self.api_net_stats),
+            R("GET", r"/api/net/logs/(?P<kind>queries|dhcp|service)", self.api_net_logs),
+            R("POST", r"/api/net/probe", self.api_net_probe),
+            R("POST", r"/api/net/restart", self.api_net_restart),
+            R("PUT", r"/api/net/static-ip", self.api_net_static_ip),
         ]
+        self._net_logged = self._read_net_logged()
 
     @staticmethod
     def _route(method, pattern, handler, auth=True):
@@ -414,6 +445,181 @@ class App:
     def api_vpn_remove(self, req):
         res = self._wifi({"cmd": "vpn_remove"}, timeout=10)
         log.info("VPN-Konfiguration entfernt von %s", req.client)
+        return 200, res
+
+    # -- DHCP und DNS --
+
+    def _net(self, cmd, timeout=15, **args):
+        try:
+            res = wifi.request(self.config["wifi_socket"], dict(args, cmd=cmd), timeout)
+        except (OSError, ValueError):
+            raise ApiError(503, "Netzwerk-Verwaltung nicht erreichbar (Dienst wol-wifi)") from None
+        if not res.get("ok"):
+            raise ApiError(400, res.get("error") or "Netzwerk-Befehl fehlgeschlagen")
+        res.pop("ok", None)
+        return res
+
+    def _net_logged_path(self):
+        return os.path.join(self.config["data_dir"], "net-protokolliert")
+
+    def _read_net_logged(self):
+        return _read_text(self._net_logged_path()) or ""
+
+    def _log_net_job(self, status):
+        """Abgeschlossene Netzwerk-Änderungen einmal ins Protokoll schreiben."""
+        job = status.get("job") or {}
+        if job.get("state") not in ("ok", "failed") or job.get("action") not in ("apply", "release"):
+            return
+        if job.get("id") == self._net_logged:
+            return
+        self._net_logged = job["id"]
+        try:
+            with open(self._net_logged_path(), "w", encoding="utf-8") as f:
+                f.write(job["id"])
+        except OSError:
+            pass
+        change = status.get("last_change") or {}
+        if job["state"] == "ok" and change.get("request") == job["id"] and change.get("changes"):
+            items = change["changes"]
+            message = "; ".join(items[:4]) + (" (+%d weitere)" % (len(items) - 4) if len(items) > 4 else "")
+        else:
+            message = job.get("message") or ""
+        self.store.add_event(device_id=None, device="Netzwerk", action="net",
+                             source=change.get("client") or "manuell", ok=job["state"] == "ok", message=message)
+
+    def api_net(self, req):
+        status = self._net("net_status", timeout=10)
+        self._log_net_job(status)
+        return 200, status
+
+    def api_net_config(self, req):
+        res = self._net("net_config")
+        res["devices"] = {d["mac"].lower(): {"id": d["id"], "name": d["name"]} for d in self.store.list("devices")}
+        return 200, res
+
+    def api_net_settings(self, req):
+        return 200, self._net("net_settings", settings=req.body)
+
+    def api_net_reservation_save(self, req, item_id=None):
+        data = dict(req.body)
+        if item_id:
+            data["id"] = item_id
+        else:
+            data.pop("id", None)
+        return 200, self._net("net_reservation_save", reservation=data)
+
+    def api_net_reservation_delete(self, req, item_id):
+        return 200, self._net("net_reservation_delete", id=item_id)
+
+    def api_net_record_save(self, req, item_id=None):
+        data = dict(req.body)
+        if item_id:
+            data["id"] = item_id
+        else:
+            data.pop("id", None)
+        return 200, self._net("net_record_save", record=data)
+
+    def api_net_record_delete(self, req, item_id):
+        return 200, self._net("net_record_delete", id=item_id)
+
+    def api_net_apply(self, req):
+        res = self._net("net_apply", client=req.client)
+        log.info("Netzwerk-Änderungen übernommen von %s: %s", req.client, "; ".join(res.get("changes") or []))
+        return 200, res
+
+    def api_net_discard(self, req):
+        return 200, self._net("net_discard")
+
+    def api_net_leases(self, req):
+        res = self._net("net_leases")
+        devices = {d["mac"].lower(): d["id"] for d in self.store.list("devices")}
+        for lease in res.get("leases", []):
+            lease["device"] = devices.get(lease["mac"])
+        return 200, res
+
+    def api_net_release(self, req, mac):
+        return 200, self._net("net_release", mac=mac)
+
+    def api_net_unknown(self, req):
+        return 200, self._net("net_unknown")
+
+    def api_net_approve(self, req, mac):
+        b = req.body
+        res = self._net("net_approve", mac=mac, name=b.get("name"), ip=b.get("ip"), comment=b.get("comment"),
+                        client=req.client)
+        log.info("Gerät %s freigegeben von %s", mac, req.client)
+        return 200, res
+
+    def api_net_ignore(self, req, mac):
+        return 200, self._net("net_ignore", mac=mac, comment=req.body.get("comment") or "")
+
+    def api_net_unignore(self, req, mac):
+        return 200, self._net("net_unignore", mac=mac)
+
+    def api_net_import(self, req):
+        return 200, self._net("net_import_preview", text=req.body.get("text"))
+
+    def api_net_import_commit(self, req):
+        b = req.body
+        return 200, self._net("net_import_commit", preview=b.get("preview"), replace=bool(b.get("replace")),
+                              take_settings=bool(b.get("take_settings", True)))
+
+    def api_net_export(self, req):
+        return 200, self._net("net_export")["export"]
+
+    def api_net_restore(self, req):
+        return 200, self._net("net_restore", data=req.body.get("data"))
+
+    def api_net_history(self, req):
+        return 200, self._net("net_history")
+
+    def api_net_history_restore(self, req, item_id):
+        return 200, self._net("net_history_restore", id=item_id)
+
+    def _dns_target(self):
+        cfg = self._net("net_config")["config"]
+        return "127.0.0.1", cfg["server"]["port"], cfg
+
+    def api_net_test(self, req):
+        server, port, cfg = self._dns_target()
+        if not cfg["dns"]["enabled"]:
+            raise ApiError(400, "DNS ist ausgeschaltet – Testabfragen gehen erst, wenn es übernommen ist.")
+        text = req.body.get("query")
+        if not isinstance(text, str):
+            raise ApiError(400, "Bitte einen Namen oder eine IP-Adresse eingeben")
+        query = text.strip()
+        if query and "." not in query and ":" not in query:
+            query = "%s.%s" % (query, cfg["dns"]["domain"])
+        try:
+            started = time.monotonic()
+            res = dnsclient.lookup(query, server, port)
+            res["ms"] = round((time.monotonic() - started) * 1000, 1)
+        except dnsclient.DnsError as e:
+            raise ApiError(400, str(e)) from None
+        return 200, res
+
+    def api_net_stats(self, req):
+        server, port, cfg = self._dns_target()
+        if not cfg["dns"]["enabled"]:
+            return 200, {"available": False}
+        try:
+            stats = dnsclient.dnsmasq_stats(server, port)
+        except dnsclient.DnsError as e:
+            return 200, {"available": False, "error": str(e)}
+        return 200, dict(stats, available=True)
+
+    def api_net_logs(self, req, kind):
+        return 200, self._net("net_logs", timeout=25, kind=kind, lines=200)
+
+    def api_net_probe(self, req):
+        return 200, self._net("net_probe")
+
+    def api_net_restart(self, req):
+        return 200, self._net("net_restart")
+
+    def api_net_static_ip(self, req):
+        res = self._net("net_static_ip", timeout=40, enabled=bool(req.body.get("enabled")))
+        log.info("%s (von %s)", res.get("message"), req.client)
         return 200, res
 
     # -- statische Dateien --
