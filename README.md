@@ -15,6 +15,9 @@ aus dem Intranet und über VPN.
 - **Einrichtungs-Hotspot wie bei einer Appliance:** Findet der Pi kein bekanntes WLAN, öffnet er einen eigenen
   Hotspot mit Einrichtungsseite. WLAN wechseln geht ohne Imager, Tastatur oder SD-Karte.
 - **Status-LED:** Die grüne LED zeigt, ob die Einrichtung läuft, der Hotspot aktiv ist oder das Netz fehlt.
+- **DHCP und DNS fürs Heimnetz (optional):** dnsmasq, verwaltet im Reiter *Netzwerk*. Jedes Gerät ist automatisch
+  unter seinem Namen erreichbar; Reservierungen, eigene DNS-Einträge, unbekannte Geräte mit einem Klick freigeben,
+  Import vom alten ISC-dhcpd, Verlauf mit Zurückholen.
 - **Zugriff nur aus LAN/VPN** (Netz-Allowlist), Passwort-Login, CSRF-Schutz, gehärteter systemd-Dienst
 - **Keine Abhängigkeiten** außer Python 3 (Standardbibliothek) – kein pip, kein Node, keine Datenbank, kein CDN
 
@@ -343,7 +346,51 @@ ergänzen und `sudo systemctl restart wol-server` ausführen. Den VPN-Status sam
 Ein OpenVPN-Client verursacht auf dem Zero W im Leerlauf kaum Last (nur Keepalives). Für die wenigen Kilobyte
 der GUI reicht die Leistung problemlos.
 
-## 5. Bedienung
+## 5. DHCP und DNS (Reiter „Netzwerk“)
+
+Der WOL-Server kann DHCP und DNS für das Heimnetz übernehmen, zum Beispiel als Ersatz für einen ISC-dhcpd mit
+BIND und Webmin. Dahinter steckt **dnsmasq**: DHCP und DNS in einem Prozess, darum ist jedes Gerät, das eine
+Adresse bekommt, sofort als `name.domäne` erreichbar, auch rückwärts von der IP zum Namen. Abgelaufene Leases
+verschwinden wieder. Hintergrund und Entscheidungen: [docs/vorschlag-dhcp-dns.md](docs/vorschlag-dhcp-dns.md).
+
+Bis du es in der GUI einschaltest, bleibt alles aus. `hotspot-setup.sh` (läuft mit `install.sh`) stellt nur die
+Dienste bereit.
+
+**Bedienung:** Alle Änderungen landen zuerst in einem **Entwurf**. Die Leiste oben zeigt, was sich ändert;
+*Übernehmen* macht es wirksam, *Verwerfen* verwirft es. Beim Übernehmen prüft der Pi die neue Konfiguration mit
+`dnsmasq --test`, lädt neu (Reservierungen ohne Unterbrechung per SIGHUP) und testet DNS. Klappt etwas nicht,
+stellt er den vorherigen Stand selbst wieder her.
+
+| Bereich | Inhalt |
+|---|---|
+| Übersicht | Status, Hinweise (z. B. „ein weiterer DHCP-Server antwortet“), **unbekannte Geräte** mit *Freigeben* (Name und nächste freie IP vorbelegt, sofort wirksam) oder *Ignorieren* |
+| Reservierungen | MAC → IP → Name, Kommentar, aktiv/inaktiv, eigene Lease-Zeit; Suche, Filter, Hersteller, „zuletzt gesehen“; WOL-Geräte direkt wecken |
+| Leases | aktive Vergaben mit Restlaufzeit; *Reservieren*, *Als WOL-Gerät*, *Freigeben* |
+| DNS | Testabfrage, Cache-Statistik, eigene Einträge (Name → IP, Alias, MX, SRV, TXT), Abfrageprotokoll |
+| Einstellungen | DHCP (Modus „nur bekannte Geräte“ oder Adressbereich, Lease-Zeit, Gateway, DNS, NTP, Suchdomänen), DNS (Domäne, Upstream, bedingte Weiterleitungen), Server (feste Adresse setzen), Netzwerkstart (PXE) |
+| Werkzeuge | Import aus `dhcpd.conf` mit Vorschau, Sicherung als JSON, Suche nach anderen DHCP-Servern, dnsmasq neu starten, Verlauf mit Zurückholen, DHCP-/Dienstprotokoll, ignorierte Geräte |
+
+**Umzug von einem ISC-dhcpd** (Ablauf mit Rückweg im [Vorschlag](docs/vorschlag-dhcp-dns.md#6-umzug-von-10)):
+1. *Einstellungen → Server → Feste Adresse setzen.* Ein DHCP-Server braucht eine feste eigene Adresse.
+2. *Werkzeuge → dhcpd.conf importieren.* Namen werden für DNS bereinigt (`LinuxCNC_Alfa` → `linuxcnc-alfa`). Der
+   Eintrag des WOL-Servers selbst wird übersprungen.
+3. DNS einschalten, übernehmen und testen: `dig @<pi> office-pc.home.arpa`. Die Clients merken davon noch nichts.
+4. Auf dem alten Server `systemctl disable --now isc-dhcp-server`, dann *Werkzeuge → Andere DHCP-Server suchen*
+   (es darf keiner mehr antworten) und DHCP einschalten.
+5. Rückweg jederzeit: DHCP im WOL-Server aus, alten Server wieder starten.
+
+**Hinweise:**
+- Domänen unter `.local` lehnt der Pi ab: Sie sind für mDNS reserviert und würden z. B. `wol.local` stören.
+  `oldnet.local` kann als zusätzliche Suchdomäne bleiben.
+- Im Modus „nur bekannte Geräte“ fallen Handys mit **privater WLAN-Adresse** auf, wenn sich die Adresse ändert.
+  Sie erscheinen dann in der Übersicht zum Freigeben.
+- Im Einrichtungs-Hotspot pausiert dnsmasq automatisch und läuft danach wieder.
+- Hersteller zu MAC-Adressen kommen aus der Liste des Pakets `ieee-data`, falls installiert (das Setup versucht es).
+- Technik: Die GUI (ohne root) übergibt strukturierte Daten an `wol-wifi`, der sie prüft und daraus die
+  dnsmasq-Dateien erzeugt. Eingespielt werden sie von `wol-dns-apply.service` (gestartet von `wol-dns-apply.path`).
+  dnsmasq läuft als `wol-dns.service` mit eigener Konfiguration in `/etc/wol-dns/`.
+
+## 6. Bedienung
 
 | Bereich | Funktion |
 |---|---|
@@ -365,7 +412,7 @@ journalctl -u wol-wifi -f                    # WLAN-Verwaltung / Hotspot
 sudo systemctl restart wol-server            # nach Änderung der config.json
 ```
 
-## 6. Konfiguration
+## 7. Konfiguration
 
 `/etc/wol-server/config.json`:
 
@@ -399,15 +446,18 @@ Dateien:
 /etc/default/wol-wlan-watchdog   Einstellungen des WLAN-Watchdogs
 /var/lib/wol-wifi/hotspot.json   Hotspot-Passwort (nur root)
 /var/lib/wol-wifi/vpn/           hochgeladene VPN-Konfiguration, Aufträge und deren Ergebnis (nur root)
+/var/lib/wol-wifi/dns/           DHCP/DNS: aktiver Stand, Entwurf, Verlauf, Aufträge (nur root)
+/etc/wol-dns/                    erzeugte dnsmasq-Konfiguration (nicht von Hand bearbeiten)
+/var/lib/wol-dns/                Leases und Lease-Ereignisse von dnsmasq
 /var/log/wol-firstboot.log       Protokoll der Einrichtung beim ersten Start (Variante A)
 /opt/wol-server/deploy/          Skripte für spätere Änderungen (openvpn-setup.sh, lowpower.sh, …)
 /etc/NetworkManager/system-connections/   gespeicherte WLANs (NetworkManager)
 /etc/NetworkManager/dnsmasq-shared.d/60-wol-server-captive.conf   DNS-Umleitung im Hotspot
 ```
 
-**Backup:** `/var/lib/wol-server/` sichern.
+**Backup:** `/var/lib/wol-server/` sichern; DHCP/DNS zusätzlich unter *Netzwerk → Werkzeuge → Sicherung*.
 
-## 7. Technische Details
+## 8. Technische Details
 
 - **Zeitplaner:** Er wacht einmal pro Minute auf. Der Zero hat keine Echtzeituhr: Springt die Uhr nach dem Boot
   per NTP nach vorne, werden höchstens die letzten 10 Minuten nachgeholt. Rücksprünge und die doppelte Stunde
@@ -444,9 +494,20 @@ GET    /api/wifi                    POST /api/wifi/scan             POST /api/wi
 POST   /api/wifi/forget {ssid}      PUT  /api/wifi/hotspot {password}
 GET    /api/vpn                     POST /api/vpn/config {config, username, password}
 PUT    /api/vpn {enabled}           DELETE /api/vpn
+GET    /api/net                     GET  /api/net/config            PUT  /api/net/settings
+POST   /api/net/reservations        PUT/DELETE /api/net/reservations/<id>
+POST   /api/net/records             PUT/DELETE /api/net/records/<id>
+POST   /api/net/apply               POST /api/net/discard           GET  /api/net/leases
+POST   /api/net/leases/<mac>/release                                GET  /api/net/unknown
+POST   /api/net/unknown/<mac>/approve {name, ip, comment}           POST /api/net/unknown/<mac>/ignore
+DELETE /api/net/ignored/<mac>       POST /api/net/import {text}     POST /api/net/import/commit {preview}
+GET    /api/net/export              POST /api/net/restore {data}    GET  /api/net/history
+POST   /api/net/history/<id>/restore                                POST /api/net/test {query}
+GET    /api/net/stats               GET  /api/net/logs/<queries|dhcp|service>
+POST   /api/net/probe               POST /api/net/restart           PUT  /api/net/static-ip {enabled}
 ```
 
-## 8. Entwicklung
+## 9. Entwicklung
 
 ```bash
 python3 -m wolserver -c config.dev.json      # http://localhost:8080, Daten in ./data
@@ -454,7 +515,7 @@ python3 -m unittest discover -s tests -t .   # Tests
 ./deploy/make-image.sh --image raspios.img.xz -o test.img   # Image aus vorhandenem OS-Image bauen
 ```
 
-## 9. Fehlersuche
+## 10. Fehlersuche
 
 | Problem | Lösung |
 |---|---|
@@ -474,10 +535,15 @@ python3 -m unittest discover -s tests -t .   # Tests
 | Handy öffnet die Einrichtungsseite nicht | `http://10.42.0.1/` von Hand aufrufen; manche Handys trennen WLANs ohne Internet, dann „Verbunden bleiben“ wählen |
 | *System → WLAN*: „nicht erreichbar“ | `systemctl status wol-wifi`; erneut einrichten mit `sudo ./deploy/hotspot-setup.sh` |
 | Zeitpläne laufen zur falschen Zeit | Zeitzone setzen: `sudo timedatectl set-timezone Europe/Berlin` |
+| *Netzwerk*: Übernehmen schlägt fehl | Die Meldung oben nennt den Grund; der alte Stand läuft weiter. Details: `journalctl -u wol-dns-apply -u wol-dns -e` |
+| Geräte bekommen keine Adresse | *Netzwerk → Übersicht*: unbekannt (freigeben)? Reservierung inaktiv? *Werkzeuge → Andere DHCP-Server suchen* – antwortet noch der alte? |
+| Namen werden nicht aufgelöst | Bekommen die Geräte den WOL-Server als DNS (*Einstellungen → DNS-Server für die Geräte*)? *DNS → Testabfrage* |
+| Übernehmen hängt bei „Wird ausgeführt …“ | `systemctl status wol-dns-apply.path wol-dns-apply.service` |
 
 ## Deinstallation
 
 ```bash
 sudo ./deploy/uninstall.sh            # Programm entfernen, Daten behalten (OpenVPN-Client und WLANs bleiben)
+# Achtung: Macht der WOL-Server DHCP/DNS, ist das danach weg – vorher den alten DHCP-Server wieder einschalten.
 sudo ./deploy/uninstall.sh --purge    # alles entfernen
 ```
