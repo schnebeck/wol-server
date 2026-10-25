@@ -57,14 +57,28 @@ cat > /etc/NetworkManager/dnsmasq-shared.d/60-wol-server-captive.conf <<'EOF'
 address=/#/10.42.0.1
 EOF
 
-say "Dienst wol-wifi (WLAN und VPN aus der Web-GUI)"
+say "DHCP/DNS (dnsmasq) bereitstellen – eingeschaltet wird es in der Web-GUI unter Netzwerk"
+# Benutzer dnsmasq legt das Paket dnsmasq-base an; zur Sicherheit auf nobody ausweichen
+DNS_USER=dnsmasq
+id -u "$DNS_USER" >/dev/null 2>&1 || DNS_USER=nobody
+install -d -m 0755 /etc/wol-dns
+install -d -m 0755 -o "$DNS_USER" /var/lib/wol-dns
+install -d -m 0700 /var/lib/wol-wifi /var/lib/wol-wifi/vpn /var/lib/wol-wifi/dns /var/lib/wol-wifi/dns/requests
+install -m 0644 "$SRC/deploy/wol-dns.service" "$SRC/deploy/wol-dns-apply.path" "$SRC/deploy/wol-dns-apply.service" \
+    /etc/systemd/system/
+# Herstellernamen zu MAC-Adressen (optional, braucht Internet)
+if [ ! -f /usr/share/ieee-data/oui.csv ]; then
+    timeout 300 apt-get install -y -q --no-install-recommends ieee-data >/dev/null 2>&1 \
+        || echo "    ieee-data nicht installiert – Hersteller werden ohne Liste nicht angezeigt"
+fi
+
+say "Dienst wol-wifi (WLAN, VPN und Netzwerk aus der Web-GUI)"
 install -m 0644 "$SRC/deploy/wol-wifi.service" /etc/systemd/system/wol-wifi.service
 install -m 0644 "$SRC/deploy/wol-vpn.path" "$SRC/deploy/wol-vpn.service" /etc/systemd/system/
-install -d -m 0700 /var/lib/wol-wifi /var/lib/wol-wifi/vpn
 # Ein enable für alle: lädt einmal neu (siehe install.sh)
-systemctl enable wol-wifi.service wol-vpn.path >/dev/null
+systemctl enable wol-wifi.service wol-vpn.path wol-dns-apply.path >/dev/null
 systemctl restart wol-wifi.service
-systemctl start wol-vpn.path
+systemctl start wol-vpn.path wol-dns-apply.path
 sleep 2
 if systemctl is-active --quiet wol-wifi.service; then
     say "WLAN-Verwaltung läuft"

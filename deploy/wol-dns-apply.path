@@ -1,0 +1,11 @@
+[Unit]
+Description=WOL-Server: Netzwerk-Aufträge aus der Web-GUI erkennen
+Documentation=file:///opt/wol-server/docs/vorschlag-dhcp-dns.md
+
+[Path]
+# wol-wifi legt dort geprüfte Aufträge ab (Übernehmen, Lease freigeben, DHCP-Suche, …)
+DirectoryNotEmpty=/var/lib/wol-wifi/dns/requests
+Unit=wol-dns-apply.service
+
+[Install]
+WantedBy=paths.target
