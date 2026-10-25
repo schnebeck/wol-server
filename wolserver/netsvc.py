@@ -523,7 +523,8 @@ class NetManager:
                 raise NetError("Es gibt keine Änderungen zu übernehmen.")
             request_id, changes = self._apply(draft, args.get("client", ""))
             return {"ok": True, "request": request_id, "changes": changes,
-                    "message": "%d Änderung%s werden übernommen …" % (len(changes), "" if len(changes) == 1 else "en")}
+                    "message": ("1 Änderung wird übernommen …" if len(changes) == 1
+                                else "%d Änderungen werden übernommen …" % len(changes))}
 
     def _apply_direct(self, mutate, client, note):
         """Sofort wirksame Änderung am aktiven Stand (Freigeben, Ignorieren); ein Entwurf bekommt sie auch."""

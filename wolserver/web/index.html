@@ -39,6 +39,7 @@
         <button type="button" class="tab" data-view="devices">Geräte</button>
         <button type="button" class="tab" data-view="schedules">Zeitpläne</button>
         <button type="button" class="tab" data-view="events">Protokoll</button>
+        <button type="button" class="tab" data-view="network">Netzwerk<span class="tab-badge" id="net-tab-badge" hidden></span></button>
         <button type="button" class="tab" data-view="system">System</button>
       </nav>
       <button type="button" id="logout" class="btn ghost small" hidden>Abmelden</button>
@@ -79,6 +80,262 @@
         <button type="button" class="btn ghost" id="clear-events">Leeren</button>
       </div>
       <div id="event-list" class="list"></div>
+    </section>
+
+    <section id="view-network" class="view" hidden>
+      <div class="view-head">
+        <div>
+          <h2>Netzwerk</h2>
+          <p class="muted" id="net-subtitle">DHCP und DNS für das Heimnetz</p>
+        </div>
+        <div class="service-pill" id="net-service" hidden></div>
+      </div>
+
+      <div id="net-unavailable" class="empty" hidden>
+        <h3>Netzwerk-Verwaltung nicht erreichbar</h3>
+        <p class="muted">Läuft der Dienst <code>wol-wifi</code>? Einrichten mit <code>sudo ./deploy/hotspot-setup.sh</code>.</p>
+      </div>
+
+      <div id="net-body" hidden>
+        <div class="pending-bar" id="net-pending" hidden>
+          <div class="pending-main">
+            <strong id="net-pending-title"></strong>
+            <details class="pending-details">
+              <summary>Änderungen anzeigen</summary>
+              <ul id="net-pending-list"></ul>
+            </details>
+          </div>
+          <div class="pending-actions">
+            <button type="button" class="btn ghost" id="net-discard">Verwerfen</button>
+            <button type="button" class="btn primary" id="net-apply">Übernehmen</button>
+          </div>
+        </div>
+        <div class="job-bar" id="net-job" hidden></div>
+
+        <nav class="subtabs" aria-label="Netzwerk-Bereiche" id="net-subtabs">
+          <button type="button" class="subtab" data-sub="overview">Übersicht</button>
+          <button type="button" class="subtab" data-sub="reservations">Reservierungen <span class="count" id="net-count-res"></span></button>
+          <button type="button" class="subtab" data-sub="leases">Leases <span class="count" id="net-count-leases"></span></button>
+          <button type="button" class="subtab" data-sub="dns">DNS</button>
+          <button type="button" class="subtab" data-sub="settings">Einstellungen</button>
+          <button type="button" class="subtab" data-sub="tools">Werkzeuge</button>
+        </nav>
+
+        <div class="subview" id="net-sub-overview">
+          <div class="stat-grid" id="net-stats"></div>
+          <div class="notice-list" id="net-warnings"></div>
+          <div class="panel" id="net-unknown-panel">
+            <div class="panel-head">
+              <h3>Unbekannte Geräte</h3>
+              <span class="muted small" id="net-unknown-info"></span>
+            </div>
+            <div id="net-unknown-list" class="device-requests"></div>
+          </div>
+          <div class="panel" id="net-last-panel" hidden>
+            <div class="panel-head">
+              <h3>Letzte Änderung</h3>
+              <button type="button" class="btn small ghost" data-goto-sub="tools">Verlauf</button>
+            </div>
+            <p class="small muted" id="net-last-meta"></p>
+            <ul class="change-list" id="net-last-list"></ul>
+          </div>
+        </div>
+
+        <div class="subview" id="net-sub-reservations" hidden>
+          <div class="toolbar">
+            <input type="search" id="res-search" placeholder="Suchen: Name, IP, MAC, Hersteller …" aria-label="Reservierungen durchsuchen">
+            <div class="segmented" role="radiogroup" aria-label="Filter" id="res-filter">
+              <label><input type="radio" name="res-filter" value="all" checked><span>Alle</span></label>
+              <label><input type="radio" name="res-filter" value="online"><span>Online</span></label>
+              <label><input type="radio" name="res-filter" value="wol"><span>WOL</span></label>
+              <label><input type="radio" name="res-filter" value="disabled"><span>Inaktiv</span></label>
+            </div>
+            <span class="spacer"></span>
+            <button type="button" class="btn primary" id="res-add">Reservierung</button>
+          </div>
+          <div class="table-wrap" id="res-table"></div>
+          <p class="muted small table-foot" id="res-foot"></p>
+        </div>
+
+        <div class="subview" id="net-sub-leases" hidden>
+          <div class="toolbar">
+            <input type="search" id="lease-search" placeholder="Suchen …" aria-label="Leases durchsuchen">
+            <span class="spacer"></span>
+            <button type="button" class="btn ghost" id="lease-refresh">Aktualisieren</button>
+          </div>
+          <div class="table-wrap" id="lease-table"></div>
+          <p class="muted small table-foot">Aktive Adressvergaben laut dnsmasq. Reservierte Geräte behalten ihre IP auch ohne Lease.</p>
+        </div>
+
+        <div class="subview" id="net-sub-dns" hidden>
+          <div class="sys-grid two-up">
+            <div class="panel">
+              <h3>Testabfrage</h3>
+              <form id="dns-test-form" class="inline-form" novalidate>
+                <label class="field">
+                  <span>Name oder IP-Adresse</span>
+                  <input name="query" class="mono" placeholder="z. B. office oder 192.168.1.9" spellcheck="false" autocapitalize="off" autocomplete="off">
+                </label>
+                <button class="btn" type="submit">Abfragen</button>
+                <p class="form-error" hidden></p>
+              </form>
+              <div id="dns-test-result" class="dns-result" hidden></div>
+            </div>
+            <div class="panel">
+              <div class="panel-head">
+                <h3>Cache</h3>
+                <button type="button" class="btn small ghost" id="dns-stats-refresh">Aktualisieren</button>
+              </div>
+              <dl class="kv" id="dns-stats"></dl>
+            </div>
+            <div class="panel wide">
+              <div class="panel-head">
+                <h3>Eigene Einträge</h3>
+                <button type="button" class="btn small" id="rec-add">Eintrag hinzufügen</button>
+              </div>
+              <p class="muted small" id="rec-hint"></p>
+              <div class="table-wrap" id="rec-table"></div>
+            </div>
+            <div class="panel wide" id="dns-querylog-panel">
+              <div class="panel-head">
+                <h3>Abfrageprotokoll</h3>
+                <button type="button" class="btn small ghost" id="dns-querylog-refresh">Aktualisieren</button>
+              </div>
+              <p class="muted small" id="dns-querylog-hint"></p>
+              <div class="table-wrap" id="dns-querylog"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="subview" id="net-sub-settings" hidden>
+          <form id="net-settings-form" class="settings" novalidate>
+            <div class="sys-grid">
+              <fieldset class="panel">
+                <legend class="panel-legend">DHCP</legend>
+                <label class="check"><input type="checkbox" name="dhcp.enabled"> <span>DHCP-Server einschalten</span></label>
+                <div class="field">
+                  <span>Wer bekommt eine Adresse?</span>
+                  <div class="segmented" role="radiogroup">
+                    <label><input type="radio" name="dhcp.mode" value="known-only"><span>Nur bekannte Geräte</span></label>
+                    <label><input type="radio" name="dhcp.mode" value="range"><span>Auch unbekannte (Bereich)</span></label>
+                  </div>
+                  <small id="mode-hint"></small>
+                </div>
+                <div class="form-grid" data-mode="range">
+                  <label class="field"><span>Bereich von</span><input name="dhcp.range_start" class="mono" placeholder="192.168.1.200"></label>
+                  <label class="field"><span>bis</span><input name="dhcp.range_end" class="mono" placeholder="192.168.1.249"></label>
+                </div>
+                <div class="field">
+                  <span>Lease-Zeit</span>
+                  <div class="lease-picker" id="settings-lease"></div>
+                  <small>Wie lange ein Gerät seine Adresse behält, bevor es sie erneuern muss.</small>
+                </div>
+                <div class="form-grid">
+                  <label class="field"><span>Gateway (Router)</span><input name="dhcp.gateway" class="mono" placeholder="192.168.1.1"></label>
+                  <label class="field"><span>NTP-Server <em class="opt">optional</em></span><input name="dhcp.ntp" class="mono" placeholder="192.168.1.1"></label>
+                  <label class="field span2"><span>DNS-Server für die Geräte <em class="opt">leer = dieser Server</em></span><input name="dhcp.dns" class="mono" placeholder="z. B. 192.168.1.8, 192.168.1.1"><small>Ein zweiter Eintrag (z. B. der Router) springt ein, falls der WOL-Server ausfällt.</small></label>
+                  <label class="field span2"><span>Weitere Suchdomänen <em class="opt">optional</em></span><input name="dhcp.search" class="mono" placeholder="z. B. oldnet.local"></label>
+                </div>
+              </fieldset>
+
+              <fieldset class="panel">
+                <legend class="panel-legend">DNS</legend>
+                <label class="check"><input type="checkbox" name="dns.enabled"> <span>DNS-Server einschalten</span></label>
+                <div class="form-grid">
+                  <label class="field span2"><span>Lokale Domäne</span><input name="dns.domain" class="mono" placeholder="home.arpa"><small>Jedes Gerät ist dann als <code>name.domäne</code> erreichbar.</small></label>
+                  <label class="field span2"><span>Upstream-DNS</span><input name="dns.upstream" class="mono" placeholder="192.168.1.1"><small>Wohin Anfragen für das Internet gehen, z. B. an den Router.</small></label>
+                  <label class="field"><span>TTL lokaler Namen (s)</span><input name="dns.ttl" type="number" min="0" max="86400"></label>
+                  <label class="field"><span>Cache-Größe</span><input name="dns.cache_size" type="number" min="0" max="10000"></label>
+                </div>
+                <div class="field">
+                  <span>Bedingte Weiterleitungen <em class="opt">optional</em></span>
+                  <div id="conditional-list" class="row-editor"></div>
+                  <button type="button" class="btn small ghost" id="conditional-add">+ Weiterleitung</button>
+                  <small>Eine Domäne an einen anderen DNS-Server, z. B. Namen im VPN an den VPN-Server.</small>
+                </div>
+                <label class="check"><input type="checkbox" name="dns.log_queries"> <span>Abfrageprotokoll (zur Fehlersuche, nur im RAM)</span></label>
+              </fieldset>
+
+              <fieldset class="panel">
+                <legend class="panel-legend">Server</legend>
+                <div class="form-grid">
+                  <label class="field"><span>Adresse</span><input name="server.ip" class="mono" placeholder="192.168.1.8"></label>
+                  <label class="field"><span>Präfix</span><input name="server.prefix" type="number" min="8" max="30"><small id="prefix-hint"></small></label>
+                  <label class="field"><span>Name im DNS</span><input name="server.name" class="mono" placeholder="wol"></label>
+                  <label class="field"><span>Interface</span><input name="server.interface" class="mono" placeholder="wlan0"></label>
+                  <label class="field"><span>DNS-Port</span><input name="server.port" type="number" min="1" max="65535"></label>
+                </div>
+                <div class="static-ip" id="static-ip"></div>
+              </fieldset>
+
+              <fieldset class="panel">
+                <legend class="panel-legend">Netzwerkstart (PXE) <em class="opt">optional</em></legend>
+                <div class="form-grid">
+                  <label class="field"><span>Boot-Datei</span><input name="dhcp.boot_file" class="mono" placeholder="z. B. pxelinux.0"></label>
+                  <label class="field"><span>TFTP-Server</span><input name="dhcp.boot_server" class="mono" placeholder="leer = dieser Server"></label>
+                </div>
+                <label class="check"><input type="checkbox" name="dhcp.tftp"> <span>Eigenen TFTP-Server starten (Dateien in <code>/srv/tftp</code>)</span></label>
+              </fieldset>
+            </div>
+            <p class="form-error" hidden></p>
+            <div class="settings-foot">
+              <span class="muted small">Gespeichert wird als Entwurf – wirksam erst mit „Übernehmen“.</span>
+              <button type="button" class="btn ghost" id="net-settings-reset">Zurücksetzen</button>
+              <button type="submit" class="btn primary">Speichern</button>
+            </div>
+          </form>
+        </div>
+
+        <div class="subview" id="net-sub-tools" hidden>
+          <div class="sys-grid four-up">
+            <div class="panel">
+              <h3>Vom alten DHCP-Server übernehmen</h3>
+              <p class="muted small">Konfiguration von ISC dhcpd (<code>/etc/dhcp/dhcpd.conf</code>) hochladen. Du siehst vorher, was übernommen wird.</p>
+              <div><button type="button" class="btn" id="import-open">dhcpd.conf importieren</button></div>
+            </div>
+            <div class="panel">
+              <h3>Sicherung</h3>
+              <p class="muted small">Der aktive Stand als JSON-Datei. Eine Sicherung lässt sich als Entwurf wieder laden.</p>
+              <div class="btn-row">
+                <button type="button" class="btn" id="export-btn">Herunterladen</button>
+                <label class="btn ghost file-btn">Sicherung laden<input type="file" id="restore-file" accept=".json,application/json"></label>
+              </div>
+            </div>
+            <div class="panel">
+              <h3>Andere DHCP-Server suchen</h3>
+              <p class="muted small">Zwei DHCP-Server im selben Netz stören sich. Die Suche fragt einmal rundum, ohne etwas zu ändern.</p>
+              <div class="btn-row"><button type="button" class="btn" id="probe-btn">Suchen</button></div>
+              <div id="probe-result" class="small"></div>
+            </div>
+            <div class="panel">
+              <h3>Dienst</h3>
+              <dl class="kv" id="service-info"></dl>
+              <div class="btn-row"><button type="button" class="btn" id="restart-btn">dnsmasq neu starten</button></div>
+            </div>
+            <div class="panel wide">
+              <div class="panel-head">
+                <h3>Verlauf</h3>
+                <span class="muted small">Die letzten 20 übernommenen Stände – jeder lässt sich als Entwurf zurückholen.</span>
+              </div>
+              <div id="history-list" class="history"></div>
+            </div>
+            <div class="panel wide">
+              <div class="panel-head">
+                <h3>Protokoll</h3>
+                <div class="segmented" role="radiogroup" id="log-kind">
+                  <label><input type="radio" name="log-kind" value="dhcp" checked><span>DHCP</span></label>
+                  <label><input type="radio" name="log-kind" value="service"><span>Dienst</span></label>
+                </div>
+              </div>
+              <div class="table-wrap" id="log-table"></div>
+            </div>
+            <div class="panel wide">
+              <h3>Ignorierte Geräte</h3>
+              <div id="ignored-list" class="saved"></div>
+            </div>
+          </div>
+        </div>
+      </div>
     </section>
 
     <section id="view-system" class="view" hidden>
@@ -198,7 +455,7 @@ echo "$USER ALL=(root) NOPASSWD: /usr/bin/systemctl suspend, /usr/bin/systemctl 
       <div class="form-grid">
         <label class="field span2">
           <span>Name</span>
-          <input name="name" required maxlength="64" placeholder="z. B. Arbeitsplatz-PC">
+          <input name="name" required maxlength="64" placeholder="z. B. Arbeitsplatz-PC" autofocus>
         </label>
         <label class="field">
           <span>MAC-Adresse</span>
@@ -218,6 +475,7 @@ echo "$USER ALL=(root) NOPASSWD: /usr/bin/systemctl suspend, /usr/bin/systemctl 
           <span>WOL-Port</span>
           <input name="wol_port" type="number" min="1" max="65535" placeholder="9">
         </label>
+        <p class="hint small span2 net-hint" id="device-net-hint" hidden></p>
       </div>
 
       <fieldset class="group">
@@ -416,6 +674,164 @@ echo "$USER ALL=(root) NOPASSWD: /usr/bin/systemctl suspend, /usr/bin/systemctl 
       <span class="spacer"></span>
       <button type="button" class="btn ghost" data-close>Abbrechen</button>
       <button type="submit" class="btn primary" id="vpn-submit">Hochladen und einschalten</button>
+    </footer>
+  </form>
+</dialog>
+
+<dialog id="res-dialog" class="dialog">
+  <form id="res-form" class="dialog-body" novalidate>
+    <header class="dialog-head">
+      <h2 id="res-dialog-title">Reservierung</h2>
+      <button type="button" class="icon-btn" data-close aria-label="Schließen">×</button>
+    </header>
+    <div class="dialog-content">
+      <div class="form-grid">
+        <label class="field">
+          <span>Name</span>
+          <input name="name" maxlength="63" spellcheck="false" autocapitalize="off" placeholder="z. B. office" autofocus>
+          <small id="res-name-hint">Wird im DNS als <code>name.domäne</code> erreichbar.</small>
+        </label>
+        <label class="field">
+          <span>MAC-Adresse</span>
+          <input name="mac" class="mono" required placeholder="aa:bb:cc:dd:ee:ff" spellcheck="false" autocapitalize="off">
+          <small id="res-vendor"></small>
+        </label>
+        <label class="field">
+          <span>IP-Adresse</span>
+          <div class="input-with-btn">
+            <input name="ip" class="mono" required placeholder="192.168.1.20" spellcheck="false">
+            <button type="button" class="btn small" id="res-next-ip" title="Nächste freie Adresse eintragen">nächste freie</button>
+          </div>
+        </label>
+        <div class="field">
+          <span>Lease-Zeit</span>
+          <div class="lease-picker" id="res-lease"></div>
+        </div>
+        <label class="field span2">
+          <span>Kommentar <em class="opt">optional</em></span>
+          <input name="comment" maxlength="120">
+        </label>
+        <label class="check span2">
+          <input type="checkbox" name="enabled"> <span>Aktiv (inaktive Reservierungen bekommen keine Adresse)</span>
+        </label>
+      </div>
+      <p class="form-error" hidden></p>
+    </div>
+    <footer class="dialog-foot">
+      <button type="button" class="btn danger ghost" id="res-delete">Löschen</button>
+      <span class="spacer"></span>
+      <button type="button" class="btn ghost" data-close>Abbrechen</button>
+      <button type="submit" class="btn primary">Speichern</button>
+    </footer>
+  </form>
+</dialog>
+
+<dialog id="rec-dialog" class="dialog">
+  <form id="rec-form" class="dialog-body" novalidate>
+    <header class="dialog-head">
+      <h2 id="rec-dialog-title">DNS-Eintrag</h2>
+      <button type="button" class="icon-btn" data-close aria-label="Schließen">×</button>
+    </header>
+    <div class="dialog-content">
+      <div class="field">
+        <span>Art</span>
+        <div class="segmented" role="radiogroup" id="rec-type">
+          <label><input type="radio" name="type" value="host"><span>Name → IP</span></label>
+          <label><input type="radio" name="type" value="alias"><span>Alias</span></label>
+          <label><input type="radio" name="type" value="mx"><span>MX</span></label>
+          <label><input type="radio" name="type" value="srv"><span>SRV</span></label>
+          <label><input type="radio" name="type" value="txt"><span>TXT</span></label>
+        </div>
+      </div>
+      <div class="form-grid">
+        <label class="field">
+          <span id="rec-name-label">Name</span>
+          <input name="name" class="mono" spellcheck="false" autocapitalize="off" autofocus>
+          <small id="rec-name-hint"></small>
+        </label>
+        <label class="field">
+          <span id="rec-value-label">Wert</span>
+          <input name="value" class="mono" spellcheck="false" autocapitalize="off">
+          <small id="rec-value-hint"></small>
+        </label>
+        <label class="field" data-rec="mx srv"><span>Priorität</span><input name="priority" type="number" min="0" max="65535"></label>
+        <label class="field" data-rec="srv"><span>Port</span><input name="port" type="number" min="1" max="65535"></label>
+        <label class="field" data-rec="srv"><span>Gewicht</span><input name="weight" type="number" min="0" max="65535"></label>
+        <label class="field span2"><span>Kommentar <em class="opt">optional</em></span><input name="comment" maxlength="120"></label>
+      </div>
+      <p class="form-error" hidden></p>
+    </div>
+    <footer class="dialog-foot">
+      <button type="button" class="btn danger ghost" id="rec-delete">Löschen</button>
+      <span class="spacer"></span>
+      <button type="button" class="btn ghost" data-close>Abbrechen</button>
+      <button type="submit" class="btn primary">Speichern</button>
+    </footer>
+  </form>
+</dialog>
+
+<dialog id="approve-dialog" class="dialog">
+  <form id="approve-form" class="dialog-body" novalidate>
+    <header class="dialog-head">
+      <h2>Unbekanntes Gerät freigeben</h2>
+      <button type="button" class="icon-btn" data-close aria-label="Schließen">×</button>
+    </header>
+    <div class="dialog-content">
+      <dl class="kv" id="approve-info"></dl>
+      <div class="form-grid approve-grid">
+        <label class="field">
+          <span>Name</span>
+          <input name="name" maxlength="63" spellcheck="false" autocapitalize="off" required autofocus>
+          <small id="approve-name-hint"></small>
+        </label>
+        <label class="field">
+          <span>IP-Adresse</span>
+          <input name="ip" class="mono" required spellcheck="false">
+          <small>Nächste freie Adresse</small>
+        </label>
+        <label class="field span2">
+          <span>Kommentar <em class="opt">optional</em></span>
+          <input name="comment" maxlength="120" placeholder="z. B. Handy von Anna">
+        </label>
+      </div>
+      <p class="hint small" id="approve-private" hidden>Das Gerät nutzt eine <strong>private WLAN-Adresse</strong>. Sie kann sich ändern (z. B. nach dem Zurücksetzen der Netzwerkeinstellungen). Dauerhaft hilft es, sie am Gerät für dieses WLAN abzuschalten.</p>
+      <p class="form-error" hidden></p>
+    </div>
+    <footer class="dialog-foot">
+      <span class="spacer"></span>
+      <button type="button" class="btn ghost" data-close>Abbrechen</button>
+      <button type="submit" class="btn primary" id="approve-submit">Freigeben und übernehmen</button>
+    </footer>
+  </form>
+</dialog>
+
+<dialog id="import-dialog" class="dialog wide">
+  <form id="import-form" class="dialog-body" novalidate>
+    <header class="dialog-head">
+      <h2>dhcpd.conf importieren</h2>
+      <button type="button" class="icon-btn" data-close aria-label="Schließen">×</button>
+    </header>
+    <div class="dialog-content">
+      <label class="field">
+        <span>Datei vom alten Server</span>
+        <input type="file" name="file" accept=".conf,text/plain" autofocus>
+        <small>Meist <code>/etc/dhcp/dhcpd.conf</code>. Es werden nur Daten gelesen, nichts ausgeführt.</small>
+      </label>
+      <div id="import-preview" hidden>
+        <dl class="kv compact" id="import-settings"></dl>
+        <ul class="notice-list small" id="import-warnings"></ul>
+        <p class="small"><strong id="import-summary"></strong></p>
+        <div class="table-wrap import-table" id="import-table"></div>
+        <label class="check"><input type="checkbox" name="take_settings" checked> <span>Einstellungen übernehmen (Gateway, Lease-Zeit, Modus, NTP)</span></label>
+        <label class="check"><input type="checkbox" name="replace"> <span>Vorhandene Reservierungen vorher entfernen</span></label>
+      </div>
+      <p class="form-error" hidden></p>
+    </div>
+    <footer class="dialog-foot">
+      <span class="muted small">Ergebnis ist ein Entwurf – prüfen, dann übernehmen.</span>
+      <span class="spacer"></span>
+      <button type="button" class="btn ghost" data-close>Abbrechen</button>
+      <button type="submit" class="btn primary" id="import-submit" disabled>In den Entwurf übernehmen</button>
     </footer>
   </form>
 </dialog>
