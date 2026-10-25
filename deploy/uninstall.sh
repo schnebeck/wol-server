@@ -8,6 +8,9 @@ rm -f /etc/systemd/system/wol-server.service /usr/local/bin/wol-server /etc/sysc
 systemctl disable --now wol-wlan-watchdog.timer 2>/dev/null || true
 rm -f /etc/systemd/system/wol-wlan-watchdog.service /etc/systemd/system/wol-wlan-watchdog.timer \
       /usr/local/sbin/wol-wlan-watchdog /etc/default/wol-wlan-watchdog
+if systemctl is-active --quiet wol-dns.service; then
+    echo "Hinweis: DHCP/DNS des WOL-Servers wird jetzt beendet – vorher den alten DHCP-Server wieder einschalten!" >&2
+fi
 systemctl disable --now wol-wifi.service wol-vpn.path wol-dns-apply.path wol-dns.service 2>/dev/null || true
 rm -f /etc/systemd/system/wol-wifi.service /etc/systemd/system/wol-vpn.path /etc/systemd/system/wol-vpn.service \
       /etc/systemd/system/wol-dns.service /etc/systemd/system/wol-dns-apply.path /etc/systemd/system/wol-dns-apply.service /etc/NetworkManager/dnsmasq-shared.d/60-wol-server-captive.conf

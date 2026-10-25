@@ -1,6 +1,14 @@
 # Vorschlag: DHCP und DNS im WOL-Server
 
-Stand: 25.10.2026 · Status: **Vorschlag, alle Grundsatzentscheidungen getroffen (Abschnitt 8), noch nicht umgesetzt**
+Stand: 26.10.2026 · Status: **umgesetzt (Phasen 1–5), lokal getestet, noch nicht auf dem Pi in Betrieb**
+
+> Bedienung und Umzug: README, Abschnitt 5. Abweichungen der Umsetzung von diesem Vorschlag:
+> - Aufträge laufen über eine Warteschlange (`/var/lib/wol-wifi/dns/requests/`, `wol-dns-apply.path` mit
+>   `DirectoryNotEmpty=`) statt einer einzelnen Auftragsdatei, ausgeführt in Python (`wolserver/dnsjob.py`).
+> - Reservierungen stehen zusätzlich in `hosts.dns`, damit auch schlafende Geräte ohne Lease per Name auflösbar
+>   sind (wichtig für Wake-on-LAN).
+> - Die Herstellererkennung nutzt die Listen des Systems (`ieee-data`, nmap), es wird keine eigene mitgeliefert.
+> - Freigeben und Ignorieren wirken sofort, unabhängig von einem offenen Entwurf.
 
 Der WOL-Server übernimmt DHCP und DNS für das Heimnetz. Beides ist automatisch abgeglichen: Jedes Gerät,
 das per DHCP eine Adresse bekommt, ist sofort unter seinem Namen erreichbar, auch rückwärts von der IP zum
