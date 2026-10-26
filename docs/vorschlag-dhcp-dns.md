@@ -9,6 +9,8 @@ Stand: 26.10.2026 · Status: **umgesetzt (Phasen 1–5), lokal getestet, noch ni
 >   sind (wichtig für Wake-on-LAN).
 > - Die Herstellererkennung nutzt die Listen des Systems (`ieee-data`, nmap), es wird keine eigene mitgeliefert.
 > - Freigeben und Ignorieren wirken sofort, unabhängig von einem offenen Entwurf.
+> - Reservierungen, DNS-Einträge und Einstellungen wirken sofort (Einstellungen mit Vorschau der
+>   Änderungen). Einen Entwurf gibt es nur nach Import, Sicherung laden oder Verlauf zurückholen.
 
 Der WOL-Server übernimmt DHCP und DNS für das Heimnetz. Beides ist automatisch abgeglichen: Jedes Gerät,
 das per DHCP eine Adresse bekommt, ist sofort unter seinem Namen erreichbar, auch rückwärts von der IP zum

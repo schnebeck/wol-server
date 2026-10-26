@@ -137,6 +137,7 @@ class App:
             R("GET", r"/api/net", self.api_net),
             R("GET", r"/api/net/config", self.api_net_config),
             R("PUT", r"/api/net/settings", self.api_net_settings),
+            R("POST", r"/api/net/settings/preview", self.api_net_settings_preview),
             R("POST", r"/api/net/reservations", self.api_net_reservation_save),
             R("PUT", r"/api/net/reservations/(?P<item_id>\w+)", self.api_net_reservation_save),
             R("DELETE", r"/api/net/reservations/(?P<item_id>\w+)", self.api_net_reservation_delete),
@@ -498,7 +499,10 @@ class App:
         return 200, res
 
     def api_net_settings(self, req):
-        return 200, self._net("net_settings", settings=req.body)
+        return 200, self._net("net_settings", settings=req.body, client=req.client)
+
+    def api_net_settings_preview(self, req):
+        return 200, self._net("net_settings", settings=req.body, preview=True)
 
     def api_net_reservation_save(self, req, item_id=None):
         data = dict(req.body)
@@ -506,10 +510,10 @@ class App:
             data["id"] = item_id
         else:
             data.pop("id", None)
-        return 200, self._net("net_reservation_save", reservation=data)
+        return 200, self._net("net_reservation_save", reservation=data, client=req.client)
 
     def api_net_reservation_delete(self, req, item_id):
-        return 200, self._net("net_reservation_delete", id=item_id)
+        return 200, self._net("net_reservation_delete", id=item_id, client=req.client)
 
     def api_net_record_save(self, req, item_id=None):
         data = dict(req.body)
@@ -517,10 +521,10 @@ class App:
             data["id"] = item_id
         else:
             data.pop("id", None)
-        return 200, self._net("net_record_save", record=data)
+        return 200, self._net("net_record_save", record=data, client=req.client)
 
     def api_net_record_delete(self, req, item_id):
-        return 200, self._net("net_record_delete", id=item_id)
+        return 200, self._net("net_record_delete", id=item_id, client=req.client)
 
     def api_net_apply(self, req):
         res = self._net("net_apply", client=req.client)

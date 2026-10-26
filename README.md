@@ -356,10 +356,12 @@ verschwinden wieder. Hintergrund und Entscheidungen: [docs/vorschlag-dhcp-dns.md
 Bis du es in der GUI einschaltest, bleibt alles aus. `hotspot-setup.sh` (läuft mit `install.sh`) stellt nur die
 Dienste bereit.
 
-**Bedienung:** Alle Änderungen landen zuerst in einem **Entwurf**. Die Leiste oben zeigt, was sich ändert;
-*Übernehmen* macht es wirksam, *Verwerfen* verwirft es. Beim Übernehmen prüft der Pi die neue Konfiguration mit
-`dnsmasq --test`, lädt neu (Reservierungen ohne Unterbrechung per SIGHUP) und testet DNS. Klappt etwas nicht,
-stellt er den vorherigen Stand selbst wieder her.
+**Bedienung:** *Übernehmen* macht eine Änderung sofort wirksam, etwa bei Reservierungen und DNS-Einträgen.
+In den Einstellungen zeigt *Prüfen* vorher alle Änderungen, die Bestätigung mit *Übernehmen* macht sie wirksam.
+Beim Übernehmen prüft der Pi die neue Konfiguration mit `dnsmasq --test`, lädt neu (Reservierungen ohne
+Unterbrechung per SIGHUP) und testet DNS. Schlägt etwas fehl, stellt er den vorherigen Stand selbst wieder her.
+Import, Sicherung und Verlauf erzeugen einen **Entwurf**. Die Leiste oben zeigt die offenen Änderungen; weitere
+Änderungen landen bis zum Übernehmen oder Verwerfen im Entwurf.
 
 | Bereich | Inhalt |
 |---|---|
@@ -495,6 +497,7 @@ POST   /api/wifi/forget {ssid}      PUT  /api/wifi/hotspot {password}
 GET    /api/vpn                     POST /api/vpn/config {config, username, password}
 PUT    /api/vpn {enabled}           DELETE /api/vpn
 GET    /api/net                     GET  /api/net/config            PUT  /api/net/settings
+POST   /api/net/settings/preview    (Liste der Änderungen, ändert nichts)
 POST   /api/net/reservations        PUT/DELETE /api/net/reservations/<id>
 POST   /api/net/records             PUT/DELETE /api/net/records/<id>
 POST   /api/net/apply               POST /api/net/discard           GET  /api/net/leases

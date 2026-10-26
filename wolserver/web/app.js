@@ -111,7 +111,8 @@ function toast(message, kind = "info") {
 function confirmDialog(title, text, okLabel = "OK", danger = false) {
   const dlg = $("#confirm-dialog");
   $("#confirm-title").textContent = title;
-  $("#confirm-text").textContent = text;
+  // Text oder Liste (z. B. die Änderungen vor dem Übernehmen)
+  $("#confirm-text").replaceChildren(Array.isArray(text) ? el("ul", { class: "change-list" }, text.map((t) => el("li", {}, t))) : text);
   const ok = $("#confirm-ok");
   ok.textContent = okLabel;
   ok.className = danger ? "btn danger" : "btn primary";
@@ -1189,6 +1190,7 @@ function renderNetHeader() {
 
 // Aufträge laufen asynchron (wol-dns-apply.service) – solange beobachten, bis sie fertig sind.
 async function watchNetJob(success) {
+  net.watchSuccess = success;
   if (net.watching) return;
   net.watching = true;
   try {
@@ -1197,7 +1199,7 @@ async function watchNetJob(success) {
       const st = await loadNetStatus();
       if (state.view === "network") renderNetHeader();
       if (!st.running) {
-        if (st.job && st.job.state === "ok") toast(success || st.job.message, "success");
+        if (st.job && st.job.state === "ok") toast(net.watchSuccess || st.job.message, "success");
         else if (st.job) toast(st.job.message, "error");
         break;
       }
@@ -1233,6 +1235,24 @@ function afterDraftChange(message) {
   toast(message, "success");
   return renderNetwork();
 }
+
+// Ohne offenen Entwurf wirken Änderungen sofort: Auftrag beobachten. Mit Entwurf landen sie dort.
+async function afterNetChange(res, success) {
+  toast(res.message, res.request ? "" : "success");
+  await renderNetwork();
+  if (res.request) watchNetJob(success);
+}
+
+// Änderungen laufen nacheinander: einen noch laufenden Auftrag abwarten.
+async function netIdle() {
+  for (let i = 0; i < 60; i++) {
+    if (!(await loadNetStatus()).running) return;
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+}
+
+const netHasDraft = () => Boolean(net.config && net.config.pending.length);
+const netSubmitLabel = () => (netHasDraft() ? "In den Entwurf" : "Übernehmen");
 
 // ---- Übersicht ----
 
@@ -1402,6 +1422,7 @@ function openResDialog(r = null, prefill = {}) {
   getResLease = leasePicker($("#res-lease"), data.lease_time ?? null, true);
   $("#res-dialog-title").textContent = r ? "Reservierung bearbeiten" : "Neue Reservierung";
   $("#res-delete").hidden = !r;
+  $("#res-submit").textContent = netSubmitLabel();
   updateResVendor();
   $("#res-dialog").showModal();
 }
@@ -1423,11 +1444,12 @@ async function onResSubmit(event) {
   };
   await busy($("button[type=submit]", form), async () => {
     try {
-      if (editingRes) await api("PUT", `/api/net/reservations/${editingRes.id}`, data);
-      else await api("POST", "/api/net/reservations", data);
+      await netIdle();
+      const res = editingRes ? await api("PUT", `/api/net/reservations/${editingRes.id}`, data)
+        : await api("POST", "/api/net/reservations", data);
       $("#res-dialog").close();
+      await afterNetChange(res, `Reservierung ${data.name || data.mac} übernommen`);
       if ($("#device-dialog").open) updateDeviceNetHint();
-      await afterDraftChange(editingRes ? "Reservierung geändert – noch übernehmen" : "Reservierung angelegt – noch übernehmen");
     } catch (e) {
       showError(form, e.message);
     }
@@ -1438,9 +1460,10 @@ async function onResDelete() {
   const r = editingRes;
   if (!(await confirmDialog(`${r.name || r.mac} löschen?`, `Die Reservierung für ${r.ip} wird entfernt. Im Modus „nur bekannte Geräte“ erhält das Gerät ohne Reservierung keine Adresse.`, "Löschen", true))) return;
   try {
-    await api("DELETE", `/api/net/reservations/${r.id}`);
+    await netIdle();
+    const res = await api("DELETE", `/api/net/reservations/${r.id}`);
     $("#res-dialog").close();
-    await afterDraftChange("Reservierung entfernt – noch übernehmen");
+    await afterNetChange(res, `Reservierung ${r.name || r.mac} gelöscht`);
   } catch (e) {
     toast(e.message, "error");
   }
@@ -1587,6 +1610,7 @@ function openRecDialog(r = null) {
   setRecType(data.type, false);
   $("#rec-dialog-title").textContent = r ? "Eintrag bearbeiten" : "Neuer Eintrag";
   $("#rec-delete").hidden = !r;
+  $("#rec-submit").textContent = netSubmitLabel();
   $("#rec-dialog").showModal();
 }
 
@@ -1621,10 +1645,11 @@ async function onRecSubmit(event) {
   }
   await busy($("button[type=submit]", form), async () => {
     try {
-      if (editingRec) await api("PUT", `/api/net/records/${editingRec.id}`, data);
-      else await api("POST", "/api/net/records", data);
+      await netIdle();
+      const res = editingRec ? await api("PUT", `/api/net/records/${editingRec.id}`, data)
+        : await api("POST", "/api/net/records", data);
       $("#rec-dialog").close();
-      await afterDraftChange("Eintrag gespeichert – noch übernehmen");
+      await afterNetChange(res, "DNS-Eintrag übernommen");
     } catch (e) {
       showError(form, e.message);
     }
@@ -1634,9 +1659,10 @@ async function onRecSubmit(event) {
 async function onRecDelete() {
   if (!(await confirmDialog("Eintrag löschen?", "Der DNS-Eintrag wird entfernt.", "Löschen", true))) return;
   try {
-    await api("DELETE", `/api/net/records/${editingRec.id}`);
+    await netIdle();
+    const res = await api("DELETE", `/api/net/records/${editingRec.id}`);
     $("#rec-dialog").close();
-    await afterDraftChange("Eintrag entfernt – noch übernehmen");
+    await afterNetChange(res, "DNS-Eintrag gelöscht");
   } catch (e) {
     toast(e.message, "error");
   }
@@ -1674,6 +1700,9 @@ function renderNetSettings() {
   updateModeHint();
   const prefix = Number(cfg.server.prefix);
   $("#prefix-hint").textContent = net.config.meta.network ? `Netz ${net.config.meta.network}` : prefix === 24 ? "/24 = 255.255.255.0" : "";
+  $("#settings-submit").textContent = netHasDraft() ? "In den Entwurf" : "Prüfen";
+  $("#settings-foot").textContent = netHasDraft() ? "Ein Entwurf ist offen. Änderungen landen im Entwurf."
+    : "„Prüfen“ zeigt alle Änderungen, bevor sie wirksam werden.";
   renderStaticIp();
 }
 
@@ -1738,11 +1767,15 @@ async function onSettingsSubmit(event) {
     },
   };
   if (data.dhcp.enabled && net.status.server.method === "auto" &&
-      !(await confirmDialog("Ohne feste Adresse?", "Der WOL-Server holt seine eigene Adresse noch per DHCP. Als DHCP-Server sollte er vorher eine feste Adresse bekommen (Schaltfläche unter „Server“).", "Trotzdem speichern"))) return;
-  await busy($("button[type=submit]", form), async () => {
+      !(await confirmDialog("Ohne feste Adresse?", "Der WOL-Server bezieht seine eigene Adresse per DHCP. Ein DHCP-Server benötigt eine feste Adresse (Einstellungen → Server → „Feste Adresse setzen“).", "Trotzdem speichern"))) return;
+  await busy($("#settings-submit"), async () => {
     try {
-      await api("PUT", "/api/net/settings", data);
-      await afterDraftChange("Einstellungen gespeichert – noch übernehmen");
+      const preview = await api("POST", "/api/net/settings/preview", data);
+      if (!preview.changes.length) return toast("Keine Änderungen", "success");
+      if (!preview.draft && !(await confirmDialog("Änderungen übernehmen?", preview.changes, "Übernehmen"))) return;
+      await netIdle();
+      const res = await api("PUT", "/api/net/settings", data);
+      await afterNetChange(res, "Einstellungen übernommen");
     } catch (e) {
       showError(form, e.message);
       form.querySelector(".form-error").scrollIntoView({ block: "center", behavior: "smooth" });

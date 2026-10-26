@@ -167,6 +167,8 @@ class NetManager:
             return self._defaults()
 
     def draft(self):
+        if not self._syncing:
+            self._sync()  # eine erfolgreiche Übernahme des Entwurfs schließt ihn
         cfg = _read_json(self.path("draft.json"))
         if cfg is None:
             return None
@@ -390,14 +392,16 @@ class NetManager:
         with self.lock:
             self._sync()
             active = self.active()
-            cfg = self.draft() or active
+            draft = self.draft()
+            # Während ein Auftrag läuft, zeigt die GUI schon den beauftragten Stand
+            cfg = draft or self._applying() or active
             leases = self._leases()
             events = self._events()
             macs = {r["mac"] for r in cfg["reservations"]} | {lease["mac"] for lease in leases}
             arp = self.arp()
             return {
                 "config": cfg,
-                "pending": netcfg.diff(active, cfg),
+                "pending": netcfg.diff(active, draft) if draft else [],
                 "meta": {
                     "vendors": oui.lookup_many(sorted(macs), self.vendor_source),
                     "last_seen": {mac: e["last_seen"] for mac, e in events.items()},
@@ -408,6 +412,14 @@ class NetManager:
                     "network": str(netcfg.network_of(cfg)) if netcfg.network_of(cfg) else None,
                 },
             }
+
+    def _applying(self):
+        names = sorted(n for n in os.listdir(self.path("applying")) if n.endswith(".json"))
+        applying = _read_json(self.path("applying", names[-1])) if names else None
+        try:
+            return netcfg.validate_config(applying["config"]) if applying else None
+        except (NetError, KeyError, TypeError):
+            return None
 
     def leases(self, args=None):
         with self.lock:
@@ -455,60 +467,89 @@ class NetManager:
         with self.lock:
             return {"unknown": self._unknown(self.working(), self._leases())}
 
-    # -- Änderungen am Entwurf --
+    # -- Änderungen: ohne offenen Entwurf sofort wirksam --
+
+    def _change(self, mutate, client, note=""):
+        """Änderung sofort übernehmen. Ist ein Entwurf offen (Import, Sicherung, Verlauf), landet sie dort."""
+        draft = self.draft()
+        if draft is not None:
+            self._save_draft(mutate(draft))
+            return {"ok": True, "draft": True, "message": "Im Entwurf gespeichert"}
+        active = self.active()
+        new = netcfg.validate_config(mutate(copy.deepcopy(active)))
+        if new == active:
+            return {"ok": True, "message": "Keine Änderung"}
+        request_id, changes = self._apply(new, client, from_draft=False, note=note)
+        return {"ok": True, "request": request_id, "changes": changes, "message": "Wird übernommen …"}
 
     def settings(self, args):
         with self.lock:
-            cfg = netcfg.validate_settings(self.working(), args.get("settings") or {})
-            return {"ok": True, "config": self._save_draft(cfg)}
+            data = args.get("settings") or {}
+            if args.get("preview"):
+                base = self.working()
+                return {"ok": True, "changes": netcfg.diff(base, netcfg.validate_settings(base, data)),
+                        "draft": self.draft() is not None}
+            return self._change(lambda cfg: netcfg.validate_settings(cfg, data), args.get("client", ""))
 
     def reservation_save(self, args):
         with self.lock:
-            cfg = self.working()
             data = args.get("reservation") or {}
-            item = netcfg.validate_reservation(data, netcfg.network_of(cfg))
+            item = netcfg.validate_reservation(data, netcfg.network_of(self.working()))
             rid = data.get("id")
-            if rid:
-                if not any(r["id"] == rid for r in cfg["reservations"]):
-                    raise NetError("Reservierung nicht gefunden")
-                cfg["reservations"] = [item if r["id"] == rid else r for r in cfg["reservations"]]
-            else:
-                cfg["reservations"].append(item)
-            # Freigegebene MAC nicht mehr ignorieren
-            cfg["ignored"] = [i for i in cfg["ignored"] if i["mac"] != item["mac"]]
-            return {"ok": True, "reservation": item, "config": self._save_draft(cfg)}
+
+            def mutate(cfg):
+                if rid:
+                    if not any(r["id"] == rid for r in cfg["reservations"]):
+                        raise NetError("Reservierung nicht gefunden")
+                    cfg["reservations"] = [item if r["id"] == rid else r for r in cfg["reservations"]]
+                else:
+                    cfg["reservations"].append(item)
+                # Freigegebene MAC nicht mehr ignorieren
+                cfg["ignored"] = [i for i in cfg["ignored"] if i["mac"] != item["mac"]]
+                return cfg
+
+            return dict(self._change(mutate, args.get("client", "")), reservation=item)
 
     def reservation_delete(self, args):
         with self.lock:
-            cfg = self.working()
-            before = len(cfg["reservations"])
-            cfg["reservations"] = [r for r in cfg["reservations"] if r["id"] != args.get("id")]
-            if len(cfg["reservations"]) == before:
-                raise NetError("Reservierung nicht gefunden")
-            return {"ok": True, "config": self._save_draft(cfg)}
+            def mutate(cfg):
+                before = len(cfg["reservations"])
+                cfg["reservations"] = [r for r in cfg["reservations"] if r["id"] != args.get("id")]
+                if len(cfg["reservations"]) == before:
+                    raise NetError("Reservierung nicht gefunden")
+                return cfg
+
+            return self._change(mutate, args.get("client", ""))
 
     def record_save(self, args):
         with self.lock:
-            cfg = self.working()
             data = args.get("record") or {}
             item = netcfg.validate_record(data)
             rid = data.get("id")
-            if rid:
-                if not any(r["id"] == rid for r in cfg["records"]):
-                    raise NetError("Eintrag nicht gefunden")
-                cfg["records"] = [item if r["id"] == rid else r for r in cfg["records"]]
-            else:
-                cfg["records"].append(item)
-            return {"ok": True, "record": item, "config": self._save_draft(cfg)}
+
+            def mutate(cfg):
+                if rid:
+                    if not any(r["id"] == rid for r in cfg["records"]):
+                        raise NetError("Eintrag nicht gefunden")
+                    cfg["records"] = [item if r["id"] == rid else r for r in cfg["records"]]
+                else:
+                    cfg["records"].append(item)
+                return cfg
+
+            return dict(self._change(mutate, args.get("client", "")), record=item)
 
     def record_delete(self, args):
         with self.lock:
-            cfg = self.working()
-            before = len(cfg["records"])
-            cfg["records"] = [r for r in cfg["records"] if r["id"] != args.get("id")]
-            if len(cfg["records"]) == before:
-                raise NetError("Eintrag nicht gefunden")
-            return {"ok": True, "config": self._save_draft(cfg)}
+            def mutate(cfg):
+                before = len(cfg["records"])
+                cfg["records"] = [r for r in cfg["records"] if r["id"] != args.get("id")]
+                if len(cfg["records"]) == before:
+                    raise NetError("Eintrag nicht gefunden")
+                return cfg
+
+            return self._change(mutate, args.get("client", ""))
+
+    # -- Entwurf (Import, Sicherung, Verlauf) --
 
     def discard(self, args=None):
         with self.lock:
