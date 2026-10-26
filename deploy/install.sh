@@ -143,6 +143,6 @@ for ip in $(hostname -I); do
     case "$ip" in *:*) ;; *) echo "            http://$ip$suffix/" ;; esac
 done
 echo "  Logs:     journalctl -u wol-server -f"
-echo "  Stromsparen (optional, einmalig): sudo ./deploy/lowpower.sh"
+echo "  Speicher und Strom sparen (optional, einmalig): sudo ./deploy/lowmem.sh && sudo ./deploy/lowpower.sh"
 [ -z "$OVPN" ] && echo "  OpenVPN-Client:  sudo ./deploy/openvpn-setup.sh <client.ovpn>"
 exit 0

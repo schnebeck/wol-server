@@ -284,13 +284,13 @@ fi
 touch /etc/cloud/cloud-init.disabled
 
 STATUS="OK – GUI unter http://$(hostname).local/"
+# Treiber-Sperren, Swap und Firmware-Einstellungen wirken erst nach einem Neustart
+log "Speichersparmodus einrichten"
+bash /opt/wol-server/deploy/lowmem.sh || log "lowmem.sh fehlgeschlagen – Pi läuft ohne Speichersparmodus weiter"
 if yes_no LOWPOWER yes; then
     log "Stromsparmodus einrichten"
-    if bash /opt/wol-server/deploy/lowpower.sh; then
-        STATUS="$STATUS (Neustart für den Stromsparmodus in 1 min)"
-        shutdown -r +1 "WOL-Server eingerichtet – Neustart für den Stromsparmodus" || true
-    else
-        log "lowpower.sh fehlgeschlagen – Pi läuft ohne Stromsparmodus weiter"
-    fi
+    bash /opt/wol-server/deploy/lowpower.sh || log "lowpower.sh fehlgeschlagen – Pi läuft ohne Stromsparmodus weiter"
 fi
+STATUS="$STATUS (Neustart in 1 min)"
+shutdown -r +1 "WOL-Server eingerichtet – Neustart für Speicher- und Stromsparmodus" || true
 exit 0
