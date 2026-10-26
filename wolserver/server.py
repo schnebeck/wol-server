@@ -415,7 +415,7 @@ class App:
     def api_wifi_connect(self, req):
         b = req.body
         res = self._wifi({"cmd": "connect", "ssid": b.get("ssid"), "password": b.get("password") or "",
-                          "hidden": bool(b.get("hidden"))})
+                          "hidden": bool(b.get("hidden")), "ipv4": b.get("ipv4")})
         log.info("WLAN „%s“ eingerichtet von %s", b.get("ssid"), req.client)
         return 200, res
 
