@@ -121,6 +121,23 @@ class ParseTest(unittest.TestCase):
             with self.assertRaises(wifi.WifiError):
                 wifi.validate_ssid(bad)
 
+    def test_validate_ipv4(self):
+        self.assertEqual(wifi.validate_ipv4(None), [])
+        self.assertEqual(wifi.validate_ipv4({"address": " "}), [])
+        args = wifi.validate_ipv4({"address": "192.168.1.8", "gateway": "192.168.1.1"})
+        self.assertEqual(args, ["ipv4.method", "manual", "ipv4.addresses", "192.168.1.8/24", "ipv4.gateway",
+                                "192.168.1.1", "ipv4.dns", "192.168.1.1", "ipv4.ignore-auto-dns", "yes"])
+        args = wifi.validate_ipv4({"address": "10.0.0.5/16", "gateway": "10.0.255.254", "dns": "1.1.1.1, 9.9.9.9"})
+        self.assertEqual((args[3], args[7]), ("10.0.0.5/16", "1.1.1.1 9.9.9.9"))
+        for bad in ({"address": "192.168.1.300", "gateway": "192.168.1.1"},
+                    {"address": "192.168.1.0/24", "gateway": "192.168.1.1"},     # Netzadresse
+                    {"address": "192.168.1.8/24"},                               # Gateway fehlt
+                    {"address": "192.168.1.8/24", "gateway": "192.168.2.1"},     # anderes Netz
+                    {"address": "192.168.1.8/24", "gateway": "192.168.1.8"},
+                    {"address": "192.168.1.8/24", "gateway": "192.168.1.1", "dns": "router"}):
+            with self.assertRaises(wifi.WifiError):
+                wifi.validate_ipv4(bad)
+
     def test_captive_redirect(self):
         self.assertIsNone(captive_redirect("10.42.0.1", 80))
         self.assertIsNone(captive_redirect("10.42.0.1:8080", 8080))
@@ -227,6 +244,26 @@ class ManagerTest(unittest.TestCase):
         snap = mgr.snapshot()
         self.assertEqual((snap["mode"], snap["ssid"], snap["saved"]), ("client", "Heim", ["Heim"]))
         self.assertIsNone(snap["last_error"])
+
+    def test_connect_from_hotspot_with_static_ip(self):
+        fake = FakeNM()
+        mgr, clock = make_manager(fake, self.tmp)
+        clock.now += wifi.BOOT_GRACE
+        mgr.tick()
+        res = self.job(mgr, "connect", ssid="Heim", password="geheim123",
+                       ipv4={"address": "192.168.1.8/24", "gateway": "192.168.1.1"})
+        self.assertTrue(res["switching"])
+        self.assertTrue(fake.ran("connection", "add", "ipv4.method", "manual", "192.168.1.8/24", "192.168.1.1"))
+        # Ungültige Angaben: nichts anlegen, Hotspot bleibt
+        fake2 = FakeNM()
+        mgr2, clock2 = make_manager(fake2, tempfile.mkdtemp(dir=self.tmp))
+        clock2.now += wifi.BOOT_GRACE
+        mgr2.tick()
+        res = self.job(mgr2, "connect", ssid="Heim", password="geheim123", ipv4={"address": "192.168.1.8/24"})
+        self.assertFalse(res["ok"])
+        self.assertIn("Gateway", res["error"])
+        self.assertFalse(fake2.ran("connection", "add", "Heim"))
+        self.assertEqual(fake2.address, wifi.HOTSPOT_ADDRESS)
 
     def test_connect_failure_restores_hotspot(self):
         fake = FakeNM(connect_ok=False)

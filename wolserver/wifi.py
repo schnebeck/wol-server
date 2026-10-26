@@ -9,6 +9,7 @@ Der Web-Server (Benutzer wol) spricht über einen Unix-Socket mit diesem Dienst 
 dadurch selbst keine Rechte für NetworkManager.
 """
 
+import ipaddress
 import json
 import logging
 import os
@@ -112,6 +113,36 @@ def validate_psk(psk, what="Das WLAN-Passwort"):
     if any(not 32 <= ord(c) <= 126 for c in psk):
         raise WifiError("%s darf nur ASCII-Zeichen enthalten (keine Umlaute)." % what)
     return psk
+
+
+def validate_ipv4(data):
+    """Feste Adresse für das WLAN-Profil → nmcli-Argumente; ohne Adresse [] (DHCP).
+
+    data: {"address": "192.168.1.8/24", "gateway": "192.168.1.1", "dns": "192.168.1.1 1.1.1.1"}
+    """
+    data = data if isinstance(data, dict) else {}
+    address = str(data.get("address") or "").strip()
+    if not address:
+        return []
+    try:
+        iface = ipaddress.IPv4Interface(address if "/" in address else address + "/24")
+    except ValueError:
+        raise WifiError("Ungültige Adresse, Beispiel: 192.168.1.8/24") from None
+    net = iface.network
+    if not 8 <= net.prefixlen <= 30 or iface.ip in (net.network_address, net.broadcast_address):
+        raise WifiError("Die Adresse %s ist im Netz %s nicht nutzbar." % (iface.ip, net))
+    try:
+        gateway = ipaddress.IPv4Address(str(data.get("gateway") or "").strip())
+    except ValueError:
+        raise WifiError("Bei fester Adresse ist ein gültiges Gateway nötig, z. B. der Router.") from None
+    if gateway not in net or gateway == iface.ip:
+        raise WifiError("Das Gateway %s liegt nicht im Netz %s." % (gateway, net))
+    try:
+        dns = [ipaddress.IPv4Address(d) for d in re.split(r"[\s,;]+", str(data.get("dns") or "").strip()) if d]
+    except ValueError:
+        raise WifiError("Ungültiger DNS-Server, Beispiel: 192.168.1.1") from None
+    return ["ipv4.method", "manual", "ipv4.addresses", str(iface), "ipv4.gateway", str(gateway),
+            "ipv4.dns", " ".join(str(d) for d in dns or [gateway]), "ipv4.ignore-auto-dns", "yes"]
 
 
 def default_hotspot_ssid(iface):
@@ -396,6 +427,7 @@ class WifiManager:
         ssid = validate_ssid(job.args.get("ssid"))
         psk = validate_psk(job.args.get("password"))
         hidden = "yes" if job.args.get("hidden") else "no"
+        ipv4 = validate_ipv4(job.args.get("ipv4"))
         existing = [p for p in self.profiles if p["ssid"] == ssid]
         active = self.mode == "client" and ssid == self.current_ssid
         created = False
@@ -405,7 +437,7 @@ class WifiManager:
             uuid = existing[0]["uuid"]
             self.nm("connection", "modify", "uuid", uuid, "802-11-wireless.hidden", hidden,
                     "connection.autoconnect", "yes", "802-11-wireless.cloned-mac-address", "permanent",
-                    "wifi-sec.key-mgmt", "wpa-psk", "wifi-sec.psk", psk)
+                    "wifi-sec.key-mgmt", "wpa-psk", "wifi-sec.psk", psk, *ipv4)
         else:
             if existing and active:
                 raise WifiError("„%s“ ist verbunden. Für die Umstellung auf ein offenes Netz "
@@ -419,14 +451,14 @@ class WifiManager:
                     "802-11-wireless.cloned-mac-address", "permanent"]
             if psk:
                 args += ["wifi-sec.key-mgmt", "wpa-psk", "wifi-sec.psk", psk]
-            out = self.nm(*args)
+            out = self.nm(*args, *ipv4)
             match = re.search(r"\(([0-9a-f-]{36})\)", out)
             uuid = match.group(1) if match else None
             created = True
         self.refresh_profiles()
         if uuid is None:
             uuid = next((p["uuid"] for p in self.profiles if p["ssid"] == ssid), None)
-        log.info("WLAN „%s“ gespeichert", ssid)
+        log.info("WLAN „%s“ gespeichert%s", ssid, " (feste Adresse %s)" % ipv4[3] if ipv4 else "")
 
         if self.mode == "client":
             job.reply({"ok": True, "switching": False,

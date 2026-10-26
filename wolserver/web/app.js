@@ -741,6 +741,7 @@ function openWifiDialog() {
   form.reset();
   showError(form, "");
   form.elements.password.type = "password";
+  $("#wifi-static").hidden = true;
   const wifi = state.wifi;
   $("#wifi-step-form").hidden = false;
   $("#wifi-step-done").hidden = true;
@@ -752,7 +753,7 @@ function openWifiDialog() {
   if (wifi && wifi.mode !== "hotspot") scanWifi();
 }
 
-function showWifiSwitching(ssid) {
+function showWifiSwitching(ssid, ip) {
   $("#wifi-step-form").hidden = true;
   $("#wifi-step-done").hidden = false;
   $("#wifi-submit").hidden = true;
@@ -761,10 +762,12 @@ function showWifiSwitching(ssid) {
   const host = state.info ? state.info.hostname : "wol-server";
   const port = state.info && state.info.network && state.info.network.port !== 80 ? `:${state.info.network.port}` : "";
   const url = `http://${host}.local${port}/`;
+  const ipUrl = ip && `http://${ip}${port}/`;
   $("#wifi-done-text").replaceChildren(state.hotspot
     ? el("span", {}, "Der Hotspot wird beendet, die Verbindung zu diesem Gerät bricht ab. ",
       "Im Heimnetz ist die Oberfläche unter ", el("a", { href: url }, url),
-      " erreichbar oder unter der Adresse, die der Router für den Pi anzeigt.")
+      ...(ipUrl ? [" oder ", el("a", { href: ipUrl }, ipUrl), " erreichbar."]
+        : [" erreichbar oder unter der Adresse, die der Router für den Pi anzeigt."]))
     : el("span", {}, "Der Status aktualisiert sich automatisch."));
 }
 
@@ -777,13 +780,17 @@ async function onWifiSubmit(event) {
     password: form.elements.password.value,
     hidden: form.elements.hidden_ssid.checked,
   };
+  if (form.elements.static_ip.checked) {
+    data.ipv4 = { address: form.elements.ip_address.value, gateway: form.elements.ip_gateway.value, dns: form.elements.ip_dns.value };
+    if (!data.ipv4.address.trim()) return showError(form, "Bitte die feste Adresse eingeben, z. B. 192.168.1.8/24.");
+  }
   if (!data.ssid.trim()) return showError(form, "Bitte ein WLAN auswählen oder den Namen eingeben.");
   if (data.password && data.password.length < 8) return showError(form, "Das WLAN-Passwort hat mindestens 8 Zeichen.");
   await busy($("#wifi-submit"), async () => {
     try {
       const res = await api("POST", "/api/wifi/connect", data);
       if (res.switching || res.pending) {
-        showWifiSwitching(data.ssid);
+        showWifiSwitching(data.ssid, data.ipv4 && data.ipv4.address.trim().split("/")[0]);
         setTimeout(() => renderWifi().catch(() => {}), 3000);
       } else {
         $("#wifi-dialog").close();
@@ -2107,6 +2114,10 @@ function bind() {
   $("#wifi-form").addEventListener("submit", onWifiSubmit);
   $("#wifi-form").elements.show_password.addEventListener("change", (e) => {
     $("#wifi-form").elements.password.type = e.target.checked ? "text" : "password";
+  });
+  $("#wifi-form").elements.static_ip.addEventListener("change", (e) => {
+    $("#wifi-static").hidden = !e.target.checked;
+    if (e.target.checked) $("#wifi-form").elements.ip_address.focus();
   });
   $("#wifi-form").elements.ssid.addEventListener("input", () => {
     for (const item of $$(".scan-item")) item.classList.remove("selected");

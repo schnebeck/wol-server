@@ -628,6 +628,24 @@ echo "$USER ALL=(root) NOPASSWD: /usr/bin/systemctl suspend, /usr/bin/systemctl 
         <label class="check">
           <input type="checkbox" name="hidden_ssid"> <span>Verstecktes Netz</span>
         </label>
+        <label class="check span2">
+          <input type="checkbox" name="static_ip"> <span>Feste IP-Adresse</span>
+        </label>
+        <div class="form-grid span2" id="wifi-static" hidden>
+          <label class="field span2">
+            <span>Adresse/Präfix</span>
+            <input name="ip_address" class="mono" placeholder="192.168.1.8/24" spellcheck="false" autocapitalize="off" autocomplete="off">
+            <small>Ohne Präfix gilt /24. Nötig, wenn der WOL-Server DHCP-Server wird.</small>
+          </label>
+          <label class="field">
+            <span>Gateway</span>
+            <input name="ip_gateway" class="mono" placeholder="192.168.1.1" spellcheck="false" autocapitalize="off" autocomplete="off">
+          </label>
+          <label class="field">
+            <span>DNS-Server <em class="opt">leer = Gateway</em></span>
+            <input name="ip_dns" class="mono" placeholder="192.168.1.1" spellcheck="false" autocapitalize="off" autocomplete="off">
+          </label>
+        </div>
       </div>
       <p class="hint small">Der Pi Zero W unterstützt nur 2,4-GHz-Netze. Das WLAN muss dasselbe Netz wie das der Zielgeräte sein, kein Gast-WLAN.</p>
       <p class="form-error" hidden></p>

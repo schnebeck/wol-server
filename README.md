@@ -154,8 +154,10 @@ Neuer Router, geändertes WLAN-Passwort, Umzug: Findet der Pi keines seiner gesp
    WLAN-MAC-Adresse.
 2. Die Einrichtungsseite öffnet sich von selbst (Captive Portal). Falls nicht: **`http://10.42.0.1/`** aufrufen.
 3. Anmelden (sofern ein GUI-Passwort gesetzt ist), WLAN aus der Liste wählen, Passwort eingeben, *Verbinden*.
+   Optional *Feste IP-Adresse*: Adresse mit Präfix (z. B. `192.168.1.8/24`), Gateway und DNS-Server. Das ist
+   nötig, wenn der WOL-Server später selbst DHCP-Server wird, und funktioniert auch in einem Netz ohne DHCP.
 4. Der Pi beendet den Hotspot und verbindet sich. Danach ist die GUI wieder im Heimnetz erreichbar, z. B. unter
-   `http://wol.local/`. Klappt die Verbindung nicht, etwa weil das Passwort falsch ist, öffnet sich der Hotspot
+   `http://wol.local/` oder der festen Adresse. Klappt die Verbindung nicht, etwa weil das Passwort falsch ist, öffnet sich der Hotspot
    nach etwa einer Minute wieder und die Seite zeigt den Fehler.
 
 Im Normalbetrieb verwaltet *System → WLAN* die gespeicherten Netze. Zusätzliche WLANs lassen sich vorab
