@@ -1,0 +1,7 @@
+[Unit]
+Description=WOL-Server: Startbericht auf die Boot-Partition schreiben
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash /opt/wol-server/deploy/bootlog.sh
+Nice=10

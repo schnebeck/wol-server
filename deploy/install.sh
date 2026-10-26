@@ -109,9 +109,11 @@ fi
 
 say "systemd-Dienst"
 install -m 0644 "$SRC/deploy/wol-server.service" "$UNIT"
+# Startbericht auf der Boot-Partition (wol-boot.log), lesbar mit jedem Kartenleser
+install -m 0644 "$SRC/deploy/wol-bootlog.service" "$SRC/deploy/wol-bootlog.timer" /etc/systemd/system/
 # enable lädt die Unit-Dateien selbst neu. Kein zusätzliches daemon-reload: Jedes dauert auf dem
 # Zero 12–20 s, in denen systemd blockiert (und den Hardware-Watchdog nicht bedient).
-systemctl enable wol-server.service >/dev/null
+systemctl enable wol-server.service wol-bootlog.timer >/dev/null
 systemctl restart wol-server.service
 sleep 2
 if systemctl is-active --quiet wol-server.service; then

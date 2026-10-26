@@ -8,5 +8,14 @@
 # Den Hostnamen setzt firstboot.sh; cloud-init soll ihn nicht wieder ändern.
 preserve_hostname: true
 
+# Fehlersuche per Kartenleser: Zustand alle 15 s in wol-trace.log auf der Boot-Partition
+# (bootcmd läuft früh bei jedem Start, solange cloud-init aktiv ist; firstboot.sh beendet es)
+bootcmd:
+  - [systemd-run, --unit=wol-boottrace, --no-block, /bin/bash, /boot/firmware/wol-server/deploy/boottrace.sh]
+
+# Ausgaben von cloud-init zusätzlich auf die Boot-Partition
+output:
+  all: "| tee -a /var/log/cloud-init-output.log /boot/firmware/wol-cloud-init.log"
+
 runcmd:
   - [bash, /boot/firmware/wol-server/deploy/firstboot.sh]

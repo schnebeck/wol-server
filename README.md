@@ -71,7 +71,7 @@ Was beim ersten Start passiert (`deploy/firstboot.sh`, gestartet von cloud-init)
 - Es setzt das GUI-Passwort aus den Einstellungen.
 - OpenVPN wird automatisch nachinstalliert, sobald der Pi über das WLAN Internet hat.
 - Danach löscht es Einstellungen, VPN-Schlüssel und Quellen von der Boot-Partition. Das Protokoll liegt dort als
-  `wol-setup.log`, auf dem Pi unter `/var/log/wol-firstboot.log`.
+  `wol-setup.log` (schon während der Einrichtung), auf dem Pi unter `/var/log/wol-firstboot.log`.
 - Bricht der Pi mittendrin ab (Stromausfall, Hänger), setzt er die Einrichtung beim nächsten Start fort
   (`wol-firstboot.service`).
 
@@ -200,21 +200,21 @@ sichern.
 
 ### Speicher sparen: `lowmem.sh`
 
-Stellt den Standard-Kernel von Raspberry Pi OS auf die 512 MB des Zero W ein. Das Image bringt die
-Kernel-Parameter und Firmware-Einstellungen schon mit, den Rest erledigt die Einrichtung beim ersten Start.
+Stellt Raspberry Pi OS auf die 512 MB des Zero W ein. Beim Image läuft es am Ende der Einrichtung, die
+Änderungen wirken nach dem anschließenden Neustart.
 
 | Maßnahme | Wirkung |
 |---|---|
 | `gpu_mem=16`, KMS-Grafiktreiber aus | ca. 48 MB mehr RAM für Linux |
-| `cma=16M` (statt 64 MB) | mehr Speicher für den Kernel; Kamera, Codecs und Grafik brauchen die Reserve nicht |
 | Kamera-, Video-Codec- und Audiotreiber gesperrt, Kamera-/Display-Erkennung aus | weniger Kernel-Module |
-| `audit=0`, keine Bildschirmkonsole (`console=tty1`) | weniger Kernel-Arbeit; die serielle Konsole bleibt |
 | Swap nur als zram (`/etc/rpi/swap.conf.d`), `vm.swappiness=100`, `vm.page-cluster=0` | keine Swap-Datei auf der SD-Karte |
 | `apt-daily`, `man-db` und weitere tägliche Timer aus | keine täglichen apt-Läufe, die auf dem Zero viel RAM und CPU brauchen |
 
 Ein eigener Kernel ist nicht nötig: Er brächte nur wenige MB und bekäme keine Updates über apt mehr.
-Speicher-Cgroups (für `MemoryMax` der Dienste), AppArmor und IPv6 bleiben aktiv. Vorher werden
-`config.txt` und `cmdline.txt` gesichert (`*.bak-<datum>`).
+AppArmor und IPv6 bleiben aktiv. Speicher-Cgroups schaltet die Firmware des Zero selbst ab (`cgroup_disable=memory`),
+`MemoryMax` der Dienste wirkt dort also nicht. Die Kernel-Parameter in
+`cmdline.txt` bleiben unverändert: Ein Image mit vorab geänderten Boot-Dateien (u. a. `cma=16M`, ohne
+`console=tty1`) startete auf dem Zero W nicht. Vorher wird `config.txt` gesichert (`config.txt.bak-<datum>`).
 
 ### Stromsparen: `lowpower.sh`
 
@@ -551,7 +551,7 @@ python3 -m unittest discover -s tests -t .   # Tests
 | VPN verbindet nicht | `journalctl -u openvpn-client@wol -e`; Zugangsdaten in `/etc/openvpn/client/wol.auth` prüfen |
 | VPN steht, GUI über VPN nicht erreichbar | Auf dem Server `client-to-client`/Routing prüfen; VPN-Subnetz in `allowed_networks`? |
 | Pi zeitweise weg | `journalctl -t wlan-watchdog`; Signal unter *System* prüfen (schlechter als −75 dBm: Pi näher an den Router oder Repeater nutzen) |
-| Image: Pi richtet sich nicht ein | Karte am PC öffnen und `wol-setup.log` auf der Boot-Partition lesen; fehlt sie, lief der Erststart nicht (Imager-OS-Anpassungen benutzt? Dann `user-data` ersetzt) |
+| Image: Pi richtet sich nicht ein | Karte am PC öffnen, Protokolle auf der Boot-Partition lesen (siehe unten) |
 | Pi startet unter Last von selbst neu | Netzteil prüfen (mind. 1,2 A, kurzes Kabel; kein Laptop-USB-Port). `vcgencmd get_throttled` ≠ `0x0` heißt Unterspannung |
 | Image: VPN kommt nicht | Erst nach dem WLAN: `journalctl -u wol-openvpn-pending` – OpenVPN wird installiert, sobald Internet da ist |
 | Hotspot erscheint nicht | `journalctl -u wol-wifi -e`; WLAN-Land gesetzt (`sudo raspi-config nonint do_wifi_country DE`)? `rfkill list` |
@@ -562,6 +562,23 @@ python3 -m unittest discover -s tests -t .   # Tests
 | Geräte bekommen keine Adresse | *Netzwerk → Übersicht*: unbekannt (freigeben)? Reservierung inaktiv? *Werkzeuge → Andere DHCP-Server suchen* – antwortet noch der alte? |
 | Namen werden nicht aufgelöst | Bekommen die Geräte den WOL-Server als DNS (*Einstellungen → DNS-Server für die Geräte*)? *DNS → Testabfrage* |
 | Übernehmen hängt bei „Wird ausgeführt …“ | `systemctl status wol-dns-apply.path wol-dns-apply.service` |
+
+### Protokolle auf der Boot-Partition (Kartenleser)
+
+Ist der Pi nicht erreichbar, lässt sich die Karte an jedem PC auslesen. Die Boot-Partition (`bootfs`, FAT)
+enthält:
+
+| Datei | Inhalt |
+|---|---|
+| `wol-boot.log` | Startbericht, drei Minuten nach jedem Start: Netz, Speicher, Dienste, Warnungen aus dem Journal |
+| `wol-boot.1.log` | Startbericht des vorigen Starts |
+| `wol-setup.log` | Einrichtung beim ersten Start, wird laufend geschrieben |
+| `wol-cloud-init.log` | Ausgaben von cloud-init beim ersten Start, vor der Einrichtung |
+| `wol-trace.log`, `wol-trace.1.log` | Ablaufverfolgung bis zum Ende der Einrichtung, alle 15 s: wartende systemd-Aufträge, Prozesse, Kernel- und Journal-Meldungen |
+
+Fehlen alle Dateien, kam der Pi nicht bis zum Linux-System. Ein Hinweis darauf: Die Partition `rootfs` ist noch
+so klein wie im Image (ca. 2 GB), weil sie erst beim ersten Start auf die Kartengröße wächst. Dann liegt es an
+`config.txt`/`cmdline.txt`, der Karte oder dem Netzteil.
 
 ## Deinstallation
 

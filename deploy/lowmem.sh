@@ -1,58 +1,40 @@
 #!/bin/bash
-# Stellt Kernel und Firmware eines Raspberry Pi Zero W (512 MB RAM) auf wenig Speicher ein.
-# Mehrfach ausführbar; geänderte Boot-Dateien werden vorher gesichert.
+# Stellt einen Raspberry Pi Zero W (512 MB RAM) auf wenig Speicherverbrauch ein.
+# Mehrfach ausführbar; config.txt wird vorher gesichert.
 #
-#   sudo ./deploy/lowmem.sh          auf dem Pi, danach neu starten
-#   ./deploy/lowmem.sh --boot DIR    nur config.txt und cmdline.txt in DIR (make-image.sh, ohne root)
+#   sudo ./deploy/lowmem.sh    danach neu starten (firstboot.sh ruft es auf und startet neu)
 #
-# Rückgängig: Block "# >>> wol-server lowmem" aus config.txt entfernen, cmdline.txt aus dem Backup
-# zurückspielen, die Dateien wol-server-lowmem* in /etc/modprobe.d, /etc/sysctl.d und
-# /etc/rpi/swap.conf.d löschen und die genannten Timer wieder aktivieren.
+# Die Kernel-Parameter (cmdline.txt) bleiben unverändert. Ein Image mit vorab geänderten Boot-Dateien
+# (gpu_mem=16, KMS aus, cma=16M, audit=0, ohne console=tty1) startete auf dem Zero W nicht bis zur
+# Einrichtung; deshalb wirkt alles erst nach dem Neustart am Ende der Einrichtung.
+#
+# Rückgängig: Block "# >>> wol-server lowmem" aus config.txt entfernen, die Dateien wol-server-lowmem*
+# in /etc/modprobe.d, /etc/sysctl.d und /etc/rpi/swap.conf.d löschen, die genannten Timer aktivieren.
 set -euo pipefail
 
-BOOT=""
-BACKUP=1
 case "${1:-}" in
-    --boot) BOOT="${2:?Verzeichnis fehlt}"; BACKUP=0 ;;
-    -h|--help) sed -n '2,10p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,12p' "$0"; exit 0 ;;
     "") ;;
     *) echo "Unbekannte Option: $1" >&2; exit 1 ;;
 esac
 say() { printf '\033[1;32m==>\033[0m %s\n' "$*"; }
 
-if [ -z "$BOOT" ]; then
-    [ "$(id -u)" -eq 0 ] || { echo "Bitte mit sudo ausführen." >&2; exit 1; }
-    BOOT=/boot/firmware
-    [ -f "$BOOT/config.txt" ] || BOOT=/boot
-fi
-for f in config.txt cmdline.txt; do
-    [ -f "$BOOT/$f" ] || { echo "$BOOT/$f nicht gefunden – ist das ein Raspberry Pi?" >&2; exit 1; }
-done
-
-# Neue Fassung erst fertig schreiben, dann austauschen: Ein Reset mitten im Schreiben hinterließ
-# sonst eine leere Datei auf der FAT-Partition.
-replace() {
-    if cmp -s "$1" "$2"; then
-        rm -f "$2"
-        echo "    $(basename "$1") unverändert"
-        return
-    fi
-    [ "$BACKUP" -eq 0 ] || cp -a "$1" "$1.bak-$(date +%Y%m%d-%H%M%S)"
-    sync
-    mv -f "$2" "$1"
-    sync
-    echo "    $(basename "$1") angepasst"
-}
+[ "$(id -u)" -eq 0 ] || { echo "Bitte mit sudo ausführen." >&2; exit 1; }
+CONFIG=/boot/firmware/config.txt
+[ -f "$CONFIG" ] || CONFIG=/boot/config.txt
+[ -f "$CONFIG" ] || { echo "config.txt nicht gefunden – ist das ein Raspberry Pi?" >&2; exit 1; }
 
 # ---------------------------------------------------------------- config.txt
 # Der Grafikchip bekommt 16 statt 64 MB (mehr RAM für Linux). Ohne KMS-Treiber, Audio sowie
 # Kamera- und Display-Erkennung lädt der Kernel deren Treiber gar nicht erst.
 say "Firmware: Speicheraufteilung und Treiber"
-NEW="$BOOT/config.txt.wol-neu"
+# Neue Fassung erst fertig schreiben, dann austauschen: Ein Reset mitten im Schreiben hinterließ
+# sonst eine leere config.txt auf der FAT-Partition.
+NEW="$CONFIG.wol-neu"
 {
     sed -e 's/^dtoverlay=vc4-kms-v3d/#&  # deaktiviert von wol-server lowmem/' \
         -e 's/^max_framebuffers=/#&/' \
-        -e '/^# >>> wol-server lowmem/,/^# <<< wol-server lowmem/d' "$BOOT/config.txt"
+        -e '/^# >>> wol-server lowmem/,/^# <<< wol-server lowmem/d' "$CONFIG"
     echo "# >>> wol-server lowmem"
     echo "[all]"
     echo "gpu_mem=16"
@@ -61,19 +43,14 @@ NEW="$BOOT/config.txt.wol-neu"
     echo "display_auto_detect=0"
     echo "# <<< wol-server lowmem"
 } > "$NEW"
-replace "$BOOT/config.txt" "$NEW"
-
-# ---------------------------------------------------------------- cmdline.txt
-# cma=16M:      Die CMA-Reserve (Device Tree: 64 MB) dient Kamera, Codecs und Grafik, die hier fehlen.
-# audit=0:      kein Kernel-Audit (AppArmor bleibt aktiv).
-# console=tty1: keine Bildschirmkonsole; die serielle Konsole bleibt für Notfälle.
-say "Kernel-Parameter"
-NEW="$BOOT/cmdline.txt.wol-neu"
-args=$(tr ' ' '\n' < "$BOOT/cmdline.txt" | grep -vE '^(console=tty1|cma=.*|audit=.*)?$' | tr '\n' ' ')
-printf '%scma=16M audit=0\n' "$args" > "$NEW"
-replace "$BOOT/cmdline.txt" "$NEW"
-
-[ "$BACKUP" -eq 1 ] || exit 0
+if cmp -s "$CONFIG" "$NEW"; then
+    rm -f "$NEW"
+else
+    cp -a "$CONFIG" "$CONFIG.bak-$(date +%Y%m%d-%H%M%S)"
+    sync
+    mv -f "$NEW" "$CONFIG"
+    sync
+fi
 
 # ---------------------------------------------------------------- Treiber
 say "Kamera-, Video- und Audiotreiber sperren"

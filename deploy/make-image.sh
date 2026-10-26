@@ -99,15 +99,6 @@ mdir -i "$part" ::/cmdline.txt >/dev/null 2>&1 || die "$OUT sieht nicht nach Ras
 stage=$(mktemp -d)
 trap 'rm -rf "$stage"' EXIT
 
-# Kernel-Parameter und Firmware schon im Image auf wenig Speicher einstellen: wirkt ab dem
-# ersten Start; den Rest von lowmem.sh erledigt firstboot.sh.
-say "Stelle Kernel und Firmware auf wenig Speicher ein"
-mkdir "$stage/boot"
-mcopy -i "$part" ::/config.txt ::/cmdline.txt "$stage/boot/"
-bash "$SRC/deploy/lowmem.sh" --boot "$stage/boot" >/dev/null
-mcopy -i "$part" -D o "$stage/boot/config.txt" "$stage/boot/cmdline.txt" ::/
-rm -rf "${stage:?}/boot"
-
 mkdir "$stage/wol-server"
 cp -r "$SRC/wolserver" "$SRC/deploy" "$SRC/README.md" "$stage/wol-server/"
 find "$stage" -name '__pycache__' -prune -exec rm -rf {} +
