@@ -1,6 +1,7 @@
 #!/bin/bash
 # Optimiert einen Raspberry Pi Zero W für den Headless-Dauerbetrieb mit wenig Strom
 # und wenig SD-Karten-Verschleiß. Mehrfach ausführbar; config.txt wird vorher gesichert.
+# Speicheraufteilung, Grafik-, Audio- und Kameratreiber regelt lowmem.sh.
 #
 #   sudo ./deploy/lowpower.sh [--led-off] [--keep-hdmi] [--keep-bluetooth]
 #
@@ -37,19 +38,9 @@ NEW="$CONFIG.wol-neu"
 cp "$CONFIG" "$NEW"
 sed -i '/^# >>> wol-server lowpower/,/^# <<< wol-server lowpower/d' "$NEW"
 
-if [ "$KEEP_HDMI" -eq 0 ]; then
-    # Headless braucht keinen KMS-Grafiktreiber: spart RAM und erlaubt das Abschalten von HDMI.
-    sed -i 's/^dtoverlay=vc4-kms-v3d/#dtoverlay=vc4-kms-v3d  # deaktiviert von wol-server lowpower/' "$NEW"
-    sed -i 's/^max_framebuffers=/#max_framebuffers=/' "$NEW"
-fi
-
 {
     echo "# >>> wol-server lowpower"
     echo "[all]"
-    echo "dtparam=audio=off"
-    echo "camera_auto_detect=0"
-    echo "display_auto_detect=0"
-    [ "$KEEP_HDMI" -eq 0 ] && echo "gpu_mem=16"
     [ "$KEEP_BT" -eq 0 ] && echo "dtoverlay=disable-bt"
     if [ "$LED_OFF" -eq 1 ]; then
         echo "dtparam=act_led_trigger=none"

@@ -23,7 +23,7 @@ GUI_PASSWORD=
 WIFI_SSID=
 WIFI_PASSWORD=
 
-# Stromsparmodus: HDMI, Bluetooth und Audio aus. Danach startet der Pi einmal neu.
+# Stromsparmodus: HDMI und Bluetooth aus.
 LOWPOWER=yes
 
 # Wartungszugang. Standard: kein Login, das Gerät braucht keinen.

@@ -58,7 +58,7 @@ mit einem beliebigen Programm auf die Karte schreiben:
 - **balenaEtcher** oder `xzcat wol-server.img.xz | sudo dd of=/dev/sdX bs=4M conv=fsync`
 
 Karte in den Pi, Strom an. Beim ersten Start richtet sich der Pi selbst ein, das dauert auf dem Zero W etwa
-5–10 Minuten. Danach startet er einmal neu (Stromsparmodus) und öffnet den Hotspot **`WOL-Setup-XXXX`**, über
+5–10 Minuten. Danach startet er einmal neu (Speicher- und Stromsparmodus) und öffnet den Hotspot **`WOL-Setup-XXXX`**, über
 den das Heim-WLAN gewählt wird (siehe [WLAN einrichten](#wlan-einrichten-und-wechseln-einrichtungs-hotspot)).
 War in den Einstellungen ein WLAN eingetragen, ist er direkt unter `http://wol.local/` erreichbar.
 Solange die Einrichtung läuft, blinkt die grüne LED schnell (siehe [Status-LED](#status-led)).
@@ -112,6 +112,7 @@ scp -r WOL-Server <benutzer>@wol.local:~/
 ssh <benutzer>@wol.local
 cd ~/WOL-Server
 sudo ./deploy/install.sh --openvpn ~/client.ovpn   # fragt nach GUI-Passwort (und ggf. VPN-Zugang)
+sudo ./deploy/lowmem.sh                            # optional, empfohlen
 sudo ./deploy/lowpower.sh                          # optional, empfohlen – danach: sudo reboot
 ```
 
@@ -195,13 +196,30 @@ Die Muster laufen im Kernel und kosten keine CPU. Abschalten mit `"status_led": 
 Start öffnet er sofort den Hotspot. Die SD-Karte lässt sich in diesem Zustand auch als Image für weitere Geräte
 sichern.
 
+### Speicher sparen: `lowmem.sh`
+
+Stellt den Standard-Kernel von Raspberry Pi OS auf die 512 MB des Zero W ein. Das Image bringt die
+Kernel-Parameter und Firmware-Einstellungen schon mit, den Rest erledigt die Einrichtung beim ersten Start.
+
+| Maßnahme | Wirkung |
+|---|---|
+| `gpu_mem=16`, KMS-Grafiktreiber aus | ca. 48 MB mehr RAM für Linux |
+| `cma=16M` (statt 64 MB) | mehr Speicher für den Kernel; Kamera, Codecs und Grafik brauchen die Reserve nicht |
+| Kamera-, Video-Codec- und Audiotreiber gesperrt, Kamera-/Display-Erkennung aus | weniger Kernel-Module |
+| `audit=0`, keine Bildschirmkonsole (`console=tty1`) | weniger Kernel-Arbeit; die serielle Konsole bleibt |
+| Swap nur als zram (`/etc/rpi/swap.conf.d`), `vm.swappiness=100`, `vm.page-cluster=0` | keine Swap-Datei auf der SD-Karte |
+| `apt-daily`, `man-db` und weitere tägliche Timer aus | keine täglichen apt-Läufe, die auf dem Zero viel RAM und CPU brauchen |
+
+Ein eigener Kernel ist nicht nötig: Er brächte nur wenige MB und bekäme keine Updates über apt mehr.
+Speicher-Cgroups (für `MemoryMax` der Dienste), AppArmor und IPv6 bleiben aktiv. Vorher werden
+`config.txt` und `cmdline.txt` gesichert (`*.bak-<datum>`).
+
 ### Stromsparen: `lowpower.sh`
 
 | Maßnahme | Wirkung |
 |---|---|
-| HDMI aus, KMS-Grafiktreiber aus, `gpu_mem=16` | ca. 25 mA weniger, mehr RAM |
+| HDMI aus | ca. 25 mA weniger |
 | Bluetooth aus (`disable-bt`, `hciuart`, `bluetooth`) | weniger Strom, weniger Dienste |
-| Audio, Kamera-/Display-Autoerkennung aus | weniger Treiber |
 | `triggerhappy`, `ModemManager` aus | weniger Hintergrundprozesse |
 | Journal nur im RAM, SD-Swap aus | schont die SD-Karte |
 | `--led-off` | grüne Aktivitäts-LED im Normalbetrieb aus (Statusmuster bleiben) |
@@ -452,7 +470,7 @@ Dateien:
 /etc/wol-dns/                    erzeugte dnsmasq-Konfiguration (nicht von Hand bearbeiten)
 /var/lib/wol-dns/                Leases und Lease-Ereignisse von dnsmasq
 /var/log/wol-firstboot.log       Protokoll der Einrichtung beim ersten Start (Variante A)
-/opt/wol-server/deploy/          Skripte für spätere Änderungen (openvpn-setup.sh, lowpower.sh, …)
+/opt/wol-server/deploy/          Skripte für spätere Änderungen (openvpn-setup.sh, lowmem.sh, lowpower.sh, …)
 /etc/NetworkManager/system-connections/   gespeicherte WLANs (NetworkManager)
 /etc/NetworkManager/dnsmasq-shared.d/60-wol-server-captive.conf   DNS-Umleitung im Hotspot
 ```
