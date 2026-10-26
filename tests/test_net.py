@@ -417,11 +417,14 @@ class DnsClientTest(unittest.TestCase):
                                  "--pid-file=%s/pid" % tmp], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         self.addCleanup(proc.wait)
         self.addCleanup(proc.terminate)
-        for _ in range(30):
+        deadline = time.monotonic() + 30  # unter Last startet dnsmasq langsam
+        while True:
             try:
                 result = dnsclient.lookup("pc.home.arpa", "127.0.0.1", port, timeout=0.5)
                 break
             except dnsclient.DnsError:
+                if time.monotonic() > deadline:
+                    self.fail("dnsmasq antwortet nicht")
                 time.sleep(0.1)
         self.assertEqual([(a["type"], a["data"]) for a in result["answers"]],
                          [("CNAME", "office-pc.home.arpa"), ("A", "192.168.1.9")])
@@ -504,61 +507,75 @@ class ManagerTest(unittest.TestCase):
         self.assertEqual((cfg["server"]["ip"], cfg["dhcp"]["gateway"], cfg["dns"]["upstream"]),
                          ("192.168.1.8", "192.168.1.1", ["192.168.1.1"]))
 
-    def test_draft_apply_cycle(self):
-        self.mgr.settings({"settings": {"dns": {"enabled": True}}})
-        saved = self.mgr.reservation_save({"reservation": {"mac": "00:d8:61:d7:1d:36", "ip": "192.168.1.9", "name": "Office"}})
-        rid = saved["reservation"]["id"]
-        status = self.mgr.status()
-        self.assertEqual(status["pending"], ["DNS: aus → an", "Reservierung neu: office (192.168.1.9)"])
-        self.assertFalse(status["running"])
-        res = self.mgr.apply({"client": "192.168.1.12"})
-        self.assertIn("2 Änderungen", res["message"])
+    def test_direct_changes(self):
+        res = self.mgr.settings({"settings": {"dns": {"enabled": True}}, "client": "192.168.1.12"})
+        self.assertEqual(res["changes"], ["DNS: aus → an"])
         request = json.load(open(self.mgr.path("requests", res["request"] + ".json")))
         name = self.mgr.active()["server"]["name"]  # aus dem Hostnamen des Rechners
         self.assertEqual((request["action"], request["enabled"], request["expect"], request["test_name"]),
                          ("apply", True, "192.168.1.8", "%s.home.arpa" % name))
-        staged = open(os.path.join(request["staging"], "hosts.dhcp")).read()
-        self.assertIn("00:d8:61:d7:1d:36,192.168.1.9,office", staged)
         self.assertTrue(self.mgr.status()["running"])
+        config = self.mgr.config()
+        self.assertTrue(config["config"]["dns"]["enabled"])  # die GUI zeigt schon den beauftragten Stand
+        self.assertEqual(config["pending"], [])
         with self.assertRaises(NetError):  # zweite Änderung während der ersten
-            self.mgr.apply()
+            self.mgr.reservation_save({"reservation": {"mac": "00:d8:61:d7:1d:36", "ip": "192.168.1.9", "name": "Office"}})
         self.finish("ok")
         status = self.mgr.status()
-        self.assertEqual(status["pending"], [])
         self.assertTrue(status["dns_enabled"])
         self.assertEqual(status["last_change"]["request"], res["request"])
         self.assertEqual(status["last_change"]["client"], "192.168.1.12")
-        self.assertEqual(self.mgr.active()["reservations"][0]["id"], rid)
         self.assertFalse(os.path.exists(request["staging"]))
+
+        saved = self.mgr.reservation_save({"reservation": {"mac": "00:d8:61:d7:1d:36", "ip": "192.168.1.9", "name": "Office"}})
+        request = json.load(open(self.mgr.path("requests", saved["request"] + ".json")))
+        self.assertIn("00:d8:61:d7:1d:36,192.168.1.9,office", open(os.path.join(request["staging"], "hosts.dhcp")).read())
+        self.finish("ok")
+        self.assertEqual(self.mgr.active()["reservations"][0]["id"], saved["reservation"]["id"])
         history = self.mgr.history()["history"]
-        self.assertEqual(len(history), 1)
+        self.assertEqual(len(history), 2)
         self.assertIn("Reservierung neu: office (192.168.1.9)", history[0]["changes"])
 
-    def test_failed_apply_keeps_draft(self):
+        # Unverändert: kein Auftrag. Vorschau: nur die Liste der Änderungen.
+        self.assertNotIn("request", self.mgr.settings({"settings": {"dns": {"enabled": True}}}))
+        preview = self.mgr.settings({"settings": {"dhcp": {"lease_time": "1h"}}, "preview": True})
+        self.assertEqual((preview["changes"], preview["draft"]), (["Lease-Zeit: 12 h → 1 h"], False))
+        self.assertEqual(os.listdir(self.mgr.path("requests")), [])
+        self.assertEqual(self.mgr.active()["dhcp"]["lease_time"], 43200)
+
+    def test_failed_change_keeps_active(self):
         self.mgr.settings({"settings": {"dns": {"enabled": True}}})
-        self.mgr.apply()
         self.finish("failed", "dnsmasq lehnt ab")
         status = self.mgr.status()
         self.assertEqual(status["job"]["state"], "failed")
-        self.assertEqual(status["pending"], ["DNS: aus → an"])
+        self.assertEqual(status["pending"], [])
         self.assertFalse(self.mgr.active()["dns"]["enabled"])
+        self.assertFalse(self.mgr.config()["config"]["dns"]["enabled"])
 
-    def test_discard_and_noop(self):
-        self.mgr.settings({"settings": {"dhcp": {"lease_time": "1h"}}})
-        self.assertTrue(os.path.exists(self.mgr.path("draft.json")))
-        self.mgr.settings({"settings": {"dhcp": {"lease_time": "12h"}}})  # zurück auf den aktiven Stand
-        self.assertFalse(os.path.exists(self.mgr.path("draft.json")))
-        with self.assertRaises(NetError):
-            self.mgr.apply()
-        self.mgr.settings({"settings": {"dhcp": {"lease_time": "1h"}}})
+    def test_open_draft_collects_changes(self):
+        export = self.mgr.export()["export"]
+        export["config"]["dhcp"]["lease_time"] = 3600
+        self.mgr.restore({"data": export})
+        self.assertEqual(self.mgr.status()["pending"], ["Lease-Zeit: 12 h → 1 h"])
+        res = self.mgr.record_save({"record": {"type": "host", "name": "nas", "value": "192.168.1.5"}})
+        self.assertTrue(res["draft"])
+        self.assertTrue(self.mgr.settings({"settings": {"dns": {"ttl": 120}}, "preview": True})["draft"])
+        self.mgr.settings({"settings": {"dhcp": {"lease_time": "12h"}}})
+        self.assertEqual(self.mgr.status()["pending"], ["DNS-Eintrag neu: nas → 192.168.1.5"])
+        self.assertEqual(os.listdir(self.mgr.path("requests")), [])
         self.mgr.discard()
         self.assertEqual(self.mgr.status()["pending"], [])
+        with self.assertRaises(NetError):
+            self.mgr.apply()
 
     def test_records_and_errors(self):
         rec = self.mgr.record_save({"record": {"type": "host", "name": "nas", "value": "192.168.1.5"}})["record"]
+        self.finish()
         self.mgr.record_save({"record": dict(rec, value="192.168.1.6")})
-        self.assertEqual(self.mgr.working()["records"][0]["value"], "192.168.1.6")
+        self.finish()
+        self.assertEqual(self.mgr.active()["records"][0]["value"], "192.168.1.6")
         self.mgr.record_delete({"id": rec["id"]})
+        self.finish()
         with self.assertRaises(NetError):
             self.mgr.record_delete({"id": rec["id"]})
         with self.assertRaises(NetError):
@@ -569,7 +586,6 @@ class ManagerTest(unittest.TestCase):
                             "1700000000.1 wol dnsmasq-dhcp[1]: 7 DHCPDISCOVER(wlan0) 5a:1f:3c:00:00:01 ignored\n"
                             "1700000001.0 wol dnsmasq-dhcp[1]: DHCPDISCOVER(wlan0) 00:11:22:33:44:55 ignored\n")
         self.mgr.settings({"settings": {"dhcp": {"enabled": True}, "dns": {"enabled": True}}})
-        self.mgr.apply()
         self.finish()
         unknown = {u["mac"]: u for u in self.mgr.unknown()["unknown"]}
         phone = unknown["5a:1f:3c:00:00:01"]
@@ -578,7 +594,9 @@ class ManagerTest(unittest.TestCase):
         self.assertEqual({phone["suggested_ip"], unknown["00:11:22:33:44:55"]["suggested_ip"]},
                          {"192.168.1.11", "192.168.1.12"})
         # Entwurf mit anderer Änderung darf die Freigabe nicht blockieren
-        self.mgr.settings({"settings": {"dhcp": {"lease_time": "1d"}}})
+        export = self.mgr.export()["export"]
+        export["config"]["dhcp"]["lease_time"] = 86400
+        self.mgr.restore({"data": export})
         res = self.mgr.approve({"mac": phone["mac"], "name": phone["suggested_name"], "ip": phone["suggested_ip"]})
         self.assertIn("annas-iphone", res["message"])
         request = json.load(open(self.mgr.path("requests", res["request"] + ".json")))
@@ -601,14 +619,16 @@ class ManagerTest(unittest.TestCase):
             f.write("%d 00:d8:61:d7:1d:36 192.168.1.9 office-pc *\n%d 5a:1f:3c:00:00:01 192.168.1.40 * *\n"
                     % (self.now + 3600, self.now + 60))
         with open(os.path.join(self.data, "lease-events.log"), "w") as f:
-            f.write("%d add 00:d8:61:d7:1d:36 192.168.1.9 office-pc\n" % (self.now - 100))
+            seen = self.now - 100
+            f.write("%d add 00:d8:61:d7:1d:36 192.168.1.9 office-pc\n" % seen)
         self.mgr.reservation_save({"reservation": {"mac": "00:d8:61:d7:1d:36", "ip": "192.168.1.9", "name": "office"}})
+        self.finish()
         leases = self.mgr.leases()["leases"]
         self.assertEqual([(l["ip"], l["name"], bool(l["reservation"])) for l in leases],
                          [("192.168.1.9", "office", True), ("192.168.1.40", "", False)])
         self.assertTrue(leases[1]["private"])
         meta = self.mgr.config()["meta"]
-        self.assertEqual(meta["last_seen"]["00:d8:61:d7:1d:36"], self.now - 100)
+        self.assertEqual(meta["last_seen"]["00:d8:61:d7:1d:36"], seen)
         self.assertEqual(meta["next_ip"], "192.168.1.11")
         self.assertEqual(meta["network"], "192.168.1.0/24")
         res = self.mgr.release({"mac": "5a:1f:3c:00:00:01"})
@@ -628,15 +648,18 @@ class ManagerTest(unittest.TestCase):
         export = self.mgr.export()["export"]
         self.assertEqual(len(export["config"]["reservations"]), 4)
         self.mgr.reservation_delete({"id": export["config"]["reservations"][0]["id"]})
+        self.finish()
+        self.assertEqual(len(self.mgr.active()["reservations"]), 3)
         self.mgr.restore({"data": export})
-        self.assertEqual(self.mgr.status()["pending"], [])  # entspricht wieder dem aktiven Stand
+        self.assertEqual(len(self.mgr.status()["pending"]), 1)  # die gelöschte Reservierung kommt zurück
+        self.mgr.apply()
+        self.finish()
         with self.assertRaises(NetError):
             self.mgr.restore({"data": {"config": {"dns": {"domain": "x.local"}}}})
         self.mgr.settings({"settings": {"dhcp": {"lease_time": "1h"}}})
-        self.mgr.apply()
         self.finish()
         history = self.mgr.history()["history"]
-        self.assertEqual(len(history), 2)
+        self.assertEqual(len(history), 4)
         self.mgr.history_restore({"id": history[1]["id"]})
         self.assertEqual(self.mgr.status()["pending"], ["Lease-Zeit: 1 h → 10 min"])
 
@@ -644,7 +667,6 @@ class ManagerTest(unittest.TestCase):
         self.mgr.wifi_changed("client")
         self.assertEqual(os.listdir(self.mgr.path("requests")), [])  # erste Meldung, dnsmasq aus
         self.mgr.settings({"settings": {"dns": {"enabled": True}}})
-        self.mgr.apply()
         self.finish()
         self.mgr.wifi_changed("hotspot")
         self.mgr.wifi_changed("hotspot")
@@ -665,7 +687,6 @@ class ManagerTest(unittest.TestCase):
 
     def test_warnings(self):
         self.mgr.settings({"settings": {"dhcp": {"enabled": True}}})
-        self.mgr.apply()
         self.finish()
         json.dump({"ts": self.now, "ok": True, "servers": [{"server_id": "192.168.1.10", "offered": "192.168.1.8"}]},
                   open(self.mgr.path("probe.json"), "w"))
@@ -883,36 +904,42 @@ class SocketApiTest(unittest.TestCase):
             api.app.config["wifi_socket"] = path
             status, data = api.call("GET", "/api/net")
             self.assertEqual((status, data["dns_enabled"], data["pending"]), (200, False, []))
+            def finish_jobs():  # wol-dns-apply.service spielen
+                for name in os.listdir(net.path("requests")):
+                    req = json.load(open(net.path("requests", name)))
+                    json.dump({"id": req["id"], "action": "apply", "state": "ok", "message": "ok", "ts": 1},
+                              open(net.path("jobs", name), "w"))
+                    os.remove(net.path("requests", name))
+
             status, data = api.call("POST", "/api/net/reservations", {"mac": "00:d8:61:d7:1d:36", "ip": "192.168.1.9", "name": "office"})
             self.assertEqual(status, 200, data)
+            self.assertIn("request", data)
             rid = data["reservation"]["id"]
+            finish_jobs()
             status, data = api.call("PUT", "/api/net/reservations/%s" % rid, {"mac": "00:d8:61:d7:1d:36", "ip": "192.168.1.19", "name": "office"})
             self.assertEqual(data["reservation"]["ip"], "192.168.1.19")
+            finish_jobs()
             status, data = api.call("POST", "/api/net/reservations", {"mac": "kaputt", "ip": "192.168.1.9"})
             self.assertEqual(status, 400)
             self.assertIn("MAC", data["error"])
             api.call("POST", "/api/devices", {"name": "Office", "mac": "00:D8:61:D7:1D:36"})
             status, data = api.call("GET", "/api/net/config")
             self.assertEqual(data["devices"]["00:d8:61:d7:1d:36"]["name"], "Office")
-            self.assertEqual(data["pending"], ["Reservierung neu: office (192.168.1.19)"])
+            self.assertEqual((data["pending"], data["config"]["reservations"][0]["ip"]), ([], "192.168.1.19"))
+            status, data = api.call("POST", "/api/net/settings/preview", {"dns": {"enabled": True}})
+            self.assertEqual(data["changes"], ["DNS: aus → an"])
+            self.assertEqual(api.call("GET", "/api/net")[1]["dns_enabled"], False)
             status, data = api.call("PUT", "/api/net/settings", {"dns": {"enabled": True}})
-            self.assertTrue(data["config"]["dns"]["enabled"])
-            status, data = api.call("POST", "/api/net/apply")
             self.assertEqual(status, 200, data)
-            # wol-dns-apply.service spielen
-            for name in os.listdir(net.path("requests")):
-                req = json.load(open(net.path("requests", name)))
-                json.dump({"id": req["id"], "action": "apply", "state": "ok", "message": "ok", "ts": 1},
-                          open(net.path("jobs", name), "w"))
-                os.remove(net.path("requests", name))
+            finish_jobs()
             status, data = api.call("GET", "/api/net")
             self.assertTrue(data["dns_enabled"])
             status, events = api.call("GET", "/api/events")
             net_events = [e for e in events["events"] if e["action"] == "net"]
-            self.assertEqual(len(net_events), 1)
-            self.assertIn("DNS: aus → an", net_events[0]["message"])
+            self.assertTrue(any("DNS: aus → an" in e["message"] for e in net_events))
+            count = len(net_events)
             api.call("GET", "/api/net")  # nicht doppelt protokollieren
-            self.assertEqual(len([e for e in api.call("GET", "/api/events")[1]["events"] if e["action"] == "net"]), 1)
+            self.assertEqual(len([e for e in api.call("GET", "/api/events")[1]["events"] if e["action"] == "net"]), count)
             status, data = api.call("POST", "/api/net/import", {"text": DHCPD_CONF})
             self.assertEqual(status, 200)
             status, data = api.call("POST", "/api/net/import/commit", {"preview": data["preview"]})

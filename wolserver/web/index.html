@@ -279,9 +279,9 @@
             </div>
             <p class="form-error" hidden></p>
             <div class="settings-foot">
-              <span class="muted small">Gespeichert wird als Entwurf – wirksam erst mit „Übernehmen“.</span>
+              <span class="muted small" id="settings-foot"></span>
               <button type="button" class="btn ghost" id="net-settings-reset">Zurücksetzen</button>
-              <button type="submit" class="btn primary">Speichern</button>
+              <button type="submit" class="btn primary" id="settings-submit">Prüfen</button>
             </div>
           </form>
         </div>
@@ -721,7 +721,7 @@ echo "$USER ALL=(root) NOPASSWD: /usr/bin/systemctl suspend, /usr/bin/systemctl 
       <button type="button" class="btn danger ghost" id="res-delete">Löschen</button>
       <span class="spacer"></span>
       <button type="button" class="btn ghost" data-close>Abbrechen</button>
-      <button type="submit" class="btn primary">Speichern</button>
+      <button type="submit" class="btn primary" id="res-submit">Übernehmen</button>
     </footer>
   </form>
 </dialog>
@@ -765,7 +765,7 @@ echo "$USER ALL=(root) NOPASSWD: /usr/bin/systemctl suspend, /usr/bin/systemctl 
       <button type="button" class="btn danger ghost" id="rec-delete">Löschen</button>
       <span class="spacer"></span>
       <button type="button" class="btn ghost" data-close>Abbrechen</button>
-      <button type="submit" class="btn primary">Speichern</button>
+      <button type="submit" class="btn primary" id="rec-submit">Übernehmen</button>
     </footer>
   </form>
 </dialog>
@@ -840,7 +840,7 @@ echo "$USER ALL=(root) NOPASSWD: /usr/bin/systemctl suspend, /usr/bin/systemctl 
   <form method="dialog" class="dialog-body">
     <div class="dialog-content">
       <h2 id="confirm-title"></h2>
-      <p id="confirm-text" class="muted"></p>
+      <div id="confirm-text" class="muted"></div>
     </div>
     <footer class="dialog-foot">
       <span class="spacer"></span>
