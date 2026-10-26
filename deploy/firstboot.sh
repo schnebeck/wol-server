@@ -21,8 +21,13 @@ STATUS="FEHLGESCHLAGEN"
 MARKER=/run/wol-firstboot  # solange er existiert, blinkt die LED schnell (auch über wol-wifi)
 RETRY_UNIT=/etc/systemd/system/wol-firstboot.service
 
-exec > >(tee -a "$LOG") 2>&1
-log() { printf '[%s] %s\n' "$(date '+%F %T')" "$*"; }
+# Das Protokoll entsteht gleich auch auf der Boot-Partition: Hängt die Einrichtung, lässt es sich
+# über einen Kartenleser lesen. finish() schreibt am Ende die bereinigte Fassung.
+exec > >(tee -a "$LOG" "$BOOT/wol-setup.log") 2>&1
+log() {
+    printf '[%s] %s\n' "$(date '+%F %T')" "$*"
+    sync -f "$BOOT/wol-setup.log" 2>/dev/null
+}
 
 # Status-LED: "fast" = schnelles Blinken, "normal" = Standardanzeige (SD-Zugriffe)
 led() {
@@ -42,6 +47,7 @@ led() {
 
 # shellcheck disable=SC2317  # wird über trap aufgerufen
 finish() {
+    systemctl stop wol-boottrace.service >/dev/null 2>&1   # Ablaufverfolgung aus user-data
     # Geheimnisse von der FAT-Partition entfernen – auch wenn etwas schiefging
     rm -f "$BOOT/wol-setup.txt" "$BOOT/openvpn.ovpn" "$BOOT/openvpn.auth" "$BOOT/ssh_authorized_keys"
     rm -rf "$SRC_BOOT" "$WORK"

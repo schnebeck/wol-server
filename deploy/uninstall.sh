@@ -3,8 +3,8 @@
 set -euo pipefail
 [ "$(id -u)" -eq 0 ] || { echo "Bitte mit sudo ausführen." >&2; exit 1; }
 
-systemctl disable --now wol-server.service 2>/dev/null || true
-rm -f /etc/systemd/system/wol-server.service /usr/local/bin/wol-server /etc/sysctl.d/60-wol-server.conf
+systemctl disable --now wol-server.service wol-bootlog.timer 2>/dev/null || true
+rm -f /etc/systemd/system/wol-server.service /etc/systemd/system/wol-bootlog.service /etc/systemd/system/wol-bootlog.timer /usr/local/bin/wol-server /etc/sysctl.d/60-wol-server.conf
 systemctl disable --now wol-wlan-watchdog.timer 2>/dev/null || true
 rm -f /etc/systemd/system/wol-wlan-watchdog.service /etc/systemd/system/wol-wlan-watchdog.timer \
       /usr/local/sbin/wol-wlan-watchdog /etc/default/wol-wlan-watchdog
