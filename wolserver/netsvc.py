@@ -267,7 +267,7 @@ class NetManager:
     def _busy_check(self):
         running, _, _ = self._job_state()
         if running:
-            raise NetError("Es läuft noch eine Änderung – bitte einen Moment warten.")
+            raise NetError("Eine Änderung wird bereits ausgeführt. Bitte kurz warten.")
 
     def _apply(self, cfg, client="", from_draft=True, note=""):
         cfg = netcfg.validate_config(cfg)
@@ -350,16 +350,16 @@ class NetManager:
             probe = _read_json(self.path("probe.json"))
             warnings = []
             if server["hotspot"]:
-                warnings.append("Einrichtungs-Hotspot aktiv – DHCP und DNS sind solange pausiert.")
+                warnings.append("Einrichtungs-Hotspot aktiv: DHCP und DNS sind pausiert.")
             if active["dhcp"]["enabled"] and server["method"] == "auto":
-                warnings.append("DHCP ist an, aber der WOL-Server holt seine eigene Adresse noch per DHCP. "
-                                "Bitte unter Einstellungen → Server eine feste Adresse setzen.")
+                warnings.append("DHCP ist eingeschaltet, der WOL-Server bezieht seine eigene Adresse aber per DHCP. "
+                                "Feste Adresse setzen unter Einstellungen → Server.")
             if active["dhcp"]["enabled"] and server["address"] and server["address"] != active["server"]["ip"]:
-                warnings.append("Der WOL-Server hat gerade %s, eingestellt ist %s." % (server["address"], active["server"]["ip"]))
+                warnings.append("Aktuelle Adresse des WOL-Servers: %s, eingestellt: %s." % (server["address"], active["server"]["ip"]))
             if probe and probe.get("servers"):
                 others = [s for s in probe["servers"] if (s.get("server_id") or s.get("source")) != active["server"]["ip"]]
                 if others and active["dhcp"]["enabled"]:
-                    warnings.append("Ein weiterer DHCP-Server antwortet: %s – zwei DHCP-Server stören sich gegenseitig."
+                    warnings.append("Weiterer DHCP-Server im Netz: %s. Zwei DHCP-Server stören sich gegenseitig."
                                     % ", ".join(s.get("server_id") or s.get("source") for s in others))
             last_change = None
             names = sorted(os.listdir(self.path("history")))
@@ -523,7 +523,7 @@ class NetManager:
                 raise NetError("Es gibt keine Änderungen zu übernehmen.")
             request_id, changes = self._apply(draft, args.get("client", ""))
             return {"ok": True, "request": request_id, "changes": changes,
-                    "message": ("1 Änderung wird übernommen …" if len(changes) == 1
+                    "message": ("Eine Änderung wird übernommen …" if len(changes) == 1
                                 else "%d Änderungen werden übernommen …" % len(changes))}
 
     def _apply_direct(self, mutate, client, note):
@@ -553,7 +553,7 @@ class NetManager:
 
             request_id, _ = self._apply_direct(mutate, args.get("client", ""), "Freigegeben: %s (%s)" % (item["name"], item["ip"]))
             return {"ok": True, "request": request_id, "reservation": item,
-                    "message": "%s wird freigegeben – das Gerät bekommt %s beim nächsten Versuch." % (item["name"] or mac, item["ip"])}
+                    "message": "%s wird freigegeben und erhält %s bei der nächsten Anfrage." % (item["name"] or mac, item["ip"])}
 
     def ignore(self, args):
         with self.lock:
@@ -632,7 +632,7 @@ class NetManager:
                                              bool(args.get("take_settings", True)))
             self._save_draft(cfg)
             return {"ok": True, "stats": stats,
-                    "message": "%d neu, %d aktualisiert, %d übersprungen – bitte prüfen und übernehmen."
+                    "message": "%d neu, %d aktualisiert, %d übersprungen (Entwurf)."
                                % (stats["added"], stats["updated"], stats["skipped"])}
 
     def export(self, args=None):
@@ -646,7 +646,7 @@ class NetManager:
                 data = data["config"]
             cfg = netcfg.validate_config(data)
             self._save_draft(cfg)
-            return {"ok": True, "message": "Gesicherte Konfiguration geladen – bitte prüfen und übernehmen."}
+            return {"ok": True, "message": "Gesicherte Konfiguration als Entwurf geladen."}
 
     def history(self, args=None):
         with self.lock:
@@ -664,7 +664,7 @@ class NetManager:
                 entry = _read_json(self.path("history", name))
                 if entry and entry.get("id") == args.get("id"):
                     self._save_draft(entry["config"])
-                    return {"ok": True, "message": "Stand vom %s als Entwurf geladen – bitte prüfen und übernehmen."
+                    return {"ok": True, "message": "Stand vom %s als Entwurf geladen."
                                                    % time.strftime("%d.%m. %H:%M", time.localtime(entry["ts"]))}
             raise NetError("Version nicht gefunden")
 

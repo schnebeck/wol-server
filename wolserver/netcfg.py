@@ -285,7 +285,7 @@ def validate_config(data):
     if not valid_domain(n["domain"]) or "." not in n["domain"]:
         raise NetError("Domäne ungültig: %s (z. B. home.arpa)" % n["domain"])
     if n["domain"].endswith(".local") or n["domain"] == "local":
-        raise NetError("Domänen unter .local sind für mDNS reserviert – bitte z. B. home.arpa verwenden")
+        raise NetError("Domänen unter .local sind für mDNS reserviert (Alternative z. B. home.arpa)")
     n["upstream"] = _ip_list(n["upstream"], "Upstream-DNS")
     n["ttl"] = _int(n["ttl"], "TTL", 0, 86400)
     n["cache_size"] = _int(n["cache_size"], "Cache-Größe", 0, 10000)
@@ -384,7 +384,7 @@ def check_conflicts(cfg):
             raise NetError("IP %s gehört dem WOL-Server selbst (%s)" % (r["ip"], label))
         ips[r["ip"]] = label
         if rng and rng[0] <= ipaddress.IPv4Address(r["ip"]) <= rng[1]:
-            raise NetError("IP %s von %s liegt im dynamischen Bereich – bitte außerhalb reservieren" % (r["ip"], label))
+            raise NetError("IP %s von %s liegt im dynamischen Bereich; Reservierungen müssen außerhalb liegen" % (r["ip"], label))
         if net is not None and ipaddress.IPv4Address(r["ip"]) not in net:
             raise NetError("IP %s von %s liegt nicht im Netz %s" % (r["ip"], label, net))
         if r["name"]:
@@ -410,8 +410,8 @@ def check_conflicts(cfg):
             target = rec["value"]
             short = target[: -len(domain) - 1] if target.endswith("." + domain) else target
             if short not in local:
-                raise NetError("Alias „%s“ zeigt auf „%s“ – das Ziel muss ein lokaler Name sein "
-                               "(Reservierung, Eintrag oder der WOL-Server)" % (rec["name"], target))
+                raise NetError("Alias „%s“: Ziel „%s“ ist kein lokaler Name "
+                               "(Reservierung, Eintrag oder WOL-Server)" % (rec["name"], target))
             if short == rec["name"]:
                 raise NetError("Alias „%s“ zeigt auf sich selbst" % rec["name"])
     return True
@@ -882,7 +882,7 @@ def annotate_import(cfg, preview, server_mac=None):
     ips = {r["ip"]: r for r in cfg["reservations"]}
     for item in preview.get("reservations") or []:
         if item["ip"] and (item["ip"] == server_ip or (server_mac and item["mac"] == server_mac)):
-            item["problems"].append("das ist der WOL-Server selbst – er bekommt eine feste Adresse statt einer Reservierung")
+            item["problems"].append("WOL-Server selbst: feste Adresse statt Reservierung")
         elif item["ip"] and net is not None and ipaddress.IPv4Address(item["ip"]) not in net:
             item["problems"].append("IP liegt nicht im Netz %s" % net)
         if item["mac"] in existing:

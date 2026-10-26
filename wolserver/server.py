@@ -583,7 +583,7 @@ class App:
     def api_net_test(self, req):
         server, port, cfg = self._dns_target()
         if not cfg["dns"]["enabled"]:
-            raise ApiError(400, "DNS ist ausgeschaltet – Testabfragen gehen erst, wenn es übernommen ist.")
+            raise ApiError(400, "DNS ist ausgeschaltet. Testabfragen erfordern einen eingeschalteten und übernommenen DNS-Dienst.")
         text = req.body.get("query")
         if not isinstance(text, str):
             raise ApiError(400, "Bitte einen Namen oder eine IP-Adresse eingeben")

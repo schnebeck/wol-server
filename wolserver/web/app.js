@@ -276,8 +276,8 @@ function renderDevices() {
   if (!state.devices.length) {
     $("#status-line").textContent = " ";
     list.replaceChildren(el("div", { class: "empty" },
-      el("h3", {}, "Noch keine Geräte"),
-      el("p", { class: "muted" }, "Lege ein Gerät mit seiner MAC-Adresse an, um es per Wake-on-LAN aufzuwecken."),
+      el("h3", {}, "Keine Geräte"),
+      el("p", { class: "muted" }, "Geräte werden über ihre MAC-Adresse per Wake-on-LAN aufgeweckt."),
       el("button", { class: "btn primary", type: "button", onclick: () => openDeviceDialog() }, "Erstes Gerät anlegen")));
     return;
   }
@@ -366,9 +366,9 @@ async function updateDeviceNetHint() {
   box.replaceChildren(res
     ? el("span", {}, icon("check"), "Feste IP im Netzwerk: ", el("strong", { class: "mono" }, res.ip),
       res.name ? ` (${res.name}.${domain})` : "")
-    : el("span", {}, "Noch keine feste IP im Netzwerk. ",
+    : el("span", {}, "Keine feste IP im Netzwerk. ",
       el("button", { type: "button", class: "linkish", disabled: !mac, onclick: () => openResDialog(null, {
-        mac, name: $("#device-form").elements.name.value }) }, "Jetzt reservieren …")));
+        mac, name: $("#device-form").elements.name.value }) }, "Reservieren …")));
   box.hidden = false;
 }
 
@@ -400,8 +400,8 @@ async function onDeviceSubmit(event) {
 async function onDeviceDelete() {
   const device = editingDevice;
   const count = state.schedules.filter((s) => s.device_id === device.id).length;
-  const extra = count ? ` Zugehörige Zeitpläne (${count}) werden ebenfalls gelöscht.` : "";
-  if (!(await confirmDialog(`${device.name} löschen?`, `Das Gerät wird entfernt.${extra}`, "Löschen", true))) return;
+  const text = count ? `Das Gerät und seine Zeitpläne (${count}) werden gelöscht.` : "Das Gerät wird gelöscht.";
+  if (!(await confirmDialog(`${device.name} löschen?`, text, "Löschen", true))) return;
   try {
     await api("DELETE", `/api/devices/${device.id}`);
     $("#device-dialog").close();
@@ -421,8 +421,8 @@ function renderSchedules() {
     : " ";
   if (!state.devices.length) {
     list.replaceChildren(el("div", { class: "empty" },
-      el("h3", {}, "Erst ein Gerät anlegen"),
-      el("p", { class: "muted" }, "Zeitpläne beziehen sich immer auf ein Gerät.")));
+      el("h3", {}, "Keine Geräte"),
+      el("p", { class: "muted" }, "Jeder Zeitplan gehört zu einem Gerät. Geräte werden im Reiter „Geräte“ angelegt.")));
     return;
   }
   if (!state.schedules.length) {
@@ -548,8 +548,8 @@ async function renderEvents() {
   const { events } = await api("GET", "/api/events");
   const list = $("#event-list");
   if (!events.length) {
-    list.replaceChildren(el("div", { class: "empty" }, el("h3", {}, "Noch keine Einträge"),
-      el("p", { class: "muted" }, "Hier erscheinen manuelle und geplante Aktionen.")));
+    list.replaceChildren(el("div", { class: "empty" }, el("h3", {}, "Keine Einträge"),
+      el("p", { class: "muted" }, "Das Protokoll listet manuelle und geplante Aktionen.")));
     return;
   }
   list.replaceChildren(...events.map((e) =>
@@ -666,12 +666,12 @@ async function renderWifi() {
         class: "icon-btn", type: "button", disabled: ssid === current,
         title: ssid === current ? "Das verbundene WLAN kann nicht entfernt werden" : "Entfernen",
         "aria-label": `${ssid} entfernen`, onclick: () => forgetWifi(ssid),
-      }, icon("x")))) : [el("p", { class: "muted small" }, "Noch kein WLAN gespeichert.")]));
+      }, icon("x")))) : [el("p", { class: "muted small" }, "Kein WLAN gespeichert.")]));
 
   $("#hotspot-text").textContent = hs.enabled
-    ? `Findet der WOL-Server ${hs.delay_minutes} Minuten lang keines der gespeicherten WLANs (ohne gespeichertes WLAN sofort), ` +
-      `öffnet er den Hotspot „${hs.ssid}“. Mit dem Handy verbinden: Die Einrichtungsseite öffnet sich von selbst, ` +
-      `sonst http://${hs.address}/ aufrufen. Solange der Hotspot läuft, sucht er alle paar Minuten nach den gespeicherten WLANs.`
+    ? `Ist ${hs.delay_minutes} Minuten lang keines der gespeicherten WLANs erreichbar (ohne gespeichertes WLAN sofort), ` +
+      `öffnet der WOL-Server den Hotspot „${hs.ssid}“. Nach dem Verbinden öffnet sich die Einrichtungsseite automatisch, ` +
+      `alternativ unter http://${hs.address}/. Während der Hotspot läuft, sucht der WOL-Server alle paar Minuten nach den gespeicherten WLANs.`
     : "Der Einrichtungs-Hotspot ist abgeschaltet (hotspot_enabled in /etc/wol-server/config.json).";
 }
 
@@ -761,10 +761,10 @@ function showWifiSwitching(ssid) {
   const port = state.info && state.info.network && state.info.network.port !== 80 ? `:${state.info.network.port}` : "";
   const url = `http://${host}.local${port}/`;
   $("#wifi-done-text").replaceChildren(state.hotspot
-    ? el("span", {}, "Der Hotspot wird dafür beendet, dein Gerät verliert jetzt die Verbindung. ",
-      "Verbinde es wieder mit deinem WLAN und öffne dann ", el("a", { href: url }, url),
-      " (oder die Adresse, die dein Router für den Pi anzeigt).")
-    : el("span", {}, "Der Status aktualisiert sich gleich."));
+    ? el("span", {}, "Der Hotspot wird beendet, die Verbindung zu diesem Gerät bricht ab. ",
+      "Im Heimnetz ist die Oberfläche unter ", el("a", { href: url }, url),
+      " erreichbar oder unter der Adresse, die der Router für den Pi anzeigt.")
+    : el("span", {}, "Der Status aktualisiert sich automatisch."));
 }
 
 async function onWifiSubmit(event) {
@@ -801,10 +801,10 @@ async function onHotspotSubmit(event) {
   showError(form, "");
   const password = form.elements.password.value;
   if (password && (password.length < 8 || password.length > 63)) {
-    return showError(form, "8 bis 63 Zeichen – oder leer lassen für einen offenen Hotspot.");
+    return showError(form, "Das Passwort braucht 8 bis 63 Zeichen. Ohne Passwort ist der Hotspot offen.");
   }
   if (!password && !(await confirmDialog("Hotspot ohne Passwort?",
-    "Dann kann sich jeder in Funkreichweite mit dem Einrichtungs-Hotspot verbinden. Die Web-GUI bleibt durch ihr Passwort geschützt.",
+    "Ohne Passwort kann sich jedes Gerät in Funkreichweite mit dem Einrichtungs-Hotspot verbinden. Die Web-GUI bleibt durch ihr eigenes Passwort geschützt.",
     "Offen lassen"))) return;
   await busy($("button[type=submit]", form), async () => {
     try {
@@ -887,7 +887,7 @@ function openVpnDialog() {
   form.reset();
   showError(form, "");
   state.vpnFile = null;
-  $("#vpn-file-info").textContent = "Die Datei vom VPN-Server mit eingebetteten Zertifikaten.";
+  $("#vpn-file-info").textContent = "OpenVPN-Client-Konfiguration (.ovpn) mit eingebetteten Zertifikaten.";
   for (const field of $$("[data-auth]", form)) field.hidden = true;
   $("#vpn-dialog").showModal();
 }
@@ -902,7 +902,7 @@ async function onVpnFile(event) {
   const text = await file.text();
   const info = inspectOvpn(text);
   if (!info.client || !info.remote) {
-    return showError(form, "Das sieht nicht nach einer OpenVPN-Client-Konfiguration aus (es fehlen „client“ oder „remote“).");
+    return showError(form, "Keine OpenVPN-Client-Konfiguration: „client“ oder „remote“ fehlt.");
   }
   state.vpnFile = { text, info };
   $("#vpn-file-info").textContent = `Server: ${info.remote}${info.needsAuth ? " · braucht Benutzername und Passwort" : ""}`;
@@ -942,7 +942,7 @@ function viaVpn() {
 async function onVpnToggle() {
   const enable = !state.vpn.enabled;
   if (!enable && viaVpn() && !(await confirmDialog("VPN ausschalten?",
-    "Du bist gerade über das VPN verbunden und verlierst damit den Zugriff, bis du die GUI aus dem Heimnetz öffnest.",
+    "Diese Sitzung läuft über das VPN und wird getrennt. Ohne VPN ist die Oberfläche nur aus dem Heimnetz erreichbar.",
     "Ausschalten", true))) return;
   await busy($("#vpn-toggle"), async () => {
     try {
@@ -957,7 +957,7 @@ async function onVpnToggle() {
 
 async function onVpnRemove() {
   if (!(await confirmDialog("VPN-Konfiguration entfernen?",
-    "Zertifikate und Zugangsdaten werden vom WOL-Server gelöscht. Danach ist er nur noch im Heimnetz erreichbar.",
+    "Zertifikate und Zugangsdaten werden gelöscht. Ohne VPN ist der WOL-Server nur aus dem Heimnetz erreichbar.",
     "Entfernen", true))) return;
   try {
     const res = await api("DELETE", "/api/vpn");
@@ -1162,7 +1162,7 @@ function renderNetHeader() {
   const pending = (net.config && net.config.pending) || st.pending;
   const bar = $("#net-pending");
   bar.hidden = !pending.length;
-  $("#net-pending-title").textContent = `${pending.length} Änderung${pending.length === 1 ? "" : "en"} noch nicht übernommen`;
+  $("#net-pending-title").textContent = pending.length === 1 ? "Eine offene Änderung" : `${pending.length} offene Änderungen`;
   $("#net-pending-list").replaceChildren(...pending.map((c) => el("li", {}, c)));
   $("#net-apply").disabled = st.running;
   $("#net-discard").disabled = st.running;
@@ -1223,7 +1223,7 @@ async function netApply() {
 }
 
 async function netDiscard() {
-  if (!(await confirmDialog("Änderungen verwerfen?", "Alle noch nicht übernommenen Änderungen gehen verloren.", "Verwerfen", true))) return;
+  if (!(await confirmDialog("Änderungen verwerfen?", "Alle Änderungen im Entwurf werden verworfen. Der aktive Stand bleibt unverändert.", "Verwerfen", true))) return;
   await api("POST", "/api/net/discard");
   toast("Entwurf verworfen", "success");
   await renderNetwork();
@@ -1275,7 +1275,7 @@ function renderNetOverview() {
   $("#net-unknown-info").textContent = st.dhcp_enabled && st.mode === "known-only"
     ? "Abgewiesene Anfragen der letzten 24 Stunden" : "Nur im Modus „nur bekannte Geräte“";
   if (!unknown.length) {
-    list.replaceChildren(el("p", { class: "muted small" }, st.dhcp_enabled ? "Keine – alle Geräte, die zuletzt angefragt haben, sind bekannt." : "DHCP ist aus."));
+    list.replaceChildren(el("p", { class: "muted small" }, st.dhcp_enabled ? "Keine abgewiesenen Anfragen." : "DHCP ist aus."));
   } else {
     list.replaceChildren(...unknown.map((u) => el("div", { class: "request" },
       el("span", { class: "request-icon" }, icon("device")),
@@ -1340,7 +1340,7 @@ async function onApproveSubmit(event) {
 
 async function ignoreDevice(u) {
   if (!(await confirmDialog(`${u.name || u.mac} ignorieren?`,
-    "Das Gerät bekommt weiterhin keine Adresse und erscheint hier nicht mehr. Rückgängig unter Werkzeuge → Ignorierte Geräte.", "Ignorieren"))) return;
+    "Das Gerät erhält keine Adresse und wird in der Übersicht nicht mehr angezeigt. Aufheben unter Werkzeuge → Ignorierte Geräte.", "Ignorieren"))) return;
   try {
     await api("POST", `/api/net/unknown/${u.mac}/ignore`, { comment: u.name || "" });
     toast("Wird ignoriert", "success");
@@ -1384,7 +1384,7 @@ function renderReservations() {
       r.device ? el("button", { type: "button", class: "icon-btn wake-btn", title: `${r.device.name} aufwecken`, "aria-label": `${r.device.name} aufwecken`,
         onclick: (e) => deviceAction(r.device, "wake", e.currentTarget) }, icon("power")) : null,
       el("button", { type: "button", class: "icon-btn", title: "Bearbeiten", "aria-label": `${r.name || r.mac} bearbeiten`, onclick: () => openResDialog(r) }, icon("edit"))) },
-  ], rows, search || filter !== "all" ? "Keine passenden Reservierungen." : "Noch keine Reservierungen – lege eine an oder importiere die dhcpd.conf (Werkzeuge)."));
+  ], rows, search || filter !== "all" ? "Keine passenden Reservierungen." : "Keine Reservierungen. Anlegen über „Reservierung“ oder per Import unter Werkzeuge."));
   $("#res-foot").textContent = `${rows.length} von ${cfg.reservations.length} · erreichbar als name.${domain}`;
 }
 
@@ -1410,7 +1410,7 @@ function updateResVendor() {
   const mac = normMac($("#res-form").elements.mac.value);
   const vendor = mac && net.config ? net.config.meta.vendors[mac] : "";
   const leased = mac && net.config ? net.config.meta.leases[mac] : "";
-  $("#res-vendor").textContent = [vendor, leased && `hat gerade ${leased}`].filter(Boolean).join(" · ");
+  $("#res-vendor").textContent = [vendor, leased && `aktuelle Lease: ${leased}`].filter(Boolean).join(" · ");
 }
 
 async function onResSubmit(event) {
@@ -1436,7 +1436,7 @@ async function onResSubmit(event) {
 
 async function onResDelete() {
   const r = editingRes;
-  if (!(await confirmDialog(`${r.name || r.mac} löschen?`, `Die Reservierung für ${r.ip} wird entfernt. Im Modus „nur bekannte Geräte“ bekommt das Gerät danach keine Adresse mehr.`, "Löschen", true))) return;
+  if (!(await confirmDialog(`${r.name || r.mac} löschen?`, `Die Reservierung für ${r.ip} wird entfernt. Im Modus „nur bekannte Geräte“ erhält das Gerät ohne Reservierung keine Adresse.`, "Löschen", true))) return;
   try {
     await api("DELETE", `/api/net/reservations/${r.id}`);
     $("#res-dialog").close();
@@ -1476,7 +1476,7 @@ async function renderLeases(load) {
 }
 
 async function releaseLease(l) {
-  if (!(await confirmDialog(`Lease von ${l.ip} freigeben?`, "Das Gerät verliert seine Adresse erst bei der nächsten Erneuerung und bekommt dann eine neue (oder seine reservierte).", "Freigeben", true))) return;
+  if (!(await confirmDialog(`Lease von ${l.ip} freigeben?`, "Die Lease wird gelöscht. Bei der nächsten Erneuerung erhält das Gerät eine neue Adresse, mit Reservierung die reservierte.", "Freigeben", true))) return;
   try {
     const res = await api("POST", `/api/net/leases/${l.mac}/release`);
     toast(res.message);
@@ -1493,7 +1493,7 @@ async function releaseLease(l) {
 async function renderDnsView(load) {
   const cfg = net.config.config;
   const domain = cfg.dns.domain;
-  $("#rec-hint").textContent = `Zusätzlich zu den Reservierungen, die automatisch als name.${domain} erreichbar sind.`;
+  $("#rec-hint").textContent = `Reservierungen sind automatisch als name.${domain} erreichbar und brauchen hier keinen Eintrag.`;
   const recValue = (r) => r.type === "mx" ? `${r.value} (Priorität ${r.priority})`
     : r.type === "srv" ? `${r.value}:${r.port} (Prio ${r.priority}, Gewicht ${r.weight})` : r.value;
   $("#rec-table").replaceChildren(dataTable("rec", [
@@ -1507,7 +1507,7 @@ async function renderDnsView(load) {
 
   const querylogOn = net.status.dns_enabled && cfg.dns.log_queries;
   $("#dns-querylog-hint").textContent = querylogOn ? "Die letzten Anfragen an den DNS-Server."
-    : "Ausgeschaltet. Zum Einschalten: Einstellungen → DNS → Abfrageprotokoll.";
+    : "Abfrageprotokoll ausgeschaltet (Einstellungen → DNS).";
   $("#dns-querylog-refresh").hidden = !querylogOn;
   if (!querylogOn) $("#dns-querylog").replaceChildren();
   if (load) {
@@ -1546,7 +1546,7 @@ async function loadQueryLog() {
       { key: "client", label: "Von", render: (q) => el("span", { class: "mono small" }, q.client) },
       { key: "type", label: "Typ", cls: "hide-sm", render: (q) => el("span", { class: "tag" }, q.type) },
       { key: "name", label: "Name", render: (q) => el("span", { class: "mono small break" }, q.name) },
-    ], [...entries].reverse().slice(0, 100), "Noch keine Anfragen protokolliert."));
+    ], [...entries].reverse().slice(0, 100), "Keine Anfragen protokolliert."));
   } catch (e) {
     box.replaceChildren(el("p", { class: "muted small" }, e.message));
   }
@@ -1682,8 +1682,8 @@ function updateModeHint() {
   const mode = (form.querySelector("input[name='dhcp.mode']:checked") || {}).value;
   for (const block of $$("[data-mode]", form)) block.hidden = block.dataset.mode !== mode;
   $("#mode-hint").textContent = mode === "known-only"
-    ? "Nur Geräte mit Reservierung bekommen eine Adresse. Neue Geräte erscheinen in der Übersicht zum Freigeben."
-    : "Unbekannte Geräte bekommen eine Adresse aus dem Bereich; Reservierungen müssen außerhalb liegen.";
+    ? "Nur Geräte mit Reservierung erhalten eine Adresse. Unbekannte Geräte erscheinen zur Freigabe in der Übersicht."
+    : "Unbekannte Geräte erhalten eine Adresse aus dem Bereich. Reservierte Adressen liegen außerhalb des Bereichs.";
 }
 
 function renderStaticIp() {
@@ -1694,8 +1694,7 @@ function renderStaticIp() {
     el("div", { class: "static-ip-text" },
       el("strong", {}, fixed ? "Feste Adresse" : st.method === "auto" ? "Adresse per DHCP" : "Adresse unbekannt"),
       el("span", { class: "muted small" }, ` · ${st.address || "–"} auf ${st.interface}${st.connection ? ` (${st.connection})` : ""}`),
-      el("div", { class: "muted small" }, fixed ? "Gut so: Ein DHCP-Server braucht eine feste eigene Adresse."
-        : "Bevor DHCP eingeschaltet wird, braucht der WOL-Server eine feste Adresse.")),
+      el("div", { class: "muted small" }, "Ein DHCP-Server benötigt eine feste eigene Adresse.")),
     st.connection ? el("button", { type: "button", class: "btn small", onclick: () => toggleStaticIp(!fixed) },
       fixed ? "Wieder per DHCP" : "Feste Adresse setzen") : null);
 }
@@ -1703,8 +1702,8 @@ function renderStaticIp() {
 async function toggleStaticIp(enable) {
   const ip = net.config.config.server.ip || net.status.server.address;
   const text = enable
-    ? `Das WLAN-Profil bekommt die feste Adresse ${ip} mit Gateway ${net.config.config.dhcp.gateway || "?"}. Die Verbindung bleibt bestehen.`
-    : "Der WOL-Server holt seine Adresse wieder per DHCP – das geht nicht, solange er selbst der DHCP-Server ist.";
+    ? `Das WLAN-Profil erhält die feste Adresse ${ip} mit Gateway ${net.config.config.dhcp.gateway || "?"}. Die Verbindung bleibt bestehen.`
+    : "Der WOL-Server bezieht seine Adresse per DHCP. Bei eingeschaltetem DHCP auf dem WOL-Server selbst erhält er so keine Adresse.";
   if (!(await confirmDialog(enable ? "Feste Adresse setzen?" : "Wieder per DHCP?", text, enable ? "Setzen" : "Umstellen", !enable))) return;
   try {
     const res = await api("PUT", "/api/net/static-ip", { enabled: enable });
@@ -1800,14 +1799,14 @@ async function loadHistory() {
         i === 0 ? el("span", { class: "tag current" }, "aktiv") : el("button", { type: "button", class: "btn small ghost", onclick: (e) => { e.preventDefault(); restoreHistory(h); } }, icon("undo"), "Zurückholen")),
       el("p", { class: "muted small" }, h.client ? `von ${h.client}` : ""),
       el("ul", { class: "change-list" }, h.changes.map((c) => el("li", {}, c)))))
-      : [el("p", { class: "muted small" }, "Noch keine Änderungen übernommen.")]));
+      : [el("p", { class: "muted small" }, "Kein Verlauf vorhanden.")]));
   } catch (e) {
     box.replaceChildren(el("p", { class: "muted small" }, e.message));
   }
 }
 
 async function restoreHistory(h) {
-  if (!(await confirmDialog("Diesen Stand zurückholen?", `Der Stand vom ${fmtDateTime(h.ts)} wird als Entwurf geladen. Wirksam wird er erst mit „Übernehmen“.`, "Als Entwurf laden"))) return;
+  if (!(await confirmDialog("Diesen Stand zurückholen?", `Der Stand vom ${fmtDateTime(h.ts)} wird als Entwurf geladen und mit „Übernehmen“ wirksam.`, "Als Entwurf laden"))) return;
   try {
     const res = await api("POST", `/api/net/history/${h.id}/restore`);
     await afterDraftChange(res.message);
@@ -1932,7 +1931,7 @@ function renderImportPreview() {
   }));
   $("#import-warnings").replaceChildren(...p.warnings.map((w) => el("li", { class: "notice warn" }, icon("alert"), el("span", {}, w))));
   const ok = p.reservations.filter((r) => !r.problems.length).length;
-  $("#import-summary").textContent = `${p.reservations.length} feste Zuordnungen gefunden – ${ok} werden übernommen, ${p.reservations.length - ok} übersprungen.`;
+  $("#import-summary").textContent = `${p.reservations.length} feste Zuordnungen gefunden: ${ok} werden übernommen, ${p.reservations.length - ok} übersprungen.`;
   $("#import-table").replaceChildren(dataTable("import", [
     { key: "name", label: "Name", render: (r) => el("div", {}, el("strong", {}, r.name || "–"),
       r.original_name !== r.name ? el("div", { class: "muted small" }, `war „${r.original_name}“`) : null) },
@@ -1951,7 +1950,7 @@ async function onImportSubmit(event) {
   const form = event.currentTarget;
   showError(form, "");
   if (form.elements.replace.checked && !(await confirmDialog("Vorhandene Reservierungen entfernen?",
-    "Alle bisherigen Reservierungen werden durch die importierten ersetzt (im Entwurf).", "Ersetzen", true))) return;
+    "Die importierten Reservierungen ersetzen alle vorhandenen (im Entwurf).", "Ersetzen", true))) return;
   await busy($("#import-submit"), async () => {
     try {
       const res = await api("POST", "/api/net/import/commit", {
