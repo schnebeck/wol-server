@@ -150,7 +150,7 @@ class Job:
 
     def _fail(self, backup, reason, detail=""):
         self._restore(backup)
-        raise JobError("%s – der vorherige Stand wurde wiederhergestellt.%s" % (reason, (" " + detail) if detail else ""))
+        raise JobError("%s. Der vorherige Stand ist wiederhergestellt.%s" % (reason, (" " + detail) if detail else ""))
 
     def _self_test(self, request):
         name, expect, port = request.get("test_name"), request.get("expect"), int(request.get("port") or 53)
@@ -194,7 +194,7 @@ class Job:
         self.systemctl("enable", "--no-reload", UNIT)
         if self.hotspot_active(request.get("iface") or "wlan0"):
             self.systemctl("stop", UNIT)
-            return "Gespeichert – wird aktiv, sobald der Einrichtungs-Hotspot beendet ist"
+            return "Gespeichert, aktiv nach Ende des Einrichtungs-Hotspots"
 
         was_active = self.is_active()
         if was_active and not conf_changed:

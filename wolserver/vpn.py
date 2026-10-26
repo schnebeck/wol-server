@@ -177,7 +177,7 @@ class VpnManager:
     def _request(self, action):
         job = self.job()
         if job and job.get("state") == "running":
-            raise VpnError("Es läuft noch eine VPN-Änderung – bitte kurz warten.")
+            raise VpnError("Eine VPN-Änderung wird bereits ausgeführt. Bitte kurz warten.")
         os.makedirs(self.dir, mode=0o700, exist_ok=True)
         request = {"id": "%d" % (self.clock() * 1000), "action": action, "ts": self.clock()}
         # Direkt schreiben (nicht umbenennen): wol-vpn.path reagiert auf das Schließen der Datei
@@ -211,7 +211,7 @@ class VpnManager:
         enabled = bool(args.get("enabled"))
         with self.lock:
             if not os.path.exists(CONF):
-                raise VpnError("Es ist noch keine VPN-Konfiguration eingerichtet.")
+                raise VpnError("Keine VPN-Konfiguration eingerichtet.")
             self._request("enable" if enabled else "disable")
         return {"ok": True, "message": "VPN wird %s …" % ("eingeschaltet" if enabled else "ausgeschaltet")}
 

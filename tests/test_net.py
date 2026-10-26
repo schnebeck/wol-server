@@ -670,8 +670,8 @@ class ManagerTest(unittest.TestCase):
         json.dump({"ts": self.now, "ok": True, "servers": [{"server_id": "192.168.1.10", "offered": "192.168.1.8"}]},
                   open(self.mgr.path("probe.json"), "w"))
         warnings = " ".join(self.mgr.status()["warnings"])
-        self.assertIn("feste Adresse", warnings)
-        self.assertIn("weiterer DHCP-Server antwortet: 192.168.1.10", warnings)
+        self.assertIn("Feste Adresse setzen", warnings)
+        self.assertIn("Weiterer DHCP-Server im Netz: 192.168.1.10", warnings)
 
     def test_static_ip(self):
         self.mgr.static_ip({"enabled": True})
@@ -785,7 +785,7 @@ class JobTest(unittest.TestCase):
         self.job.run()
         result = self.result(rid)
         self.assertEqual(result["state"], "failed")
-        self.assertIn("vorherige Stand wurde wiederhergestellt", result["message"])
+        self.assertIn("vorherige Stand ist wiederhergestellt", result["message"])
         self.assertIn("bad option", result["message"])
         self.assertEqual(open(os.path.join(self.conf, "dnsmasq.conf")).read(), "port=53\n# v1\n")
 

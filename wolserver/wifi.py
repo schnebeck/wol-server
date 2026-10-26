@@ -408,7 +408,7 @@ class WifiManager:
                     "wifi-sec.key-mgmt", "wpa-psk", "wifi-sec.psk", psk)
         else:
             if existing and active:
-                raise WifiError("„%s“ ist gerade verbunden – zum Umstellen auf ein offenes Netz bitte "
+                raise WifiError("„%s“ ist verbunden. Für die Umstellung auf ein offenes Netz "
                                 "zuerst ein anderes WLAN verbinden." % ssid)
             for profile in existing:
                 self.nm("connection", "delete", "uuid", profile["uuid"])
@@ -486,7 +486,7 @@ class WifiManager:
         log.info("Hotspot-Passwort %s", "gesetzt" if password else "entfernt (offener Hotspot)")
         later = " Gilt ab dem nächsten Start des Hotspots." if self.mode == "hotspot" else ""
         job.reply({"ok": True, "message": ("Hotspot-Passwort gespeichert." if password
-                                           else "Hotspot ist jetzt offen.") + later})
+                                           else "Hotspot ohne Passwort gespeichert.") + later})
 
     # -- Worker --
 
@@ -495,7 +495,7 @@ class WifiManager:
         self.jobs.put(job)
         if job.done.wait(wait):
             return job.result
-        return {"ok": True, "pending": True, "message": "Wird noch ausgeführt …"}
+        return {"ok": True, "pending": True, "message": "Wird ausgeführt …"}
 
     def run_job(self, job):
         handler = getattr(self, "do_" + job.name, None)

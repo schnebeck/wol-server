@@ -93,7 +93,7 @@
 
       <div id="net-unavailable" class="empty" hidden>
         <h3>Netzwerk-Verwaltung nicht erreichbar</h3>
-        <p class="muted">Läuft der Dienst <code>wol-wifi</code>? Einrichten mit <code>sudo ./deploy/hotspot-setup.sh</code>.</p>
+        <p class="muted">Die Netzwerk-Verwaltung benötigt den Dienst <code>wol-wifi</code> (Einrichtung mit <code>sudo ./deploy/hotspot-setup.sh</code>).</p>
       </div>
 
       <div id="net-body" hidden>
@@ -164,7 +164,7 @@
             <button type="button" class="btn ghost" id="lease-refresh">Aktualisieren</button>
           </div>
           <div class="table-wrap" id="lease-table"></div>
-          <p class="muted small table-foot">Aktive Adressvergaben laut dnsmasq. Reservierte Geräte behalten ihre IP auch ohne Lease.</p>
+          <p class="muted small table-foot">Aktive Adressvergaben laut dnsmasq. Reservierte Geräte behalten ihre IP unabhängig von der Lease.</p>
         </div>
 
         <div class="subview" id="net-sub-dns" hidden>
@@ -233,7 +233,7 @@
                 <div class="form-grid">
                   <label class="field"><span>Gateway (Router)</span><input name="dhcp.gateway" class="mono" placeholder="192.168.1.1"></label>
                   <label class="field"><span>NTP-Server <em class="opt">optional</em></span><input name="dhcp.ntp" class="mono" placeholder="192.168.1.1"></label>
-                  <label class="field span2"><span>DNS-Server für die Geräte <em class="opt">leer = dieser Server</em></span><input name="dhcp.dns" class="mono" placeholder="z. B. 192.168.1.8, 192.168.1.1"><small>Ein zweiter Eintrag (z. B. der Router) springt ein, falls der WOL-Server ausfällt.</small></label>
+                  <label class="field span2"><span>DNS-Server für die Geräte <em class="opt">leer = dieser Server</em></span><input name="dhcp.dns" class="mono" placeholder="z. B. 192.168.1.8, 192.168.1.1"><small>Ein zweiter Eintrag (z. B. der Router) dient als Ersatz bei Ausfall des WOL-Servers.</small></label>
                   <label class="field span2"><span>Weitere Suchdomänen <em class="opt">optional</em></span><input name="dhcp.search" class="mono" placeholder="z. B. oldnet.local"></label>
                 </div>
               </fieldset>
@@ -242,8 +242,8 @@
                 <legend class="panel-legend">DNS</legend>
                 <label class="check"><input type="checkbox" name="dns.enabled"> <span>DNS-Server einschalten</span></label>
                 <div class="form-grid">
-                  <label class="field span2"><span>Lokale Domäne</span><input name="dns.domain" class="mono" placeholder="home.arpa"><small>Jedes Gerät ist dann als <code>name.domäne</code> erreichbar.</small></label>
-                  <label class="field span2"><span>Upstream-DNS</span><input name="dns.upstream" class="mono" placeholder="192.168.1.1"><small>Wohin Anfragen für das Internet gehen, z. B. an den Router.</small></label>
+                  <label class="field span2"><span>Lokale Domäne</span><input name="dns.domain" class="mono" placeholder="home.arpa"><small>Geräte sind als <code>name.domäne</code> erreichbar.</small></label>
+                  <label class="field span2"><span>Upstream-DNS</span><input name="dns.upstream" class="mono" placeholder="192.168.1.1"><small>Ziel aller Anfragen außerhalb der lokalen Domäne, z. B. der Router.</small></label>
                   <label class="field"><span>TTL lokaler Namen (s)</span><input name="dns.ttl" type="number" min="0" max="86400"></label>
                   <label class="field"><span>Cache-Größe</span><input name="dns.cache_size" type="number" min="0" max="10000"></label>
                 </div>
@@ -251,7 +251,7 @@
                   <span>Bedingte Weiterleitungen <em class="opt">optional</em></span>
                   <div id="conditional-list" class="row-editor"></div>
                   <button type="button" class="btn small ghost" id="conditional-add">+ Weiterleitung</button>
-                  <small>Eine Domäne an einen anderen DNS-Server, z. B. Namen im VPN an den VPN-Server.</small>
+                  <small>Anfragen für eine bestimmte Domäne gehen an einen eigenen DNS-Server, z. B. VPN-Namen an den VPN-Server.</small>
                 </div>
                 <label class="check"><input type="checkbox" name="dns.log_queries"> <span>Abfrageprotokoll (zur Fehlersuche, nur im RAM)</span></label>
               </fieldset>
@@ -290,7 +290,7 @@
           <div class="sys-grid four-up">
             <div class="panel">
               <h3>Vom alten DHCP-Server übernehmen</h3>
-              <p class="muted small">Konfiguration von ISC dhcpd (<code>/etc/dhcp/dhcpd.conf</code>) hochladen. Du siehst vorher, was übernommen wird.</p>
+              <p class="muted small">Konfiguration von ISC dhcpd (<code>/etc/dhcp/dhcpd.conf</code>) einlesen. Eine Vorschau zeigt vor dem Import alle Übernahmen.</p>
               <div><button type="button" class="btn" id="import-open">dhcpd.conf importieren</button></div>
             </div>
             <div class="panel">
@@ -303,7 +303,7 @@
             </div>
             <div class="panel">
               <h3>Andere DHCP-Server suchen</h3>
-              <p class="muted small">Zwei DHCP-Server im selben Netz stören sich. Die Suche fragt einmal rundum, ohne etwas zu ändern.</p>
+              <p class="muted small">Zwei DHCP-Server im selben Netz stören sich gegenseitig. Die Suche sendet eine einzelne DHCP-Anfrage und ändert nichts.</p>
               <div class="btn-row"><button type="button" class="btn" id="probe-btn">Suchen</button></div>
               <div id="probe-result" class="small"></div>
             </div>
@@ -315,7 +315,7 @@
             <div class="panel wide">
               <div class="panel-head">
                 <h3>Verlauf</h3>
-                <span class="muted small">Die letzten 20 übernommenen Stände – jeder lässt sich als Entwurf zurückholen.</span>
+                <span class="muted small">Die letzten 20 übernommenen Stände. Jeder Stand lässt sich als Entwurf zurückholen.</span>
               </div>
               <div id="history-list" class="history"></div>
             </div>
@@ -346,7 +346,7 @@
             <h3>WLAN</h3>
             <button type="button" class="btn small" id="wifi-add" hidden>WLAN hinzufügen</button>
           </div>
-          <p class="muted small" id="wifi-unavailable" hidden>Die WLAN-Verwaltung ist nicht erreichbar. Läuft der Dienst <code>wol-wifi</code>? Einrichten mit <code>sudo ./deploy/hotspot-setup.sh</code>.</p>
+          <p class="muted small" id="wifi-unavailable" hidden>Die WLAN-Verwaltung ist nicht erreichbar. Sie benötigt den Dienst <code>wol-wifi</code> (Einrichtung mit <code>sudo ./deploy/hotspot-setup.sh</code>).</p>
           <div id="wifi-body" class="stack" hidden>
             <dl class="kv" id="wifi-info"></dl>
             <p class="form-error" id="wifi-error" hidden></p>
@@ -373,7 +373,7 @@
             <h3>VPN (OpenVPN)</h3>
             <button type="button" class="btn small" id="vpn-upload" hidden>Konfiguration hochladen</button>
           </div>
-          <p class="muted small" id="vpn-unavailable" hidden>Die VPN-Verwaltung ist nicht erreichbar. Läuft der Dienst <code>wol-wifi</code>? Einrichten mit <code>sudo ./deploy/hotspot-setup.sh</code>.</p>
+          <p class="muted small" id="vpn-unavailable" hidden>Die VPN-Verwaltung ist nicht erreichbar. Sie benötigt den Dienst <code>wol-wifi</code> (Einrichtung mit <code>sudo ./deploy/hotspot-setup.sh</code>).</p>
           <div id="vpn-body" class="stack" hidden>
             <dl class="kv" id="vpn-info"></dl>
             <p class="form-error" id="vpn-error" hidden></p>
@@ -383,8 +383,8 @@
             </div>
             <details class="howto">
               <summary>Hinweise zum VPN</summary>
-              <p class="small">Der WOL-Server verbindet sich als Client mit deinem OpenVPN-Server und ist dann über das VPN erreichbar, ohne Portfreigabe zu Hause. Er leitet keinen Internetverkehr durch den Tunnel, Magic Packets gehen immer ins WLAN.</p>
-              <p class="small">Am besten bekommt der Pi ein <strong>eigenes Client-Zertifikat</strong> und auf dem Server per <code>client-config-dir</code> eine feste Adresse. Damit andere VPN-Clients (z. B. das Handy) ihn erreichen, braucht der Server <code>client-to-client</code>. Die Datei muss die Zertifikate eingebettet enthalten (<code>&lt;ca&gt;</code>, <code>&lt;cert&gt;</code>, <code>&lt;key&gt;</code> …); aus Sicherheitsgründen werden Skripte (<code>up</code>, <code>script-security</code> …) nicht übernommen.</p>
+              <p class="small">Der WOL-Server verbindet sich als Client mit einem OpenVPN-Server und ist über das VPN erreichbar, ohne Portfreigabe im Heimnetz. Internetverkehr läuft nicht durch den Tunnel, Magic Packets gehen immer ins WLAN.</p>
+              <p class="small">Empfohlen: ein <strong>eigenes Client-Zertifikat</strong> für den Pi und eine feste Adresse per <code>client-config-dir</code> auf dem Server. Für den Zugriff anderer VPN-Clients (z. B. Handy) benötigt der Server <code>client-to-client</code>. Die Datei muss die Zertifikate eingebettet enthalten (<code>&lt;ca&gt;</code>, <code>&lt;cert&gt;</code>, <code>&lt;key&gt;</code> …); Skripte (<code>up</code>, <code>script-security</code> …) werden aus Sicherheitsgründen nicht übernommen.</p>
             </details>
           </div>
         </div>
@@ -401,7 +401,7 @@
           <h3>Zugriff</h3>
           <p class="muted small">Die Oberfläche ist nur aus diesen Netzen erreichbar (Intranet und VPN). Ändern lässt sich das in <code>/etc/wol-server/config.json</code>.</p>
           <div id="sys-networks" class="chips"></div>
-          <p class="small">Deine Adresse: <code id="sys-client"></code></p>
+          <p class="small">Adresse dieses Browsers: <code id="sys-client"></code></p>
         </div>
         <div class="panel wide">
           <h3>SSH-Schlüssel zum Schlafenlegen</h3>
@@ -629,13 +629,13 @@ echo "$USER ALL=(root) NOPASSWD: /usr/bin/systemctl suspend, /usr/bin/systemctl 
           <input type="checkbox" name="hidden_ssid"> <span>Verstecktes Netz</span>
         </label>
       </div>
-      <p class="hint small">Der Pi Zero W kann nur 2,4-GHz-Netze nutzen. Er muss im selben Netz wie die Zielgeräte sein, also nicht im Gast-WLAN.</p>
+      <p class="hint small">Der Pi Zero W unterstützt nur 2,4-GHz-Netze. Das WLAN muss dasselbe Netz wie das der Zielgeräte sein, kein Gast-WLAN.</p>
       <p class="form-error" hidden></p>
     </div>
     <div class="dialog-content" id="wifi-step-done" hidden>
       <h3 id="wifi-done-title"></h3>
       <p id="wifi-done-text"></p>
-      <p class="small muted">Klappt die Verbindung nicht, öffnet der WOL-Server seinen Hotspot nach etwa einer Minute wieder und zeigt hier den Fehler an.</p>
+      <p class="small muted">Schlägt die Verbindung fehl, öffnet der WOL-Server nach etwa einer Minute erneut den Hotspot und zeigt den Fehler hier an.</p>
     </div>
     <footer class="dialog-foot">
       <span class="spacer"></span>
@@ -667,7 +667,7 @@ echo "$USER ALL=(root) NOPASSWD: /usr/bin/systemctl suspend, /usr/bin/systemctl 
           <input name="password" type="password" autocomplete="off" maxlength="256">
         </label>
       </div>
-      <p class="hint small">Eine vorhandene Konfiguration wird ersetzt. Der WOL-Server installiert OpenVPN bei Bedarf, das dauert auf dem Pi Zero ein paar Minuten.</p>
+      <p class="hint small">Eine vorhandene Konfiguration wird ersetzt. Fehlt OpenVPN, wird es installiert; auf dem Pi Zero dauert das einige Minuten.</p>
       <p class="form-error" hidden></p>
     </div>
     <footer class="dialog-foot">
@@ -689,7 +689,7 @@ echo "$USER ALL=(root) NOPASSWD: /usr/bin/systemctl suspend, /usr/bin/systemctl 
         <label class="field">
           <span>Name</span>
           <input name="name" maxlength="63" spellcheck="false" autocapitalize="off" placeholder="z. B. office" autofocus>
-          <small id="res-name-hint">Wird im DNS als <code>name.domäne</code> erreichbar.</small>
+          <small id="res-name-hint">Im DNS erreichbar als <code>name.domäne</code>.</small>
         </label>
         <label class="field">
           <span>MAC-Adresse</span>
@@ -794,13 +794,13 @@ echo "$USER ALL=(root) NOPASSWD: /usr/bin/systemctl suspend, /usr/bin/systemctl 
           <input name="comment" maxlength="120" placeholder="z. B. Handy von Anna">
         </label>
       </div>
-      <p class="hint small" id="approve-private" hidden>Das Gerät nutzt eine <strong>private WLAN-Adresse</strong>. Sie kann sich ändern (z. B. nach dem Zurücksetzen der Netzwerkeinstellungen). Dauerhaft hilft es, sie am Gerät für dieses WLAN abzuschalten.</p>
+      <p class="hint small" id="approve-private" hidden>Das Gerät nutzt eine <strong>private WLAN-Adresse</strong>. Sie kann sich ändern, z. B. nach dem Zurücksetzen der Netzwerkeinstellungen. Für eine dauerhafte Zuordnung die private Adresse am Gerät für dieses WLAN abschalten.</p>
       <p class="form-error" hidden></p>
     </div>
     <footer class="dialog-foot">
       <span class="spacer"></span>
       <button type="button" class="btn ghost" data-close>Abbrechen</button>
-      <button type="submit" class="btn primary" id="approve-submit">Freigeben und übernehmen</button>
+      <button type="submit" class="btn primary" id="approve-submit">Freigeben</button>
     </footer>
   </form>
 </dialog>
@@ -815,7 +815,7 @@ echo "$USER ALL=(root) NOPASSWD: /usr/bin/systemctl suspend, /usr/bin/systemctl 
       <label class="field">
         <span>Datei vom alten Server</span>
         <input type="file" name="file" accept=".conf,text/plain" autofocus>
-        <small>Meist <code>/etc/dhcp/dhcpd.conf</code>. Es werden nur Daten gelesen, nichts ausgeführt.</small>
+        <small>Üblicher Pfad: <code>/etc/dhcp/dhcpd.conf</code>. Die Datei wird nur gelesen, nichts wird ausgeführt.</small>
       </label>
       <div id="import-preview" hidden>
         <dl class="kv compact" id="import-settings"></dl>
@@ -828,10 +828,10 @@ echo "$USER ALL=(root) NOPASSWD: /usr/bin/systemctl suspend, /usr/bin/systemctl 
       <p class="form-error" hidden></p>
     </div>
     <footer class="dialog-foot">
-      <span class="muted small">Ergebnis ist ein Entwurf – prüfen, dann übernehmen.</span>
+      <span class="muted small">Der Import erzeugt einen Entwurf, wirksam mit „Übernehmen“.</span>
       <span class="spacer"></span>
       <button type="button" class="btn ghost" data-close>Abbrechen</button>
-      <button type="submit" class="btn primary" id="import-submit" disabled>In den Entwurf übernehmen</button>
+      <button type="submit" class="btn primary" id="import-submit" disabled>Als Entwurf laden</button>
     </footer>
   </form>
 </dialog>
