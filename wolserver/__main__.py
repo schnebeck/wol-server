@@ -1,4 +1,4 @@
-"""Kommandozeile: `python3 -m wolserver [serve|passwd|wake|wifi-daemon]`."""
+"""Kommandozeile: `python3 -m wolserver [serve|passwd|wake|wifi-daemon|cert-fetch]`."""
 
 import argparse
 import getpass
@@ -13,25 +13,44 @@ from .config import load_config
 
 
 def cmd_serve(cfg):
-    from .server import App, create_server
+    from .server import App, create_https_server, create_server
 
     app = App(cfg)
-    server = create_server(app)
-    host, port = server.server_address[:2]
-    logging.getLogger("wolserver").info(
-        "WOL-Server %s lauscht auf [%s]:%d, Daten in %s", __version__, host, port, cfg["data_dir"]
-    )
+    servers = [s for s in (create_server(app), create_https_server(app)) if s]
+    log = logging.getLogger("wolserver")
+    log.info("WOL-Server %s lauscht auf %s, Daten in %s", __version__,
+             ", ".join("[%s]:%d" % s.server_address[:2] for s in servers), cfg["data_dir"])
     stop = threading.Event()
     for sig in (signal.SIGTERM, signal.SIGINT):
         signal.signal(sig, lambda *_: stop.set())
     app.start()
-    thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 5}, daemon=True)
-    thread.start()
+    for server in servers:
+        threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 5}, daemon=True).start()
     stop.wait()
-    logging.getLogger("wolserver").info("Beende …")
+    log.info("Beende …")
     app.stop()
-    server.shutdown()
-    server.server_close()
+    for server in servers:
+        server.shutdown()
+        server.server_close()
+    return 0
+
+
+def cmd_cert_fetch(cfg):
+    import grp
+
+    from . import tls
+
+    try:
+        data = tls.fetch(cfg)
+        try:
+            gid = grp.getgrnam("wol").gr_gid
+        except KeyError:
+            gid = None
+        changed = tls.install_bundle(data, cfg["tls_dir"], cfg["https_host"], gid)
+    except (tls.FetchError, OSError) as e:
+        print("Zertifikat nicht abgeholt: %s" % e, file=sys.stderr)
+        return 1
+    print("Zertifikat erneuert." if changed else "Zertifikat unverändert.")
     return 0
 
 
@@ -77,6 +96,7 @@ def main(argv=None):
     wake.add_argument("--broadcast", default="255.255.255.255")
     wake.add_argument("--port", type=int, default=9)
     sub.add_parser("wifi-daemon", help="WLAN-Verwaltung mit Einrichtungs-Hotspot (als root, Dienst wol-wifi)")
+    sub.add_parser("cert-fetch", help="HTTPS-Zertifikat vom Webserver abholen (als root, Dienst wol-cert)")
     args = parser.parse_args(argv)
 
     if args.cmd == "wake":
@@ -87,6 +107,8 @@ def main(argv=None):
     logging.getLogger().setLevel(str(cfg["log_level"]).upper())
     if args.cmd == "passwd":
         return cmd_passwd(cfg, args.stdin)
+    if args.cmd == "cert-fetch":
+        return cmd_cert_fetch(cfg)
     if args.cmd == "wifi-daemon":
         from .wifi import run_daemon
 

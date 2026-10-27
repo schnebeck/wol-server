@@ -1,0 +1,13 @@
+[Unit]
+Description=WOL-Server: HTTPS-Zertifikat vom Webserver abholen
+Documentation=file:///opt/wol-server/README.md
+# Erst eingerichtet, wenn der Host-Schlüssel des Webservers hinterlegt ist
+ConditionPathExists=/etc/wol-server/tls/known_hosts
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/wol-server
+ExecStart=/usr/bin/python3 -m wolserver --config /etc/wol-server/config.json cert-fetch
+Nice=10

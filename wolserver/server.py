@@ -10,6 +10,7 @@ import logging
 import os
 import re
 import socket
+import ssl
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit
@@ -19,6 +20,7 @@ from .auth import Auth, LoginLimiter
 from .scheduler import Scheduler, next_run
 from .status import StatusMonitor
 from .store import Store
+from .tls import TlsState
 
 log = logging.getLogger("wolserver")
 
@@ -53,11 +55,12 @@ class ApiError(Exception):
 
 
 class Request:
-    def __init__(self, body, client, authenticated, via_hotspot=False):
+    def __init__(self, body, client, authenticated, via_hotspot=False, secure=False):
         self.body = body
         self.client = client
         self.authenticated = authenticated
         self.via_hotspot = via_hotspot
+        self.secure = secure
         self.cookies = []
 
 
@@ -95,6 +98,7 @@ class App:
         self.auth = Auth(data_dir, config["session_days"])
         self.limiter = LoginLimiter()
         self.networks = [ipaddress.ip_network(n, strict=False) for n in config["allowed_networks"]]
+        self.tls = TlsState(config["tls_dir"])
         self.identity = power.SshIdentity(data_dir)
         try:
             self.identity.ensure()
@@ -243,7 +247,7 @@ class App:
         password = req.body.get("password")
         if isinstance(password, str) and self.auth.check_password(password):
             self.limiter.reset(req.client)
-            req.cookies.append(self._session_cookie(self.auth.make_token(), self.auth.session_seconds))
+            req.cookies.append(self._session_cookie(self.auth.make_token(), self.auth.session_seconds, req.secure))
             return 200, {"ok": True}
         self.limiter.fail(req.client)
         log.warning("Fehlgeschlagener Login von %s", req.client)
@@ -251,12 +255,13 @@ class App:
         raise ApiError(401, "Falsches Passwort")
 
     def api_logout(self, req):
-        req.cookies.append(self._session_cookie("", 0))
+        req.cookies.append(self._session_cookie("", 0, req.secure))
         return 200, {"ok": True}
 
     @staticmethod
-    def _session_cookie(value, max_age):
-        return "%s=%s; Path=/; Max-Age=%d; HttpOnly; SameSite=Strict" % (COOKIE, value, max_age)
+    def _session_cookie(value, max_age, secure=False):
+        return "%s=%s; Path=/; Max-Age=%d; HttpOnly; SameSite=Strict%s" % (COOKIE, value, max_age,
+                                                                           "; Secure" if secure else "")
 
     def api_password(self, req):
         if self.auth.required and not self.auth.check_password(str(req.body.get("current", ""))):
@@ -269,7 +274,7 @@ class App:
             self.auth.set_password(new)
         except ValueError as e:
             raise ApiError(400, str(e)) from None
-        req.cookies.append(self._session_cookie(self.auth.make_token(), self.auth.session_seconds))
+        req.cookies.append(self._session_cookie(self.auth.make_token(), self.auth.session_seconds, req.secure))
         log.info("Passwort geändert von %s", req.client)
         return 200, {"ok": True}
 
@@ -292,6 +297,7 @@ class App:
             "allowed_networks": self.config["allowed_networks"],
             "client": req.client,
             "network": self._network_info(),
+            "https": dict(self.tls.status(), port=int(self.config["https_port"]) or None),
         }
 
     def _network_info(self):
@@ -707,6 +713,9 @@ class Handler(BaseHTTPRequestHandler):
             raw = self._read_body()
             if raw is None:
                 return
+            location = None if via_hotspot or ip.is_loopback else self._https_location()
+            if location:
+                return self._send(308, b"", None, {"Location": location, "Cache-Control": "no-store"})
             path = urlsplit(self.path).path
             if path.startswith("/api/"):
                 return self._handle_api(method, path, raw, str(ip), via_hotspot)
@@ -721,6 +730,22 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json(500, {"error": "Interner Serverfehler"})
             except OSError:
                 pass
+
+    def _https_location(self):
+        """Ziel der Umleitung auf HTTPS oder None (schon HTTPS, abgeschaltet, kein gültiges Zertifikat)."""
+        https_port = getattr(self.server, "https_port", None)
+        if self.secure or not self.app.config["https_redirect"] or not https_port:
+            return None
+        valid = self.app.tls.host()
+        if not valid:
+            return None
+        host = self.app.config["https_host"] or valid
+        port = "" if https_port == 443 else ":%d" % https_port
+        return "https://%s%s%s" % (host, port, self.path if self.path.startswith("/") else "/")
+
+    @property
+    def secure(self):
+        return isinstance(self.connection, ssl.SSLSocket)
 
     def _read_body(self):
         try:
@@ -752,7 +777,7 @@ class Handler(BaseHTTPRequestHandler):
                     raise ApiError(400, "Ungültiges JSON") from None
                 if not isinstance(body, dict):
                     raise ApiError(400, "JSON-Objekt erwartet")
-            req = Request(body, client, authenticated, via_hotspot)
+            req = Request(body, client, authenticated, via_hotspot, self.secure)
             status, payload = handler(req, **params)
         except ApiError as e:
             status, payload = e.status, {"error": e.message}
@@ -812,12 +837,51 @@ class Server(ThreadingHTTPServer):
             raise
 
 
-def create_server(app):
-    host, port = app.config["listen"], int(app.config["port"])
+class TlsServer(Server):
+    """HTTPS: Der TLS-Handshake läuft im Thread der Verbindung, nicht in der Annahmeschleife."""
+
+    def finish_request(self, request, client_address):
+        context = self.app.tls.current()
+        if context is None:
+            return  # noch kein Zertifikat: Verbindung schließen
+        request.settimeout(Handler.timeout)
+        try:
+            wrapped = context.wrap_socket(request, server_side=True)
+        except (ssl.SSLError, OSError) as e:
+            log.debug("TLS-Handshake mit %s gescheitert: %s", client_address[0], e)
+            return
+        try:
+            super().finish_request(wrapped, client_address)
+        finally:
+            # wrap_socket hat den ursprünglichen Socket abgekoppelt; socketserver schließt nur diesen
+            self.shutdown_request(wrapped)
+
+
+def _bind(cls, app, port):
+    host = app.config["listen"]
     try:
-        return Server(host, port, app)
+        server = cls(host, port, app)
     except OSError as e:
         if host != "::" or e.errno == errno.EADDRINUSE:
             raise
         log.warning("IPv6 nicht verfügbar (%s) – lausche nur auf IPv4", e)
-        return Server("0.0.0.0", port, app)
+        server = cls("0.0.0.0", port, app)
+    https_port = int(app.config["https_port"])
+    server.https_port = https_port if cls is Server else None
+    return server
+
+
+def create_server(app):
+    return _bind(Server, app, int(app.config["port"]))
+
+
+def create_https_server(app):
+    """HTTPS-Server oder None (abgeschaltet oder Port nicht verfügbar)."""
+    port = int(app.config["https_port"])
+    if not port:
+        return None
+    try:
+        return _bind(TlsServer, app, port)
+    except OSError as e:
+        log.warning("HTTPS auf Port %d nicht möglich: %s", port, e)
+        return None
