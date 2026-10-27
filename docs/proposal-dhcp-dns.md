@@ -105,7 +105,7 @@ down in the middle of the work.
 │                                                                                    │
 │ Overview │ Reservations │ Leases │ DNS │ Settings                                  │
 │ ────────────────────────────────────────────────────────────────────────────────── │
-│ DHCP  ● active · known devices only · 41 leases    DNS  ● active · home.arpa│
+│ DHCP  ● active · known devices only · 41 leases    DNS  ● active · home.arpa       │
 │ ⚠ Unknown device: 5a:1f:…  "iPhone" · Apple · 2 min ago      [Approve] [Ignore]    │
 └────────────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -113,11 +113,11 @@ down in the middle of the work.
 **Reservations**
 
 ```
- Search: [aida____________]   Filter: (●) all  ( ) enabled  ( ) with WOL    [+ Reservation]
+ Search: [office__________]   Filter: (●) all  ( ) enabled  ( ) with WOL    [+ Reservation]
  ┌──────────────────┬───────────────┬───────────────────┬─────────┬──────────┬─────┐
  │ Name             │ IP            │ MAC               │ Lease   │ Seen     │     │
  ├──────────────────┼───────────────┼───────────────────┼─────────┼──────────┼─────┤
- │ office  ⏻          │ 192.168.7.9   │ 00:d8:61:91:4c:6b │ Default │ 3 min ago│ ✎ ✕ │
+ │ office-pc  ⏻     │ 192.168.7.9   │ 00:d8:61:91:4c:6b │ Default │ 3 min ago│ ✎ ✕ │
  │ brother-mfc      │ 192.168.7.40  │ 94:dd:f8:7a:9a:ab │ Default │ today    │ ✎ ✕ │
  │ repeater-lan     │ 192.168.7.2   │ d2:ce:1e:c3:24:6f │ 24 h    │ —        │ ✎ ✕ │
  └──────────────────┴───────────────┴───────────────────┴─────────┴──────────┴─────┘
@@ -213,7 +213,7 @@ As with the VPN: the GUI keeps running without privileges, and small, separate p
     "ttl": 60
   },
   "reservations": [
-    {"mac": "00:d8:61:91:4c:6b", "ip": "192.168.7.9", "name": "office",
+    {"mac": "00:d8:61:91:4c:6b", "ip": "192.168.7.9", "name": "office-pc",
      "comment": "Arbeitsplatz", "enabled": true, "lease_time": null}
   ],
   "records": [

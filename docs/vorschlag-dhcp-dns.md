@@ -105,7 +105,7 @@ mitten in der Arbeit das Netz lahm.
 │                                                                                    │
 │ Übersicht │ Reservierungen │ Leases │ DNS │ Einstellungen                          │
 │ ────────────────────────────────────────────────────────────────────────────────── │
-│ DHCP  ● aktiv · nur bekannte Geräte · 41 Leases       DNS  ● aktiv · home.arpa│
+│ DHCP  ● aktiv · nur bekannte Geräte · 41 Leases       DNS  ● aktiv · home.arpa       │
 │ ⚠ Unbekanntes Gerät: 5a:1f:…  „iPhone“ · Apple · vor 2 min  [Freigeben] [Ignorieren]│
 └────────────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -113,11 +113,11 @@ mitten in der Arbeit das Netz lahm.
 **Reservierungen**
 
 ```
- Suche: [aida____________]   Filter: (●) alle  ( ) aktiv  ( ) mit WOL     [+ Reservierung]
+ Suche: [office__________]   Filter: (●) alle  ( ) aktiv  ( ) mit WOL     [+ Reservierung]
  ┌──────────────────┬───────────────┬───────────────────┬─────────┬──────────┬─────┐
  │ Name             │ IP            │ MAC               │ Lease   │ Gesehen  │     │
  ├──────────────────┼───────────────┼───────────────────┼─────────┼──────────┼─────┤
- │ office  ⏻          │ 192.168.7.9   │ 00:d8:61:91:4c:6b │ Standard│ vor 3 min│ ✎ ✕ │
+ │ office-pc  ⏻     │ 192.168.7.9   │ 00:d8:61:91:4c:6b │ Standard│ vor 3 min│ ✎ ✕ │
  │ brother-mfc      │ 192.168.7.40  │ 94:dd:f8:7a:9a:ab │ Standard│ heute    │ ✎ ✕ │
  │ repeater-lan     │ 192.168.7.2   │ d2:ce:1e:c3:24:6f │ 24 h    │ —        │ ✎ ✕ │
  └──────────────────┴───────────────┴───────────────────┴─────────┴──────────┴─────┘
@@ -213,7 +213,7 @@ Wie beim VPN: Die GUI läuft weiter ohne Rechte, die Arbeit als root erledigen k
     "ttl": 60
   },
   "reservations": [
-    {"mac": "00:d8:61:91:4c:6b", "ip": "192.168.7.9", "name": "office",
+    {"mac": "00:d8:61:91:4c:6b", "ip": "192.168.7.9", "name": "office-pc",
      "comment": "Arbeitsplatz", "enabled": true, "lease_time": null}
   ],
   "records": [
