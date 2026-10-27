@@ -450,8 +450,17 @@ table.data th.actions, table.data td.actions { width: 1%; white-space: nowrap; t
 .row-editor { display: grid; gap: 6px; }
 .editor-row { display: grid; grid-template-columns: 1fr auto 1fr auto; align-items: center; gap: 6px; }
 
-fieldset.panel { margin: 0; min-width: 0; }
-.panel-legend { font-weight: 600; font-size: 1rem; padding: 0 6px; margin-left: -6px; }
+/* Fieldsets mit Karteireiter: Die Legende sitzt als Lasche auf der Oberkante der Karte.
+   Absolut positioniert reserviert der Browser keine Lücke in der Rahmenlinie; die Lasche
+   überdeckt die Linie unter sich und geht so nahtlos in die Karte über. */
+fieldset.panel, fieldset.group { position: relative; min-width: 0; margin: 33px 0 0; border-top-left-radius: 0; }
+fieldset.panel > legend, fieldset.group > legend {
+  position: absolute; bottom: 100%; left: -1px; max-width: calc(100% + 2px);
+  padding: 6px 14px 5px; line-height: 1.35; font-weight: 600; font-size: 0.95rem;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  background: var(--surface); border: 1px solid var(--border); border-bottom: 0;
+  border-radius: 10px 10px 0 0;
+}
 .settings { display: grid; gap: 14px; }
 .settings-foot {
   position: sticky; bottom: 0; display: flex; align-items: center; gap: 10px; justify-content: flex-end;
@@ -512,8 +521,7 @@ input[type=file]::file-selector-button {
 .hint { color: var(--muted); }
 .presets { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 
-.group { border: 1px solid var(--border); border-radius: 10px; padding: 14px; margin: 18px 0 0; display: grid; gap: 14px; }
-.group legend { padding: 0 6px; font-weight: 600; font-size: 0.9rem; }
+.group { border: 1px solid var(--border); border-radius: 10px; padding: 14px; display: grid; gap: 14px; }
 
 .segmented { display: inline-flex; flex-wrap: wrap; background: var(--surface-2); border: 1px solid var(--border); border-radius: 9px; padding: 3px; gap: 2px; justify-self: start; }
 .segmented label { position: relative; cursor: pointer; }
