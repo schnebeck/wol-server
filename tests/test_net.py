@@ -459,6 +459,7 @@ class Systemctl:
         self.calls = []
         self.dns_state = "inactive"
         self.method = "auto"
+        self.dns = "192.168.1.1"
         self.journal = ""
 
     def __call__(self, argv, timeout=15):
@@ -469,6 +470,8 @@ class Systemctl:
             return 0, "ActiveState=%s\nUnitFileState=disabled\n" % self.dns_state
         if argv[:2] == ["nmcli", "-t"] and "device" in argv:
             return 0, "HomeNet\n"
+        if argv[:2] == ["nmcli", "-t"] and "ipv4.dns" in argv:
+            return 0, self.dns + "\n"
         if argv[:2] == ["nmcli", "-t"] and "connection" in argv:
             return 0, self.method + "\n"
         if argv[0] == "nmcli":
@@ -703,6 +706,30 @@ class ManagerTest(unittest.TestCase):
         self.assertIn(["nmcli", "device", "reapply", "wlan0"], self.sys.calls)
         self.mgr.static_ip({"enabled": False})
         self.assertIn("auto", self.sys.calls[-2])
+
+    def test_own_resolver_follows_dns(self):
+        # With DHCP for the server itself: leave the resolver alone
+        self.mgr.settings({"settings": {"dns": {"enabled": True}}})
+        self.finish()
+        self.mgr.active()
+        self.assertFalse(any(c[:3] == ["nmcli", "connection", "modify"] for c in self.sys.calls))
+        # Static address: DNS on -> ask itself first, the router stays as fallback
+        self.sys.method = "manual"
+        self.mgr.wifi_changed("client")
+        modify = [c for c in self.sys.calls if c[:3] == ["nmcli", "connection", "modify"]][-1]
+        self.assertEqual(modify[4:6], ["ipv4.dns", "127.0.0.1 192.168.1.1"])
+        self.assertIn(["nmcli", "device", "reapply", "wlan0"], self.sys.calls)
+        # Already right: no further change
+        self.sys.dns = "127.0.0.1,192.168.1.1"
+        count = len(self.sys.calls)
+        self.mgr.wifi_changed("client")
+        self.assertFalse(any(c[:3] == ["nmcli", "connection", "modify"] for c in self.sys.calls[count:]))
+        # DNS off -> back to the router only
+        self.mgr.settings({"settings": {"dns": {"enabled": False}}})
+        self.finish()
+        self.mgr.active()
+        modify = [c for c in self.sys.calls if c[:3] == ["nmcli", "connection", "modify"]][-1]
+        self.assertEqual(modify[4:6], ["ipv4.dns", "192.168.1.1"])
 
     def test_logs(self):
         self.sys.journal = ("1700000000.5 wol dnsmasq[9]: query[A] heise.de from 192.168.1.12\n"
