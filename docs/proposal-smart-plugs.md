@@ -1,6 +1,6 @@
 # Proposal: smart plugs in WOL-Server
 
-As of: 2026-10-27 · Status: **phase 1 implemented (branch `plugs`), not yet tested with real plugs**
+As of: 2026-10-27 · Status: **phases 1 to 3 implemented (branch `plugs`), not yet tested with real plugs** (section 10)
 
 WOL-Server learns to use metering smart plugs. A plug is a device in the network with the type "wireless plug". Linking
 it to a consumer tells WOL-Server what the plug measures and what it switches. If the consumer is a WOL device, the
@@ -329,3 +329,21 @@ Log entries like the existing ones, with the source (GUI, schedule, API):
 
 Phase 1 can be tested with the real plugs as soon as they are set up; it does not change anything for the
 existing devices.
+
+## 10. Implementation status
+
+Phases 1 to 3 are implemented on the branch `plugs` and tested against the fake plug (unit tests and the demo).
+What differs from the plan above, and what is still open:
+
+| Topic | State |
+|---|---|
+| Energy log | `energy.db` with one row per plug and hour; the running hour stays in RAM and is written once per hour. Gaps (server off) are spread evenly over the hours they span. Plugs without a counter are integrated from the power. |
+| Day view | **One panel per plug with its own scale** and a shared time axis (small multiples): in one chart a 100 W PC would press a 1 W standby flat onto the baseline. Month and year stay stacked columns, where the sum (energy, costs) matters. |
+| Standby per year | Estimated from the hours of the last 30 days in which the draw never rose above the standby threshold, scaled to a year. |
+| Price | One price per kWh for all plugs (Plugs → Consumption). |
+| Link | Plug → WOL device or a plain name, edited from both sides. A reservation without a WOL device as consumer is not implemented yet; a name covers it for now. |
+| Status from power | In the GUI (Online, Standby, No power, Starting or shutting down, Not responding after 5 minutes above the running threshold). `GET /api/status` includes the power per device. |
+| Wake methods, cut after sleep | Implemented as planned; "Power on" with the relay already on and the device at standby runs a short power cycle. |
+| Alerts | Welded contacts, error flags, temperature above 70 °C, relay wear above 80 %, plug unreachable for 5 minutes: once into the log when raised and when cleared, and as a notice in the Plugs tab. **Open:** the slow temperature rise over days. |
+| Rule 6 (no lock-out) | **Open:** the check for the WOL-Server itself and the gateway. |
+

@@ -52,7 +52,8 @@ function findBrowser() {
 // The pictures of the README: [file name, hash in the GUI, viewport, dark mode]
 const SHOTS = [
   ["devices", "#devices", [1280, 820]],
-  ["plugs", "#plugs", [1280, 820]],
+  ["plugs", "#plugs/overview", [1280, 820]],
+  ["consumption", "#plugs/energy", [1280, 900]],
   ["schedules", "#schedules", [1280, 820]],
   ["network-overview", "#network/overview", [1280, 820]],
   ["network-reservations", "#network/reservations", [1280, 820]],

@@ -29,6 +29,7 @@ Every start begins with fresh sample data in a temporary directory.
 
 import argparse
 import os
+import random
 import re
 import shutil
 import signal
@@ -77,17 +78,77 @@ netinfo.connected_networks = lambda: [{"network": "192.168.1.0/24", "interface":
                                       {"network": "10.8.0.0/24", "interface": "tun0", "kind": "vpn"}]
 
 # --- devices: simulated status, magic packets and sleep stay inside the demo ---
-ONLINE = {"192.168.1.10", "nas.home.arpa"}
-status.check_host = server_module.check_host = lambda host, timeout=1.0: host in ONLINE
+ONLINE = set()  # hosts without a plug that answer; devices with a plug answer while they run (see PLUGGED)
+
+
+def check_host(host, timeout=1.0):
+    for sim in PLUGGED.values():
+        if sim["host"] == host:
+            dev = fakeplug.FakePlug.devices[sim["plug"]]
+            return dev.on and dev.load_w > 0
+    return host in ONLINE
+
+
+status.check_host = server_module.check_host = check_host
 
 
 def fake_magic_packet(mac, broadcast="255.255.255.255", port=9, count=3, source_ip=None):
     wol.normalize_mac(mac)
+    sim = PLUGGED.get(wol.normalize_mac(mac))
+    if sim:
+        sim["override"] = (time.time() + 7200, True)  # runs for two hours
 
 
 def fake_sleep(device, identity, source_ip=None):
     ONLINE.discard(device.get("host"))
+    sim = PLUGGED.get(device["mac"])
+    if sim:
+        sim["override"] = (time.time() + 8 * 3600, False)
     return True, "Sleep command sent to %s (simulated)" % device["name"]
+
+
+# --- devices with a plug: when they run, what they draw ---
+def office_runs(lt):
+    hm = lt.tm_hour + lt.tm_min / 60
+    if lt.tm_wday < 5:
+        return 7.5 <= hm < 12.25 or 13 <= hm < 17.5 or (lt.tm_wday in (0, 2) and 19.5 <= hm < 21.5)
+    return lt.tm_wday == 5 and 10 <= hm < 12
+
+
+def nas_runs(lt):
+    hm = lt.tm_hour + lt.tm_min / 60
+    return 6.75 <= hm < 23.5
+
+
+def backup_runs(lt):
+    hm = lt.tm_hour + lt.tm_min / 60
+    return 5.5 <= hm < 6.5 or 18 <= hm < 18.33
+
+
+def backup_relay(lt):  # the schedules cut its standby at night
+    hm = lt.tm_hour + lt.tm_min / 60
+    return not (hm >= 23.75 or hm < 5.5)
+
+
+PLUGGED = {  # MAC of the device -> simulation
+    "00:D8:61:D7:1D:36": {"plug": "192.168.1.31", "host": "office-pc.home.arpa", "runs": office_runs,
+                          "load": (64, 112)},
+    "00:11:32:4C:19:E2": {"plug": "192.168.1.33", "host": "nas.home.arpa", "runs": nas_runs, "load": (16, 23)},
+    "A8:B8:E0:07:4B:4E": {"plug": "192.168.1.34", "host": "192.168.1.10", "runs": backup_runs, "load": (38, 55),
+                          "relay": backup_relay},
+}
+for sim in PLUGGED.values():
+    sim["override"] = None
+
+
+def sim_power(sim, ts, rng, relay=True):
+    """Power of a simulated device at ts: load while it runs, standby otherwise, 0 without power."""
+    lt = time.localtime(ts)
+    if not relay:
+        return 0.0, False
+    runs = sim["runs"](lt)
+    lo, hi = sim["load"]
+    return (rng.uniform(lo, hi) if runs else 0.0), runs
 
 
 wol.send_magic_packet = fake_magic_packet
@@ -320,14 +381,14 @@ stop = threading.Event()
 threading.Thread(target=manager.run, args=(stop,), daemon=True).start()
 threading.Thread(target=control.serve, args=(stop,), daemon=True).start()
 
-# Simulated wireless plugs with typical loads
+# Simulated wireless plugs; the loads follow the devices above
 fakeplug.register()
 fakeplug.FakePlug.devices = {
-    "192.168.1.31": fakeplug.FakeDevice(model="S3PL-30110EU", mac="a8:03:2a:05:54:db", password="demo", load_w=92.4,
+    "192.168.1.31": fakeplug.FakeDevice(model="S3PL-30110EU", mac="a8:03:2a:05:54:db", password="demo", standby_w=1.3,
                                         temperature_c=34.6),
-    "192.168.1.33": fakeplug.FakeDevice(model="S3PL-30110EU", mac="a8:03:2a:df:a7:70", password="demo", load_w=18.2,
+    "192.168.1.33": fakeplug.FakeDevice(model="S3PL-30110EU", mac="a8:03:2a:df:a7:70", password="demo", standby_w=3.2,
                                         temperature_c=29.1),
-    "192.168.1.34": fakeplug.FakeDevice(model="S3PL-30110EU", mac="a8:03:2a:fc:d5:1a", load_w=0, standby_w=1.1,
+    "192.168.1.34": fakeplug.FakeDevice(model="S3PL-30110EU", mac="a8:03:2a:fc:d5:1a", standby_w=1.1,
                                         temperature_c=26.0),
     # The unknown Shelly in the overview: approving it gives it the next free address, then "Detect" finds it
     "192.168.1.11": fakeplug.FakeDevice(model="S3PL-30110EU", mac="a8:03:2a:d4:e5:f7"),
@@ -349,10 +410,74 @@ for name, mac, host, method in (("Office PC", "00:D8:61:D7:1D:36", "office-pc.ho
         "ssh_command": "sudo systemctl suspend" if method == "ssh" else "", "http_method": "POST", "http_url": "",
         "http_body": ""})["id"]
 plug_ids = {}
-for host, name, consumer, password in (("192.168.1.31", "plug-office-pc", "Office PC", "demo"),
-                                       ("192.168.1.33", "plug-nas", "NAS", "demo"),
-                                       ("192.168.1.34", "plug-backup", "Backup-Server", "")):
-    plug_ids[name] = app.plugs.add({"host": host, "name": name, "consumer_label": consumer, "password": password})["id"]
+for host, name, consumer, password, options in (
+        ("192.168.1.31", "plug-office-pc", "Office PC", "demo", {"running_w": 30}),
+        ("192.168.1.33", "plug-nas", "NAS", "demo", {"running_w": 10}),
+        ("192.168.1.34", "plug-backup", "Backup-Server", "", {"running_w": 20, "wake_method": "power"})):
+    plug_ids[name] = app.plugs.add(dict(options, host=host, name=name, consumer_device=device_ids[consumer],
+                                        password=password))["id"]
+app.plugs.set_settings({"price_kwh": 0.32, "currency": "€"})
+
+
+def seed_energy(days=90):
+    """Energy history of the last days, the curve of the last 24 hours, and the live loads from now on."""
+    rng = random.Random(7)
+    energy = app.plugs.energy
+    now = time.time()
+    rows = []
+    for sim in PLUGGED.values():
+        plug_id = next(p["id"] for p in app.plugs.list(live=False) if p["host"] == sim["plug"])
+        dev = fakeplug.FakePlug.devices[sim["plug"]]
+        start = int((now - days * 86400) // 3600 * 3600)
+        for hour in range(start, int(now), 3600):
+            watts = []
+            for minute in range(0, 60, 5):
+                ts = hour + minute * 60
+                if ts >= now:
+                    break
+                relay = sim.get("relay", lambda lt: True)(time.localtime(ts))
+                load, _ = sim_power(sim, ts, rng, relay)
+                watts.append(load or (dev.standby_w * rng.uniform(0.92, 1.08) if relay else 0.0))
+            wh = sum(watts) / 12  # 5-minute values
+            rows.append((plug_id, hour, round(wh, 3), round(max(watts), 1), round(24 + max(watts) * 0.09, 1)))
+            if hour >= now - 86400:
+                for minute in range(0, min(60, int((now - hour) // 60))):
+                    ts = hour + minute * 60
+                    relay = sim.get("relay", lambda lt: True)(time.localtime(ts))
+                    load, _ = sim_power(sim, ts, rng, relay)
+                    power = load or (dev.standby_w * rng.uniform(0.95, 1.05) if relay else 0.0)
+                    energy._samples[plug_id].append([ts // 60 * 60, power, 1])
+        with dev.lock:
+            dev.tick()
+        energy._last[plug_id] = (now, dev.energy_wh)
+    with energy._db:
+        energy._db.executemany("INSERT INTO hours (plug, hour, wh, max_w, max_temp) VALUES (?, ?, ?, ?, ?)", rows)
+
+
+def simulate():
+    """Every 20 s: the devices with a plug draw what they do at this time of day (or after WOL/sleep)."""
+    rng = random.Random()
+    while True:
+        now = time.time()
+        for sim in PLUGGED.values():
+            dev = fakeplug.FakePlug.devices[sim["plug"]]
+            override = sim["override"]
+            if override and override[0] < now:
+                override = sim["override"] = None
+            lo, hi = sim["load"]
+            runs = override[1] if override else sim["runs"](time.localtime(now))
+            with dev.lock:
+                dev.tick()
+                dev.load_w = rng.uniform(lo, hi) if runs else 0.0
+                dev.temperature_c = round(24 + dev.power_w * 0.09 + rng.uniform(-0.3, 0.3), 1)
+        time.sleep(20)
+
+
+for sim in PLUGGED.values():
+    if "relay" in sim:
+        fakeplug.FakePlug.devices[sim["plug"]].on = sim["relay"](time.localtime())
+seed_energy()
+threading.Thread(target=simulate, daemon=True).start()
 for target, action, at, days, label in (
         (("device_id", device_ids["NAS"]), "wake", "06:45", [0, 1, 2, 3, 4], ""),
         (("device_id", device_ids["Office PC"]), "wake", "07:30", [0, 1, 2, 3, 4], ""),
