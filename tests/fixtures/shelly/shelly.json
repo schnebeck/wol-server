@@ -1,0 +1,13 @@
+{
+ "name": null,
+ "id": "shellyplugmg3-a1b2c3d4e5f6",
+ "mac": "A1B2C3D4E5F6",
+ "slot": 0,
+ "model": "S3PL-30110EU",
+ "gen": 3,
+ "fw_id": "20251021-090000/1.7.1-gabcdef1",
+ "ver": "1.7.1",
+ "app": "PlugMG3",
+ "auth_en": true,
+ "auth_domain": "shellyplugmg3-a1b2c3d4e5f6"
+}

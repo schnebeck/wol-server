@@ -58,6 +58,7 @@
       <nav class="tabs" aria-label="Sections">
         <button type="button" class="tab" data-view="devices">Devices</button>
         <button type="button" class="tab" data-view="schedules">Schedules</button>
+        <button type="button" class="tab" data-view="plugs">Plugs</button>
         <button type="button" class="tab" data-view="events">Log</button>
         <button type="button" class="tab" data-view="network">Network<span class="tab-badge" id="net-tab-badge" hidden></span></button>
         <button type="button" class="tab" data-view="system">System</button>
@@ -90,6 +91,17 @@
         <button type="button" class="btn primary" id="add-schedule">Add schedule</button>
       </div>
       <div id="schedule-list" class="list"></div>
+    </section>
+
+    <section id="view-plugs" class="view" hidden>
+      <div class="view-head">
+        <div>
+          <h2>Plugs</h2>
+          <p class="muted" id="plugs-line">&nbsp;</p>
+        </div>
+        <button type="button" class="btn primary" id="add-plug">Add plug</button>
+      </div>
+      <div id="plug-list" class="grid"></div>
     </section>
 
     <section id="view-events" class="view" hidden>
@@ -841,6 +853,14 @@ echo "$USER ALL=(root) NOPASSWD: /usr/bin/systemctl suspend, /usr/bin/systemctl 
     </header>
     <div class="dialog-content">
       <dl class="kv" id="approve-info"></dl>
+      <div class="field">
+        <span>Type</span>
+        <div class="segmented" role="radiogroup" id="approve-type">
+          <label><input type="radio" name="kind" value="device" checked><span>Network device</span></label>
+          <label><input type="radio" name="kind" value="plug"><span>Wireless plug</span></label>
+        </div>
+        <small id="approve-type-hint"></small>
+      </div>
       <div class="form-grid approve-grid">
         <label class="field">
           <span>Name</span>
@@ -895,6 +915,76 @@ echo "$USER ALL=(root) NOPASSWD: /usr/bin/systemctl suspend, /usr/bin/systemctl 
       <span class="spacer"></span>
       <button type="button" class="btn ghost" data-close>Cancel</button>
       <button type="submit" class="btn primary" id="import-submit" disabled>Load as draft</button>
+    </footer>
+  </form>
+</dialog>
+
+<dialog id="plug-dialog" class="dialog">
+  <form id="plug-form" class="dialog-body" novalidate>
+    <header class="dialog-head">
+      <h2 id="plug-dialog-title">Wireless plug</h2>
+      <button type="button" class="icon-btn" data-close aria-label="Close">×</button>
+    </header>
+    <div class="dialog-content">
+      <p class="hint small" id="plug-wait" hidden>The plug gets its address with its next request, usually within a minute. Then press "Detect".</p>
+      <div class="form-grid">
+        <label class="field span2">
+          <span>Host name or IP address</span>
+          <div class="input-with-btn">
+            <input name="host" class="mono" required spellcheck="false" autocapitalize="off" placeholder="e.g. plug-office-pc">
+            <button type="button" class="btn small" id="plug-detect">Detect</button>
+          </div>
+          <small id="plug-detected"></small>
+        </label>
+        <label class="field">
+          <span>Name</span>
+          <input name="name" maxlength="64" spellcheck="false" placeholder="e.g. plug-office-pc">
+        </label>
+        <label class="field">
+          <span>Plugged in <em class="opt">optional</em></span>
+          <input name="consumer_label" maxlength="64" placeholder="e.g. Office PC">
+        </label>
+        <label class="field">
+          <span>Password of the plug</span>
+          <input name="password" type="password" maxlength="128" autocomplete="new-password">
+          <small id="plug-password-hint">Only if a password is set on the plug.</small>
+        </label>
+        <label class="field">
+          <span>After a power outage</span>
+          <select name="power_on_state">
+            <option value="restore">Restore last state</option>
+            <option value="on">On</option>
+            <option value="off">Off</option>
+          </select>
+          <small id="plug-pos-hint"></small>
+        </label>
+      </div>
+      <details class="advanced">
+        <summary>Advanced</summary>
+        <div class="form-grid">
+          <label class="field">
+            <span>Plug type</span>
+            <select name="driver" id="plug-driver"></select>
+          </label>
+          <label class="field">
+            <span>Channel</span>
+            <input name="channel" type="number" min="0" max="15" value="0">
+            <small>Outlet number on power strips, otherwise 0.</small>
+          </label>
+          <label class="field span2">
+            <span>Switch off without asking up to</span>
+            <div class="input-unit"><input name="standby_w" type="number" min="0" max="500" step="0.5" value="5"><span>W</span></div>
+            <small>Above this draw, "Off" and "Restart" ask first: the device may still be running.</small>
+          </label>
+        </div>
+      </details>
+      <p class="form-error" hidden></p>
+    </div>
+    <footer class="dialog-foot">
+      <button type="button" class="btn danger ghost" id="plug-delete">Remove</button>
+      <span class="spacer"></span>
+      <button type="button" class="btn ghost" data-close>Cancel</button>
+      <button type="submit" class="btn primary" id="plug-submit">Save</button>
     </footer>
   </form>
 </dialog>
