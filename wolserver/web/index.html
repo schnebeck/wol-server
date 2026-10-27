@@ -57,8 +57,8 @@
       </div>
       <nav class="tabs" aria-label="Sections">
         <button type="button" class="tab" data-view="devices">Devices</button>
-        <button type="button" class="tab" data-view="schedules">Schedules</button>
         <button type="button" class="tab" data-view="plugs">Plugs</button>
+        <button type="button" class="tab" data-view="schedules">Schedules</button>
         <button type="button" class="tab" data-view="events">Log</button>
         <button type="button" class="tab" data-view="network">Network<span class="tab-badge" id="net-tab-badge" hidden></span></button>
         <button type="button" class="tab" data-view="system">System</button>
@@ -82,17 +82,6 @@
       <div id="device-list" class="grid"></div>
     </section>
 
-    <section id="view-schedules" class="view" hidden>
-      <div class="view-head">
-        <div>
-          <h2>Schedules</h2>
-          <p class="muted" id="server-time">&nbsp;</p>
-        </div>
-        <button type="button" class="btn primary" id="add-schedule">Add schedule</button>
-      </div>
-      <div id="schedule-list" class="list"></div>
-    </section>
-
     <section id="view-plugs" class="view" hidden>
       <div class="view-head">
         <div>
@@ -102,6 +91,17 @@
         <button type="button" class="btn primary" id="add-plug">Add plug</button>
       </div>
       <div id="plug-list" class="grid"></div>
+    </section>
+
+    <section id="view-schedules" class="view" hidden>
+      <div class="view-head">
+        <div>
+          <h2>Schedules</h2>
+          <p class="muted" id="server-time">&nbsp;</p>
+        </div>
+        <button type="button" class="btn primary" id="add-schedule">Add schedule</button>
+      </div>
+      <div id="schedule-list" class="list"></div>
     </section>
 
     <section id="view-events" class="view" hidden>
