@@ -90,7 +90,49 @@
         </div>
         <button type="button" class="btn primary" id="add-plug">Add plug</button>
       </div>
-      <div id="plug-list" class="grid"></div>
+      <nav class="subtabs" aria-label="Plug sections" id="plug-subtabs">
+        <button type="button" class="subtab" data-sub="overview">Overview</button>
+        <button type="button" class="subtab" data-sub="energy">Consumption</button>
+      </nav>
+      <div class="subview" id="plug-sub-overview">
+        <ul class="notice-list" id="plug-alerts"></ul>
+        <div id="plug-list" class="grid"></div>
+      </div>
+      <div class="subview energy" id="plug-sub-energy" hidden>
+        <div class="energy-filters">
+          <div class="segmented" role="radiogroup" aria-label="Period" id="energy-period">
+            <label><input type="radio" name="energy_period" value="day" checked><span>Day</span></label>
+            <label><input type="radio" name="energy_period" value="month"><span>Month</span></label>
+            <label><input type="radio" name="energy_period" value="year"><span>Year</span></label>
+          </div>
+          <div class="energy-nav">
+            <button type="button" class="icon-btn" id="energy-prev" aria-label="Earlier">‹</button>
+            <strong id="energy-label"></strong>
+            <button type="button" class="icon-btn" id="energy-next" aria-label="Later">›</button>
+            <button type="button" class="btn small ghost" id="energy-today">Today</button>
+          </div>
+          <select id="energy-plug" aria-label="Plug"></select>
+          <span class="spacer"></span>
+          <button type="button" class="btn small" id="energy-csv">Export CSV</button>
+        </div>
+        <div class="stat-grid" id="energy-stats"></div>
+        <div class="panel chart-panel" id="energy-chart-panel">
+          <div class="chart-head">
+            <h3 id="energy-chart-title"></h3>
+            <div class="legend" id="energy-legend"></div>
+          </div>
+          <div class="chart" id="energy-chart"></div>
+        </div>
+        <div class="panel table-panel" id="energy-table"></div>
+        <form class="panel energy-price" id="energy-price-form" novalidate>
+          <label class="field">
+            <span>Price per kWh <em class="opt">optional</em></span>
+            <div class="input-unit"><input name="price_kwh" type="number" min="0" max="10" step="0.001" placeholder="0.32"><span id="energy-currency">€</span></div>
+            <small>With a price, costs are shown next to the energy.</small>
+          </label>
+          <button type="submit" class="btn small">Save</button>
+        </form>
+      </div>
     </section>
 
     <section id="view-schedules" class="view" hidden>
@@ -595,6 +637,30 @@ echo "$USER ALL=(root) NOPASSWD: /usr/bin/systemctl suspend, /usr/bin/systemctl 
           <p class="hint small" data-i18n>Sends a magic packet with the reversed MAC address to the broadcast address and port above. A Sleep-on-LAN service must run on the target device, e.g. <em>sleep-on-lan</em> (Windows/Linux).</p>
         </div>
       </fieldset>
+
+      <fieldset class="group" id="device-plug-group">
+        <legend>Plug</legend>
+        <label class="field">
+          <span>Plugged into</span>
+          <select name="plug_id" id="device-plug"></select>
+          <small id="device-plug-hint"></small>
+        </label>
+        <div id="device-plug-options" class="plug-options">
+          <div class="field">
+            <span>Wake via</span>
+            <div class="segmented" role="radiogroup" aria-label="Wake via">
+              <label><input type="radio" name="wake_method" value="wol"><span>WOL</span></label>
+              <label><input type="radio" name="wake_method" value="power"><span>Power on</span></label>
+              <label><input type="radio" name="wake_method" value="power_wol"><span>Power on, then WOL</span></label>
+            </div>
+            <small id="wake-method-hint"></small>
+          </div>
+          <label class="check">
+            <input type="checkbox" name="cut_after_sleep">
+            <span>Cut the power after "Sleep" <small class="muted">Only if the sleep command shuts the device down. A device in standby (suspend to RAM) loses its unsaved work.</small></span>
+          </label>
+        </div>
+      </fieldset>
       <p class="form-error" hidden></p>
     </div>
     <footer class="dialog-foot">
@@ -945,7 +1011,8 @@ echo "$USER ALL=(root) NOPASSWD: /usr/bin/systemctl suspend, /usr/bin/systemctl 
         </label>
         <label class="field">
           <span>Plugged in <em class="opt">optional</em></span>
-          <input name="consumer_label" maxlength="64" placeholder="e.g. Office PC">
+          <select name="consumer_device" id="plug-consumer"></select>
+          <input name="consumer_label" maxlength="64" placeholder="e.g. Fridge" id="plug-consumer-label" hidden>
         </label>
         <label class="field">
           <span>Password of the plug</span>
@@ -974,11 +1041,17 @@ echo "$USER ALL=(root) NOPASSWD: /usr/bin/systemctl suspend, /usr/bin/systemctl 
             <input name="channel" type="number" min="0" max="15" value="0">
             <small>Outlet number on power strips, otherwise 0.</small>
           </label>
-          <label class="field span2">
-            <span>Switch off without asking up to</span>
+          <label class="field">
+            <span>Standby up to</span>
             <div class="input-unit"><input name="standby_w" type="number" min="0" max="500" step="0.5" value="5"><span>W</span></div>
             <small>Above this draw, "Off" and "Restart" ask first: the device may still be running.</small>
           </label>
+          <label class="field">
+            <span>Running from <em class="opt">optional</em></span>
+            <div class="input-unit"><input name="running_w" type="number" min="0" max="4000" step="1"><span>W</span></div>
+            <small>Above this draw without an answer to ping, the device counts as hanging.</small>
+          </label>
+          <p class="hint small span2" id="plug-measured" hidden></p>
         </div>
       </details>
       <p class="form-error" hidden></p>

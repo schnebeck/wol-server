@@ -14,8 +14,9 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 """The core of the plug support. It talks to every plug through the driver interface, so the safety
-rules apply to every vendor alike. Plugs are stored in plugs.json (mode 0600: it holds the passwords
-of the plugs, which never leave the server)."""
+rules, the alerts and the energy log apply to every vendor alike. Plugs are stored in plugs.json
+(mode 0600: it holds the passwords of the plugs, which never leave the server), the energy values in
+energy.db."""
 
 import copy
 import json
@@ -29,11 +30,15 @@ from concurrent.futures import ThreadPoolExecutor
 from .. import models
 from ..wol import normalize_mac
 from .base import POWER_ON_STATES, PlugError, PlugUnreachable, get_driver, probe_all
+from .energy import EnergyLog
 from .http import HttpClient
 
 log = logging.getLogger("wolserver")
 
 ACTIONS = ("on", "off", "cycle")
+WAKE_METHODS = ("wol", "power", "power_wol")
+ERROR_TEXTS = {"overtemp": "Overtemperature", "overpower": "Overload", "overvoltage": "Overvoltage",
+               "undervoltage": "Undervoltage"}
 
 
 class ConfirmRequired(PlugError):
@@ -59,18 +64,33 @@ def _text(data, key, maxlen, label, required=False):
 class PlugManager:
     CACHE_SECONDS = 5
     CYCLE_SECONDS = 10
+    POLL_SECONDS = 60  # background reading for the energy log and the alerts
     DEFAULT_STANDBY_W = 5.0
+    # Alerts
+    WELD_W = 1.0  # relay off, but more than this flows ...
+    WELD_SECONDS = 30  # ... for longer than this: contacts may be welded
+    TEMP_WARN_C = 70.0
+    UNREACHABLE_SECONDS = 300
+    RATED_CYCLES = 10000  # switching cycles of the relay (Shelly Plug M Gen3)
+    WEAR_WARN = 0.8
 
-    def __init__(self, data_dir, http=None, on_event=None, workers=4, clock=time.time):
+    def __init__(self, data_dir, http=None, on_event=None, workers=4, clock=time.time, device_lookup=None):
         self.path = os.path.join(data_dir, "plugs.json")
         self.http = http or HttpClient()
         self.on_event = on_event or (lambda **event: None)
+        self.device_lookup = device_lookup or (lambda device_id: None)  # id -> device or None
         self.clock = clock
         self._lock = threading.RLock()
         self._plugs = []
+        self.settings = {"price_kwh": None, "currency": "€"}
         self._live = {}  # plug id -> (monotonic ts, host, result)
+        self._alerts = {}  # plug id -> {"active": {key: message}, "since": {key: monotonic ts}}
+        self._summary = None
         self._pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="plugs")
+        self._stop = threading.Event()
+        self._thread = None
         self._load()
+        self.energy = EnergyLog(os.path.join(data_dir, "energy.db"), clock=clock)
 
     # -- storage --
 
@@ -87,12 +107,14 @@ class PlugManager:
             return
         if isinstance(data.get("plugs"), list):
             self._plugs = data["plugs"]
+        if isinstance(data.get("settings"), dict):
+            self.settings.update(data["settings"])
 
     def _save(self):
         tmp = self.path + ".tmp"
         fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump({"plugs": self._plugs}, f, ensure_ascii=False, indent=1)
+            json.dump({"plugs": self._plugs, "settings": self.settings}, f, ensure_ascii=False, indent=1)
             f.flush()
             os.fsync(f.fileno())
         os.replace(tmp, self.path)
@@ -117,6 +139,21 @@ class PlugManager:
     def by_mac(self):
         with self._lock:
             return {p["mac"]: {"id": p["id"], "name": p["name"]} for p in self._plugs if p.get("mac")}
+
+    def for_device(self, device_id):
+        """The plug a device is plugged into, or None."""
+        with self._lock:
+            for plug in self._plugs:
+                if (plug.get("consumer") or {}).get("id") == device_id:
+                    return copy.deepcopy(plug)
+        return None
+
+    def consumer_name(self, plug):
+        consumer = plug.get("consumer") or {}
+        if consumer.get("kind") == "device":
+            device = self.device_lookup(consumer.get("id"))
+            return device["name"] if device else plug["name"]
+        return consumer.get("label") or plug["name"]
 
     # -- validation --
 
@@ -152,8 +189,17 @@ class PlugManager:
                 plug["mac"] = normalize_mac(mac).lower()
             except ValueError as e:
                 raise PlugError(str(e)) from None
-        label = _text(data, "consumer_label", 64, "Consumer")
-        plug["consumer"] = {"kind": "label", "label": label} if label else None
+        if "consumer_device" in data or "consumer_label" in data:
+            device_id = data.get("consumer_device")
+            label = _text(data, "consumer_label", 64, "Consumer")
+            if device_id:
+                if self.device_lookup(device_id) is None:
+                    raise PlugError("Unknown device")
+                plug["consumer"] = {"kind": "device", "id": device_id}
+            else:
+                plug["consumer"] = {"kind": "label", "label": label} if label else None
+        else:
+            plug.setdefault("consumer", None)
         try:
             standby = data.get("standby_w", old.get("standby_w", self.DEFAULT_STANDBY_W))
             plug["standby_w"] = round(float(self.DEFAULT_STANDBY_W if standby in (None, "") else standby), 1)
@@ -161,7 +207,34 @@ class PlugManager:
             raise PlugError("Standby threshold: number expected") from None
         if not 0 <= plug["standby_w"] <= 500:
             raise PlugError("Standby threshold must be between 0 and 500 W")
+        self._validate_device_options(data, plug)
         return plug
+
+    def _validate_device_options(self, data, plug):
+        """What a plug does for its device: wake method, power cut after sleep, running threshold."""
+        method = data.get("wake_method", plug.get("wake_method")) or "wol"
+        if method not in WAKE_METHODS:
+            raise PlugError("Unknown wake method")
+        plug["wake_method"] = method
+        plug["cut_after_sleep"] = bool(data.get("cut_after_sleep", plug.get("cut_after_sleep", False)))
+        running = data.get("running_w", plug.get("running_w"))
+        if running in (None, ""):
+            plug["running_w"] = None
+        else:
+            try:
+                plug["running_w"] = round(float(running), 1)
+            except (TypeError, ValueError):
+                raise PlugError("Running threshold: number expected") from None
+            if not plug["standby_w"] < plug["running_w"] <= 4000:
+                raise PlugError("Running threshold must be above the standby threshold (max. 4000 W)")
+
+    def _check_unique_consumer(self, plug):
+        """A device has at most one plug."""
+        consumer = plug.get("consumer") or {}
+        if consumer.get("kind") == "device":
+            for other in self._plugs:
+                if other["id"] != plug.get("id") and (other.get("consumer") or {}).get("id") == consumer["id"]:
+                    raise PlugError("This device is already plugged into %s" % other["name"])
 
     def _driver(self, plug):
         return get_driver(plug["driver"])(plug["host"], plug.get("channel", 0), plug.get("password", ""), self.http)
@@ -193,6 +266,7 @@ class PlugManager:
             if plug.get("mac") and any(p.get("mac") == plug["mac"] and p.get("channel", 0) == plug["channel"]
                                        for p in self._plugs):
                 raise PlugError("This plug is already set up")
+            self._check_unique_consumer(plug)
             plug["id"] = uuid.uuid4().hex[:12]
             plug["created"] = self.clock()
             self._plugs.append(plug)
@@ -205,6 +279,7 @@ class PlugManager:
         with self._lock:
             old = self._find(plug_id)
             plug = self._validate(data, old)
+            self._check_unique_consumer(plug)
             if plug["host"] != old["host"] or plug["password"] != old.get("password"):
                 self._driver(plug).status()  # new address or password: check before saving
             self._plugs[self._plugs.index(old)] = plug
@@ -218,7 +293,52 @@ class PlugManager:
             self._plugs.remove(plug)
             self._save()
             self._live.pop(plug_id, None)
-            return plug
+            self._alerts.pop(plug_id, None)
+        self.energy.forget(plug_id)
+        return plug
+
+    def link_device(self, device_id, plug_id, options=None):
+        """Device side of the link: plug_id (or None) becomes the plug of the device, with its options."""
+        with self._lock:
+            target = self._find(plug_id) if plug_id else None
+            changed = False
+            for plug in self._plugs:
+                if plug is not target and (plug.get("consumer") or {}).get("id") == device_id:
+                    plug["consumer"] = None
+                    changed = True
+            if target is not None:
+                updated = dict(target, consumer={"kind": "device", "id": device_id})
+                updated.setdefault("standby_w", self.DEFAULT_STANDBY_W)
+                self._validate_device_options(options or {}, updated)
+                self._plugs[self._plugs.index(target)] = updated
+                changed = True
+            if changed:
+                self._save()
+
+    def unlink_device(self, device_id, name):
+        """The device is deleted: its plug keeps the name as a plain label."""
+        with self._lock:
+            for plug in self._plugs:
+                if (plug.get("consumer") or {}).get("id") == device_id:
+                    plug["consumer"] = {"kind": "label", "label": name}
+                    self._save()
+
+    def set_settings(self, data):
+        price = data.get("price_kwh", self.settings.get("price_kwh"))
+        if price in (None, ""):
+            price = None
+        else:
+            try:
+                price = round(float(price), 4)
+            except (TypeError, ValueError):
+                raise PlugError("Price: number expected") from None
+            if not 0 <= price <= 10:
+                raise PlugError("Price must be between 0 and 10 per kWh")
+        currency = _text(data, "currency", 8, "Currency") if "currency" in data else self.settings.get("currency")
+        with self._lock:
+            self.settings = {"price_kwh": price, "currency": currency or "€"}
+            self._save()
+            return dict(self.settings)
 
     # -- live values --
 
@@ -228,8 +348,84 @@ class PlugManager:
         except PlugError as e:
             result = {"status": None, "error": str(e), "unreachable": isinstance(e, PlugUnreachable)}
         with self._lock:
+            if not any(p["id"] == plug["id"] for p in self._plugs):
+                return result  # deleted in the meantime
             self._live[plug["id"]] = (time.monotonic(), plug["host"], result)
+        if result["status"]:
+            try:
+                self.energy.record(plug["id"], result["status"])
+            except Exception:  # noqa: BLE001 - the energy log must not disturb the live values
+                log.exception("Energy log: reading of %s not recorded", plug["name"])
+        self._check_alerts(plug, result)
         return result
+
+    # -- alerts --
+
+    def _check_alerts(self, plug, result):
+        """Raises and clears the alerts of a plug; each change goes into the log once."""
+        now = time.monotonic()
+        st = result["status"]
+        with self._lock:
+            state = self._alerts.setdefault(plug["id"], {"active": {}, "since": {}})
+            since, active = state["since"], state["active"]
+            current = {}
+            if st is None:
+                current = {k: v for k, v in active.items() if k != "unreachable"}  # unknown: keep
+                if result.get("unreachable"):
+                    if now - since.setdefault("unreachable", now) >= self.UNREACHABLE_SECONDS:
+                        current["unreachable"] = "Plug not reachable"
+            else:
+                since.pop("unreachable", None)
+                power = st.get("power_w") or 0
+                if not st["on"] and power > self.WELD_W:
+                    if now - since.setdefault("welded", now) >= self.WELD_SECONDS:
+                        current["welded"] = ("Relay is off, but %s W are flowing: the contacts may be welded"
+                                             % _fmt_w(power))
+                else:
+                    since.pop("welded", None)
+                for err in st.get("errors") or ():
+                    current["error:" + err] = "Plug reports: %s" % ERROR_TEXTS.get(err, err)
+                temp = st.get("temperature_c")
+                if temp is not None and temp >= self.TEMP_WARN_C:
+                    current["hot"] = "Plug is hot: %d °C" % round(temp)
+                count = st.get("switch_count")
+                if count is not None and count >= self.RATED_CYCLES * self.WEAR_WARN:
+                    current["wear"] = "Relay worn: %d of %d switching cycles used" % (count, self.RATED_CYCLES)
+            raised = [current[k] for k in current if k not in active]
+            cleared = [active[k] for k in active if k not in current]
+            state["active"] = current
+        for message in raised:
+            log.warning("plug %s: %s", plug["name"], message)
+            self.on_event(device_id=None, device=plug["name"], action="alert", source="monitor", ok=False,
+                          message=message)
+        for message in cleared:
+            log.info("plug %s: cleared: %s", plug["name"], message)
+            self.on_event(device_id=None, device=plug["name"], action="alert", source="monitor", ok=True,
+                          message="Cleared: %s" % message)
+
+    def alerts(self, plug_id):
+        with self._lock:
+            active = (self._alerts.get(plug_id) or {}).get("active") or {}
+            return [{"key": k, "message": v} for k, v in active.items()]
+
+    # -- background reading --
+
+    def start(self):
+        self._thread = threading.Thread(target=self._loop, name="plug-poll", daemon=True)
+        self._thread.start()
+
+    def _loop(self):
+        while not self._stop.wait(self.POLL_SECONDS - time.time() % self.POLL_SECONDS + 5):
+            try:
+                self.poll()
+            except Exception:  # noqa: BLE001 - the poller must never die
+                log.exception("Error while reading the plugs")
+
+    def poll(self):
+        """Reads every plug whose live values are older than half the poll interval."""
+        with self._lock:
+            ids = [p["id"] for p in self._plugs]
+        list(self._pool.map(lambda i: self.live(i, max_age=self.POLL_SECONDS / 2), ids))
 
     def live(self, plug_id, max_age=CACHE_SECONDS):
         with self._lock:
@@ -254,11 +450,12 @@ class PlugManager:
 
         stale = [p for p in plugs if not current(p)]
         fresh = dict(zip([p["id"] for p in stale], self._pool.map(self._fetch, stale)))
-        return [dict(self.public(p), live=fresh.get(p["id"]) or cached[p["id"]][2]) for p in plugs]
+        return [dict(self.public(p), live=fresh.get(p["id"]) or cached[p["id"]][2], alerts=self.alerts(p["id"]))
+                for p in plugs]
 
     # -- switching --
 
-    def switch(self, plug_id, action, confirm=False, source="manual"):
+    def switch(self, plug_id, action, confirm=False, source="manual", log_event=True):
         if action not in ACTIONS:
             raise PlugError("Unknown action: %s" % action)
         plug = self.get(plug_id)
@@ -269,8 +466,8 @@ class PlugManager:
                 raise ConfirmRequired("This plug cannot measure: it is unknown whether the device is still running")
             status = driver.status()
             if status.on and status.power_w is not None and status.power_w > plug.get("standby_w", self.DEFAULT_STANDBY_W):
-                consumer = (plug.get("consumer") or {}).get("label") or plug["name"]
-                raise ConfirmRequired("%s is drawing %s W" % (consumer, _fmt_w(status.power_w)), status.power_w)
+                raise ConfirmRequired("%s is drawing %s W" % (self.consumer_name(plug), _fmt_w(status.power_w)),
+                                      status.power_w)
         try:
             if action == "cycle":
                 driver.cycle(self.CYCLE_SECONDS)
@@ -284,8 +481,9 @@ class PlugManager:
         with self._lock:
             self._live.pop(plug_id, None)
         (log.info if ok else log.warning)("plug %s %s (%s): %s", action, plug["name"], source, message)
-        self.on_event(device_id=None, device=plug["name"], action="power_" + action, source=source, ok=ok,
-                      message=message)
+        if log_event or not ok:
+            self.on_event(device_id=None, device=plug["name"], action="power_" + action, source=source, ok=ok,
+                          message=message)
         if not ok:
             raise PlugError(message)
         return message
@@ -298,8 +496,31 @@ class PlugManager:
             raise PlugError("Unknown state: %s" % state)
         self._driver(self.get(plug_id)).set_power_on_state(state)
 
+    # -- energy --
+
+    def energy_summary(self, max_age=30):
+        """Today, month and year per plug plus the estimated standby energy per year (Wh); cached briefly,
+        the GUI asks every few seconds."""
+        with self._lock:
+            plugs = copy.deepcopy(self._plugs)
+            cached = self._summary
+        key = [(p["id"], p.get("standby_w")) for p in plugs]
+        if cached and cached[1] == key and time.monotonic() - cached[0] < max_age:
+            return cached[2]
+        totals = self.energy.totals([p["id"] for p in plugs])
+        for p in plugs:
+            totals[p["id"]]["standby_year"] = self.energy.standby(p["id"], p.get("standby_w", self.DEFAULT_STANDBY_W))
+        with self._lock:
+            self._summary = (time.monotonic(), key, totals)
+        return totals
+
     def shutdown(self):
+        self._stop.set()
         self._pool.shutdown(wait=False)
+        try:
+            self.energy.close()
+        except Exception:  # noqa: BLE001
+            log.exception("Energy log: closing failed")
 
 
 def _fmt_w(watts):

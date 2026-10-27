@@ -182,7 +182,8 @@ class App:
         except Exception:  # noqa: BLE001
             log.exception("Could not create SSH key")
         self.status = StatusMonitor(config["status_cache_seconds"])
-        self.plugs = plugs.PlugManager(data_dir, on_event=self.store.add_event)
+        self.plugs = plugs.PlugManager(data_dir, on_event=self.store.add_event,
+                                       device_lookup=lambda device_id: self.store.get("devices", device_id))
         self.scheduler = Scheduler(self.store, self.run_action, run_plug=self.run_plug_action)
         self.started = time.time()
         self._static_cache = {}
@@ -200,6 +201,7 @@ class App:
             R("DELETE", r"/api/devices/(?P<item_id>\w+)", self.api_device_delete),
             # Device by ID or name; also allowed for API tokens (scripts)
             R("POST", r"/api/devices/(?P<item_id>[^/]+)/(?P<action>wake|sleep)", self.api_device_action, token=True),
+            R("PUT", r"/api/devices/(?P<item_id>\w+)/plug", self.api_device_plug),
             R("GET", r"/api/status", self.api_status, token=True),
             R("GET", r"/api/tokens", self.api_tokens),
             R("POST", r"/api/tokens", self.api_token_create),
@@ -259,6 +261,9 @@ class App:
             R("POST", r"/api/plugs/(?P<item_id>\w+)/(?P<action>on|off|cycle)", self.api_plug_switch),
             R("GET", r"/api/plugs/(?P<item_id>\w+)/power-on-state", self.api_plug_power_on_state),
             R("PUT", r"/api/plugs/(?P<item_id>\w+)/power-on-state", self.api_plug_power_on_state),
+            R("GET", r"/api/energy", self.api_energy),
+            R("GET", r"/api/energy/settings", self.api_energy_settings),
+            R("PUT", r"/api/energy/settings", self.api_energy_settings),
         ]
         self._net_logged = self._read_net_logged()
 
@@ -282,6 +287,7 @@ class App:
 
     def start(self):
         self.scheduler.start()
+        self.plugs.start()
 
     def stop(self):
         self.scheduler.stop()
@@ -306,15 +312,21 @@ class App:
             if source_ip == wifi.HOTSPOT_ADDRESS:
                 ok, message = False, "Not executed: the Pi is not on the home network (setup hotspot active)"
             elif action == "wake":
-                wol.send_magic_packet(
-                    device["mac"], device["broadcast"], device["wol_port"], source_ip=source_ip
-                )
-                if iface:
-                    ok, message = True, "Magic packet sent to %s via %s" % (device["mac"], iface["name"])
-                else:
-                    ok, message = True, "Magic packet sent to %s" % device["mac"]
+                ok, message = self._power_wake(device, source)
+                if message is None:
+                    wol.send_magic_packet(
+                        device["mac"], device["broadcast"], device["wol_port"], source_ip=source_ip
+                    )
+                    if iface:
+                        ok, message = True, "Magic packet sent to %s via %s" % (device["mac"], iface["name"])
+                    else:
+                        ok, message = True, "Magic packet sent to %s" % device["mac"]
             else:
                 ok, message = power.sleep_device(device, self.identity, source_ip=source_ip)
+                plug = self.plugs.for_device(device["id"])
+                if ok and plug and plug.get("cut_after_sleep"):
+                    threading.Thread(target=self._cut_after_sleep, args=(device, plug["id"], source),
+                                     name="cut-%s" % device["id"], daemon=True).start()
         except (OSError, ValueError) as e:
             ok, message = False, "Error: %s" % e
         self.status.invalidate(device["id"])
@@ -324,6 +336,74 @@ class App:
             source=source, ok=ok, message=message,
         )
         return ok, message
+
+    POWER_WOL_DELAY = 15  # s from power on to the magic packet: the network card needs power first
+    CUT_WAIT = 300  # s: how long the device may take to shut down before its power is cut
+    CUT_INTERVAL = 10
+
+    def _power_wake(self, device, source):
+        """Wake method of the device's plug. (ok, message) if done, (None, None) if WOL has to follow."""
+        plug = self.plugs.for_device(device["id"])
+        method = plug.get("wake_method", "wol") if plug else "wol"
+        if method == "wol":
+            return None, None
+        try:
+            live = self.plugs.live(plug["id"], max_age=0)
+            st = live["status"]
+            if st is None:
+                raise plugs.PlugError(live["error"])
+            if not st["on"]:
+                self.plugs.switch(plug["id"], "on", source=source, log_event=method == "power_wol")
+                if method == "power":
+                    return True, "Power switched on via %s" % plug["name"]
+                time.sleep(self.POWER_WOL_DELAY)
+                return None, None
+            if method == "power_wol":
+                return None, None
+            if st.get("power_w") is not None and st["power_w"] <= plug.get("standby_w", 0):
+                # Relay on, device off: it starts when the power returns
+                self.plugs.switch(plug["id"], "cycle", source=source, log_event=False)
+                return True, "Power cycle via %s: the device starts when the power returns" % plug["name"]
+            return True, "Power is already on: %s draws %s W" % (device["name"],
+                                                                 plugs.manager._fmt_w(st["power_w"] or 0))
+        except plugs.PlugError as e:
+            if method == "power_wol":
+                log.warning("Wake %s: plug %s: %s - sending the magic packet anyway", device["name"], plug["name"], e)
+                return None, None
+            return False, "Plug %s: %s" % (plug["name"], e)
+
+    def _cut_after_sleep(self, device, plug_id, source):
+        """After the sleep command: wait until the device draws standby power only, then switch off its plug.
+        Only offered for sleep commands that shut the device down (rule 2 of the proposal)."""
+        deadline = time.monotonic() + self.CUT_WAIT
+        quiet, power_w = 0, None
+        while time.monotonic() < deadline:
+            time.sleep(self.CUT_INTERVAL)
+            try:
+                plug = self.plugs.get(plug_id)
+                st = self.plugs.live(plug_id, max_age=0)["status"]
+            except KeyError:
+                return
+            if st is None:
+                continue
+            if not st["on"]:
+                return
+            power_w = st.get("power_w")
+            quiet = quiet + 1 if power_w is not None and power_w <= plug.get("standby_w", 0) else 0
+            if quiet >= 2:
+                try:
+                    self.plugs.switch(plug_id, "off", source=source)
+                except plugs.ConfirmRequired:
+                    quiet = 0
+                    continue
+                except plugs.PlugError:
+                    pass  # switch() has logged it
+                return
+        message = "Power not cut: %s still draws %s W after %d minutes" % (
+            device["name"], "?" if power_w is None else plugs.manager._fmt_w(power_w), self.CUT_WAIT // 60)
+        log.warning("%s (%s)", message, source)
+        self.store.add_event(device_id=device["id"], device=device["name"], action="power_off", source=source,
+                             ok=False, message=message)
 
     def run_plug_action(self, plug_id, action, force, source):
         """Plug action from a schedule. Nobody can confirm at that moment: while the consumer draws more than
@@ -471,10 +551,21 @@ class App:
         return 200, self.store.update("devices", item_id, device)
 
     def api_device_delete(self, req, item_id):
+        device = self._device_or_404(item_id)
         if not self.store.delete("devices", item_id):
             raise ApiError(404, "Device not found")
+        self.plugs.unlink_device(item_id, device["name"])
         self.status.invalidate(item_id)
         return 200, {"ok": True}
+
+    def api_device_plug(self, req, item_id):
+        """The plug of a device (or none), with what it does for the device."""
+        self._device_or_404(item_id)
+        b = req.body
+        self._plug_call(self.plugs.link_device, item_id, b.get("plug_id") or None,
+                        {k: b[k] for k in ("wake_method", "cut_after_sleep", "running_w") if k in b})
+        plug = self.plugs.for_device(item_id)
+        return 200, {"plug": self.plugs.public(plug) if plug else None}
 
     MAX_WAIT = 300  # s
 
@@ -535,7 +626,27 @@ class App:
         return 200, {"ok": True}
 
     def api_status(self, req):
-        return 200, {"status": self.status.get(self.store.list("devices")), "checked": time.time()}
+        devices = self.store.list("devices")
+        return 200, {"status": self.status.get(devices), "power": self._device_power(devices), "checked": time.time()}
+
+    def _device_power(self, devices):
+        """Live values of the plugs the devices are plugged into: {device id: {...}}."""
+        out = {}
+        for dev in devices:
+            plug = self.plugs.for_device(dev["id"])
+            if plug is None:
+                continue
+            try:
+                live = self.plugs.live(plug["id"])
+            except KeyError:
+                continue
+            st = live.get("status") or {}
+            out[dev["id"]] = {
+                "plug_id": plug["id"], "plug": plug["name"], "reachable": bool(st), "on": st.get("on"),
+                "power_w": st.get("power_w"), "standby_w": plug.get("standby_w"), "running_w": plug.get("running_w"),
+                "wake_method": plug.get("wake_method", "wol"), "cut_after_sleep": bool(plug.get("cut_after_sleep")),
+            }
+        return out
 
     # -- Schedules --
 
@@ -835,7 +946,12 @@ class App:
 
     def api_plugs(self, req):
         live = (req.query.get("live") or ["1"])[0] != "0"  # ?live=0: without asking the plugs (e.g. schedules)
-        return 200, {"plugs": self.plugs.list(live), "drivers": plugs.describe_drivers()}
+        items = self.plugs.list(live)
+        energy = self.plugs.energy_summary() if live else {}
+        for p in items:
+            p["consumer_name"] = self.plugs.consumer_name(p) if p.get("consumer") else None
+            p["energy"] = energy.get(p["id"])
+        return 200, {"plugs": items, "drivers": plugs.describe_drivers(), "settings": self.plugs.settings}
 
     def api_plug_probe(self, req):
         b = req.body
@@ -864,6 +980,35 @@ class App:
             # "ok" in the answer: the GUI asks and sends the request again with confirm
             return 409, {"ok": False, "confirm": True, "power_w": e.power_w, "message": str(e)}
         return 200, {"ok": True, "message": message}
+
+    def api_energy(self, req):
+        """Energy per hour, day or month (?period=day|month|year&date=YYYY-MM-DD), for the day also the curve."""
+        period = (req.query.get("period") or ["day"])[0]
+        if period not in ("day", "month", "year"):
+            raise ApiError(400, "Unknown period: %s" % period)
+        try:
+            day = datetime.date.fromisoformat((req.query.get("date") or [datetime.date.today().isoformat()])[0])
+        except ValueError:
+            raise ApiError(400, "Date: YYYY-MM-DD expected") from None
+        if not 2000 <= day.year <= 2100:
+            raise ApiError(400, "Date: YYYY-MM-DD expected")
+        items = self.plugs.list(live=False)
+        ids = [p["id"] for p in items]
+        res = self.plugs.energy.series(period, day, set(ids))
+        res["values"] = res.pop("plugs")  # Wh per bucket and plug; "plugs" lists the plugs
+        if period == "day":
+            res["curve"] = self.plugs.energy.curve(day, ids)
+        res.update(period=period, date=day.isoformat(), settings=self.plugs.settings,
+                   summary=self.plugs.energy_summary(),
+                   plugs=[{"id": p["id"], "name": p["name"], "standby_w": p.get("standby_w"),
+                           "consumer_name": self.plugs.consumer_name(p) if p.get("consumer") else None}
+                          for p in items])
+        return 200, res
+
+    def api_energy_settings(self, req):
+        if req.body:
+            self._plug_call(self.plugs.set_settings, req.body)
+        return 200, {"settings": self.plugs.settings}
 
     def api_plug_power_on_state(self, req, item_id):
         if req.body.get("state") is not None:
