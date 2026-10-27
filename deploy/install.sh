@@ -1,4 +1,19 @@
 #!/bin/bash
+# WOL-Server - deploy/install.sh
+# Installs or updates WOL-Server on Raspberry Pi OS.
+#
+#   Copyright (C) 2026 Thorsten Schnebeck <thorsten.schnebeck@gmx.net>
+#   Produced by Thorsten Schnebeck - the idea, the decisions, the testing.
+#   Written by Anthropic Claude Opus 5.5 - AI generated content.
+#
+#   Free software under the GNU General Public License, version 3 or later.
+#   There is no warranty, to the extent permitted by law. The full text is in
+#   LICENSES/GPL-3.0-or-later.txt.
+#
+# SPDX-FileCopyrightText: (C) 2026 Thorsten Schnebeck <thorsten.schnebeck@gmx.net>
+# SPDX-FileContributor: Anthropic Claude Opus 5.5 (AI generated content)
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
 # Installs or updates WOL-Server on Raspberry Pi OS (Lite).
 # Run from the project directory:
 #   sudo ./deploy/install.sh [--port 80] [--no-password] [--openvpn client.ovpn] [--country DE]
@@ -19,7 +34,7 @@ while [ $# -gt 0 ]; do
         --no-wlan-setup) WLAN_SETUP=0; shift ;;
         --no-hotspot) HOTSPOT=0; shift ;;
         --country) COUNTRY="$2"; shift 2 ;;
-        -h|--help) sed -n '2,5p' "$0"; exit 0 ;;
+        -h|--help) sed -n '17,20p' "$0"; exit 0 ;;
         *) echo "Unknown option: $1" >&2; exit 1 ;;
     esac
 done

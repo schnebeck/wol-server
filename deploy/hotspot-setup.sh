@@ -1,4 +1,19 @@
 #!/bin/bash
+# WOL-Server - deploy/hotspot-setup.sh
+# Sets up Wi-Fi management with the setup hotspot and the root services.
+#
+#   Copyright (C) 2026 Thorsten Schnebeck <thorsten.schnebeck@gmx.net>
+#   Produced by Thorsten Schnebeck - the idea, the decisions, the testing.
+#   Written by Anthropic Claude Opus 5.5 - AI generated content.
+#
+#   Free software under the GNU General Public License, version 3 or later.
+#   There is no warranty, to the extent permitted by law. The full text is in
+#   LICENSES/GPL-3.0-or-later.txt.
+#
+# SPDX-FileCopyrightText: (C) 2026 Thorsten Schnebeck <thorsten.schnebeck@gmx.net>
+# SPDX-FileContributor: Anthropic Claude Opus 5.5 (AI generated content)
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
 # Sets up Wi-Fi management with the setup hotspot (called by install.sh).
 #
 #   sudo ./deploy/hotspot-setup.sh [--country DE]
@@ -12,7 +27,7 @@ COUNTRY=DE
 while [ $# -gt 0 ]; do
     case "$1" in
         --country) COUNTRY="$2"; shift 2 ;;
-        -h|--help) sed -n '2,8p' "$0"; exit 0 ;;
+        -h|--help) sed -n '17,23p' "$0"; exit 0 ;;
         *) echo "Unknown option: $1" >&2; exit 1 ;;
     esac
 done

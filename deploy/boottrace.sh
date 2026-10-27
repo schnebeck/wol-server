@@ -1,4 +1,19 @@
 #!/bin/bash
+# WOL-Server - deploy/boottrace.sh
+# Boot trace during the first boot: system state every 15 s on the boot partition.
+#
+#   Copyright (C) 2026 Thorsten Schnebeck <thorsten.schnebeck@gmx.net>
+#   Produced by Thorsten Schnebeck - the idea, the decisions, the testing.
+#   Written by Anthropic Claude Opus 5.5 - AI generated content.
+#
+#   Free software under the GNU General Public License, version 3 or later.
+#   There is no warranty, to the extent permitted by law. The full text is in
+#   LICENSES/GPL-3.0-or-later.txt.
+#
+# SPDX-FileCopyrightText: (C) 2026 Thorsten Schnebeck <thorsten.schnebeck@gmx.net>
+# SPDX-FileContributor: Anthropic Claude Opus 5.5 (AI generated content)
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
 # Boot trace on the first boot: writes the state to the boot partition every 15 s
 # (wol-trace.log, previous snapshot in wol-trace.1.log). If the boot hangs, the last snapshot
 # shows what systemd is waiting for - readable with any card reader.

@@ -638,6 +638,16 @@ GET    /api/net/stats               GET  /api/net/logs/<queries|dhcp|service>
 POST   /api/net/probe               POST /api/net/restart           PUT  /api/net/static-ip {enabled}
 ```
 
+## Lizenz
+
+WOL-Server ist freie Software unter der GNU General Public License, Version 3 oder später
+(`GPL-3.0-or-later`); eine Gewährleistung gibt es nicht, soweit gesetzlich zulässig. Der vollständige Text steht in
+[LICENSES/GPL-3.0-or-later.txt](LICENSES/GPL-3.0-or-later.txt). Jede Quelldatei trägt einen SPDX-Kopf
+([REUSE](https://reuse.software/)-Aufbau; Dateien ohne Kommentarmöglichkeit deckt `REUSE.toml` ab).
+
+Copyright (C) 2026 Thorsten Schnebeck. Produziert von Thorsten Schnebeck – die Idee, die Entscheidungen, das Testen.
+Geschrieben von Anthropic Claude Opus 5.5 – KI-generierter Inhalt.
+
 ## 9. Entwicklung
 
 ```bash

@@ -1,3 +1,20 @@
+/*
+ * WOL-Server - wolserver/web/i18n.js
+ * Languages of the web GUI: language choice, translation and switcher.
+ *
+ *   Copyright (C) 2026 Thorsten Schnebeck <thorsten.schnebeck@gmx.net>
+ *   Produced by Thorsten Schnebeck - the idea, the decisions, the testing.
+ *   Written by Anthropic Claude Opus 5.5 - AI generated content.
+ *
+ *   Free software under the GNU General Public License, version 3 or later.
+ *   There is no warranty, to the extent permitted by law. The full text is in
+ *   LICENSES/GPL-3.0-or-later.txt.
+ *
+ * SPDX-FileCopyrightText: (C) 2026 Thorsten Schnebeck <thorsten.schnebeck@gmx.net>
+ * SPDX-FileContributor: Anthropic Claude Opus 5.5 (AI generated content)
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+
 // Languages: English is the source language in code and HTML; translations come from catalogs
 // such as i18n-de.js (window.I18N_DE = { "English text": "translated text", … }).
 // Keys with {0}, {1} … are patterns: t("{0} of {1} online", 3, 5) fills them in, tr() also matches

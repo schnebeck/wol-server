@@ -1,4 +1,19 @@
 #!/bin/sh
+# WOL-Server - deploy/dns-lease-hook.sh
+# dnsmasq lease hook: records lease events for the web GUI.
+#
+#   Copyright (C) 2026 Thorsten Schnebeck <thorsten.schnebeck@gmx.net>
+#   Produced by Thorsten Schnebeck - the idea, the decisions, the testing.
+#   Written by Anthropic Claude Opus 5.5 - AI generated content.
+#
+#   Free software under the GNU General Public License, version 3 or later.
+#   There is no warranty, to the extent permitted by law. The full text is in
+#   LICENSES/GPL-3.0-or-later.txt.
+#
+# SPDX-FileCopyrightText: (C) 2026 Thorsten Schnebeck <thorsten.schnebeck@gmx.net>
+# SPDX-FileContributor: Anthropic Claude Opus 5.5 (AI generated content)
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
 # Called by dnsmasq on every lease change (dhcp-script, as user dnsmasq):
 #   <add|old|del> <MAC> <IP> [name]
 # Writes one line for "last seen" and the lease history in the web GUI.

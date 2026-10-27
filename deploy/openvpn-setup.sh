@@ -1,4 +1,19 @@
 #!/bin/bash
+# WOL-Server - deploy/openvpn-setup.sh
+# Sets up the Pi as an OpenVPN client, reachable over the VPN.
+#
+#   Copyright (C) 2026 Thorsten Schnebeck <thorsten.schnebeck@gmx.net>
+#   Produced by Thorsten Schnebeck - the idea, the decisions, the testing.
+#   Written by Anthropic Claude Opus 5.5 - AI generated content.
+#
+#   Free software under the GNU General Public License, version 3 or later.
+#   There is no warranty, to the extent permitted by law. The full text is in
+#   LICENSES/GPL-3.0-or-later.txt.
+#
+# SPDX-FileCopyrightText: (C) 2026 Thorsten Schnebeck <thorsten.schnebeck@gmx.net>
+# SPDX-FileContributor: Anthropic Claude Opus 5.5 (AI generated content)
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
 # Sets up the Pi as an OpenVPN client so the WOL GUI is reachable via the VPN.
 #
 #   sudo ./deploy/openvpn-setup.sh <client.ovpn> [--name wol] [--allow-redirect-gateway]
@@ -24,7 +39,7 @@ while [ $# -gt 0 ]; do
         --allow-redirect-gateway) ALLOW_REDIRECT=1; shift ;;
         --auth) AUTH_FILE="$2"; shift 2 ;;
         --no-wait) WAIT=0; shift ;;
-        -h|--help) sed -n '2,14p' "$0"; exit 0 ;;
+        -h|--help) sed -n '17,29p' "$0"; exit 0 ;;
         -*) echo "Unknown option: $1" >&2; exit 1 ;;
         *) OVPN="$1"; shift ;;
     esac
