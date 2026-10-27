@@ -1,0 +1,10 @@
+[Unit]
+Description=WOL-Server: HTTPS-Zertifikat täglich abholen
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=1d
+RandomizedDelaySec=30min
+
+[Install]
+WantedBy=timers.target

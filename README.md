@@ -451,6 +451,11 @@ sudo systemctl restart wol-server            # nach Änderung der config.json
 |---|---|---|
 | `listen` | `"::"` | Adresse (dual-stack; fällt ohne IPv6 auf `0.0.0.0` zurück) |
 | `port` | `80` | HTTP-Port |
+| `https_port` | `443` | HTTPS-Port, `0` schaltet HTTPS ab (siehe [HTTPS](#https-lets-encrypt-über-einen-webserver)) |
+| `https_host` | `""` | Name im Zertifikat, z. B. `"wol.home.arpa"`; leer heißt: erster Name im Zertifikat |
+| `https_redirect` | `true` | HTTP auf HTTPS umleiten, sobald ein gültiges Zertifikat da ist (nicht im Hotspot) |
+| `tls_dir` | `/etc/wol-server/tls` | Zertifikat (`cert.pem`), Schlüssel (`key.pem`) und SSH-Zugang für den Abruf |
+| `cert_source` | `""` | SSH-Ziel, das Schlüssel und Zertifikat liefert, z. B. `"wolcert@10.1.1.3"` |
 | `data_dir` | `/var/lib/wol-server` | Geräte, Zeitpläne, Protokoll, Passwort-Hash, SSH-Schlüssel |
 | `allowed_networks` | private Netze | Quellnetze mit Zugriff |
 | `wol_interface` | `""` (automatisch) | Interface für Magic Packets, z. B. `"wlan0"`; automatisch heißt: das Interface der Default-Route, VPN-Interfaces ausgenommen |
@@ -473,6 +478,7 @@ Dateien:
 /var/lib/wol-server/data.json    Geräte, Zeitpläne, Protokoll (atomar geschrieben)
 /var/lib/wol-server/auth.json    Passwort-Hash (PBKDF2) + Cookie-Secret, Modus 0600
 /var/lib/wol-server/.ssh/        SSH-Schlüssel und known_hosts für das Schlafenlegen
+/etc/wol-server/tls/             HTTPS: cert.pem, key.pem, fetch_key (Abruf), known_hosts (Webserver)
 /etc/openvpn/client/wol.conf     OpenVPN-Client (Dienst openvpn-client@wol)
 /etc/default/wol-wlan-watchdog   Einstellungen des WLAN-Watchdogs
 /var/lib/wol-wifi/hotspot.json   Hotspot-Passwort (nur root)
@@ -487,6 +493,25 @@ Dateien:
 ```
 
 **Backup:** `/var/lib/wol-server/` sichern; DHCP/DNS zusätzlich unter *Netzwerk → Werkzeuge → Sicherung*.
+
+### HTTPS (Let's Encrypt über einen Webserver)
+
+Der Pi ist aus dem Internet nicht erreichbar und kann deshalb kein Let's-Encrypt-Zertifikat selbst holen. Das
+übernimmt ein öffentlicher Webserver, auf den der Name (z. B. `wol.home.arpa`) öffentlich zeigt. Der Pi holt
+Schlüssel und Zertifikat täglich per SSH über das VPN ab (`wol-cert.timer`) und lädt sie ohne Neustart.
+
+Auf dem Webserver (Apache, certbot):
+
+1. Ein vHost auf Port 80 für den Namen, der nur `/.well-known/acme-challenge/` aus einem Webroot ausliefert.
+2. `certbot certonly --webroot -w <webroot> -d <name> --key-type ecdsa --deploy-hook <hook>`; der Hook schreibt
+   `privkey.pem` und `fullchain.pem` hintereinander in eine Datei, die nur ein eigener Benutzer lesen darf.
+3. Dessen `~/.ssh/authorized_keys` enthält den Schlüssel `/etc/wol-server/tls/fetch_key.pub` des Pi:
+   `restrict,from="10.1.1.0/24",command="cat <bündel>" ssh-ed25519 …`
+
+Auf dem Pi: `cert_source` und `https_host` in `config.json` setzen, den Host-Schlüssel des Webservers in
+`/etc/wol-server/tls/known_hosts` eintragen (`<vpn-adresse> ssh-ed25519 …`), dann `sudo systemctl start wol-cert`.
+Der Abruf übernimmt nur Zertifikate, die zum Schlüssel passen, auf `https_host` lauten und noch mindestens zwei Tage
+gelten. Damit die Umleitung funktioniert, muss der Name im Heimnetz auf den Pi zeigen (interner DNS).
 
 ## 8. Technische Details
 

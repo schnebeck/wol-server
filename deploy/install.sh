@@ -87,6 +87,13 @@ exec python3 -m wolserver --config /etc/wol-server/config.json "$@"
 EOF
 chmod 0755 /usr/local/bin/wol-server
 
+say "HTTPS: Verzeichnis für das Zertifikat"
+# cert.pem/key.pem holt wol-cert.timer per SSH vom Webserver (cert_source in config.json)
+install -d -o root -g wol -m 0750 "$CONF_DIR/tls"
+if [ ! -f "$CONF_DIR/tls/fetch_key" ]; then
+    ssh-keygen -q -t ed25519 -N "" -C "wol-cert@$(hostname)" -f "$CONF_DIR/tls/fetch_key"
+fi
+
 say "SSH-Schlüssel für das Schlafenlegen"
 if [ ! -f "$DATA_DIR/.ssh/id_ed25519" ]; then
     install -d -o wol -g wol -m 0700 "$DATA_DIR/.ssh"
@@ -111,9 +118,11 @@ say "systemd-Dienst"
 install -m 0644 "$SRC/deploy/wol-server.service" "$UNIT"
 # Startbericht auf der Boot-Partition (wol-boot.log), lesbar mit jedem Kartenleser
 install -m 0644 "$SRC/deploy/wol-bootlog.service" "$SRC/deploy/wol-bootlog.timer" /etc/systemd/system/
+# HTTPS-Zertifikat täglich abholen (wartet, bis tls/known_hosts eingerichtet ist)
+install -m 0644 "$SRC/deploy/wol-cert.service" "$SRC/deploy/wol-cert.timer" /etc/systemd/system/
 # enable lädt die Unit-Dateien selbst neu. Kein zusätzliches daemon-reload: Jedes dauert auf dem
 # Zero 12–20 s, in denen systemd blockiert (und den Hardware-Watchdog nicht bedient).
-systemctl enable wol-server.service wol-bootlog.timer >/dev/null
+systemctl enable wol-server.service wol-bootlog.timer wol-cert.timer >/dev/null
 systemctl restart wol-server.service
 sleep 2
 if systemctl is-active --quiet wol-server.service; then

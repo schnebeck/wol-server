@@ -12,6 +12,12 @@ DEFAULTS = {
     # "::" lauscht dual-stack auf IPv4 und IPv6; fällt bei fehlendem IPv6 auf 0.0.0.0 zurück.
     "listen": "::",
     "port": 80,
+    # HTTPS (0 = aus). Zertifikat: tls_dir/cert.pem und key.pem, abgeholt per `wol-server cert-fetch`
+    "https_port": 443,
+    "tls_dir": "/etc/wol-server/tls",
+    "https_host": "",  # Name im Zertifikat, z. B. wol.home.arpa; leer = erster Name im Zertifikat
+    "https_redirect": True,  # HTTP auf HTTPS umleiten, sobald ein gültiges Zertifikat da ist (nicht im Hotspot)
+    "cert_source": "",  # SSH-Ziel, das Schlüssel und Zertifikat liefert, z. B. wolcert@10.1.1.3
     "data_dir": "/var/lib/wol-server",
     # Nur Clients aus diesen Netzen dürfen die GUI/API nutzen (Intranet + VPN).
     "allowed_networks": [

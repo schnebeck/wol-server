@@ -583,6 +583,7 @@ async function renderSystem() {
     ["Dienst läuft seit", fmtDuration(info.service_uptime)],
     ["CPU-Temperatur", info.cpu_temp != null ? `${info.cpu_temp.toFixed(1)} °C` : "–"],
     ["Last (1 min)", info.load.toFixed(2)],
+    ["HTTPS", httpsLabel(info.https)],
   ];
   $("#sys-info").replaceChildren(...rows.map(([k, v]) => el("div", {}, el("dt", {}, k), el("dd", {}, v))));
   renderSysNetwork(info.network);
@@ -591,6 +592,13 @@ async function renderSystem() {
   $("#ssh-key").value = info.ssh_public_key || "(kein Schlüssel – ssh-keygen nicht verfügbar)";
   $("#pw-title").textContent = info.auth_required ? "Passwort ändern" : "Passwort festlegen";
   $("#pw-current-field").hidden = !info.auth_required;
+}
+
+function httpsLabel(https) {
+  if (!https || !https.port) return "aus";
+  if (!https.names) return "kein Zertifikat";
+  const until = new Date(https.not_after * 1000).toLocaleDateString("de-DE");
+  return https.active ? `${https.names[0]}, gültig bis ${until}` : `Zertifikat abgelaufen (${until})`;
 }
 
 const IFACE_KINDS = { wifi: "WLAN", lan: "LAN", vpn: "VPN" };
