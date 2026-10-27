@@ -645,6 +645,7 @@ class App:
                 "plug_id": plug["id"], "plug": plug["name"], "reachable": bool(st), "on": st.get("on"),
                 "power_w": st.get("power_w"), "standby_w": plug.get("standby_w"), "running_w": plug.get("running_w"),
                 "wake_method": plug.get("wake_method", "wol"), "cut_after_sleep": bool(plug.get("cut_after_sleep")),
+                "locked": bool(plug.get("locked")),
             }
         return out
 

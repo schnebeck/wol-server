@@ -1028,6 +1028,10 @@ echo "$USER ALL=(root) NOPASSWD: /usr/bin/systemctl suspend, /usr/bin/systemctl 
           </select>
           <small id="plug-pos-hint"></small>
         </label>
+        <label class="check span2 lock-check">
+          <input type="checkbox" name="locked">
+          <span>Never switch off <small class="muted">For the plug of the WOL-Server, the router or a switch: it is switched on and measured, but never switched off or restarted.</small></span>
+        </label>
       </div>
       <details class="advanced">
         <summary>Advanced</summary>
