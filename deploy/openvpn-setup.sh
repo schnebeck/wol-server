@@ -147,13 +147,13 @@ suffix=""; [ "$port" != "80" ] && suffix=":$port"
 if ! (cd /opt/wol-server 2>/dev/null && python3 - "$vpn_ip" <<'PY'
 import ipaddress, sys
 from wolserver.config import load_config
-ip = ipaddress.ip_address(sys.argv[1])
-nets = [ipaddress.ip_network(n, strict=False) for n in load_config()["allowed_networks"]]
-sys.exit(0 if any(ip in n for n in nets if n.version == ip.version) else 1)
+from wolserver.server import AccessList
+# "auto" erlaubt das Netz des Tunnels ohnehin; feste Listen müssen es enthalten
+sys.exit(0 if AccessList(load_config()["allowed_networks"]).allows(ipaddress.ip_address(sys.argv[1])) else 1)
 PY
 ); then
     echo "WARNUNG: $vpn_ip ist nicht in allowed_networks – in /etc/wol-server/config.json ergänzen"
-    echo "         (das VPN-Subnetz, z. B. \"10.8.0.0/24\") und: sudo systemctl restart wol-server"
+    echo "         (\"auto\" oder das VPN-Subnetz, z. B. \"10.8.0.0/24\") und: sudo systemctl restart wol-server"
 fi
 say "VPN verbunden: $vpn_ip"
 echo "  WOL-GUI über VPN: http://$vpn_ip$suffix/"

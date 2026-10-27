@@ -587,7 +587,8 @@ async function renderSystem() {
   ];
   $("#sys-info").replaceChildren(...rows.map(([k, v]) => el("div", {}, el("dt", {}, k), el("dd", {}, v))));
   renderSysNetwork(info.network);
-  $("#sys-networks").replaceChildren(...info.allowed_networks.map((n) => el("span", { class: "chip mono" }, n)));
+  $("#sys-networks").replaceChildren(...info.allowed_networks.map((n) => el("span", { class: "chip mono" }, n.network,
+    n.source !== "config" && el("span", { class: "chip-src" }, n.source === "auto" ? "immer" : n.source))));
   $("#sys-client").textContent = info.client;
   $("#ssh-key").value = info.ssh_public_key || "(kein Schlüssel – ssh-keygen nicht verfügbar)";
   $("#pw-title").textContent = info.auth_required ? "Passwort ändern" : "Passwort festlegen";

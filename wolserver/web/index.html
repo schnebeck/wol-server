@@ -399,7 +399,7 @@
         </div>
         <div class="panel">
           <h3>Zugriff</h3>
-          <p class="muted small">Die Oberfläche ist nur aus diesen Netzen erreichbar (Intranet und VPN). Ändern lässt sich das in <code>/etc/wol-server/config.json</code>.</p>
+          <p class="muted small">Die Oberfläche ist nur aus diesen Netzen erreichbar. Mit <code>"auto"</code> sind das die Netze, an denen der WOL-Server gerade hängt (WLAN, LAN, VPN); die Liste passt sich Änderungen von selbst an. Weitere Netze: <code>allowed_networks</code> in <code>/etc/wol-server/config.json</code>.</p>
           <div id="sys-networks" class="chips"></div>
           <p class="small">Adresse dieses Browsers: <code id="sys-client"></code></p>
         </div>
