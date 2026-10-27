@@ -1,8 +1,13 @@
 # WOL-Server für den Raspberry Pi Zero W
 
-Ein schlanker, headless Wake-on-LAN-Manager mit Web-GUI. Er läuft dauerhaft auf einem Raspberry Pi Zero W
-(ca. 0,4–0,7 W) und weckt Rechner im Heimnetz auf oder legt sie schlafen – manuell oder nach Zeitplan,
-aus dem Intranet und über VPN.
+Eine kleine Heimnetz-Zentrale auf einem Raspberry Pi Zero W, die rund um die Uhr läuft und dabei weniger
+als ein Watt braucht. Sie weckt Rechner im Heimnetz auf oder legt sie schlafen – manuell oder nach Zeitplan,
+aus dem Intranet und über VPN – und übernimmt auf Wunsch DHCP und DNS für das ganze Netz. Alles über eine
+Web-GUI, ohne Abhängigkeiten außer Python 3.
+
+<p align="center">
+  <img src="docs/screenshots/geraete.png" alt="Geräteübersicht mit Online-Status, Aufwecken und Schlafen legen" width="88%">
+</p>
 
 - **Geräte verwalten:** Name, MAC, Host/IP, Broadcast-Adresse, WOL-Port, Schlaf-Methode
 - **Aufwecken** per Magic Packet, **Schlafen legen** per SSH-Befehl, HTTP-Aufruf oder Sleep-on-LAN
@@ -18,7 +23,11 @@ aus dem Intranet und über VPN.
 - **DHCP und DNS fürs Heimnetz (optional):** dnsmasq, verwaltet im Reiter *Netzwerk*. Jedes Gerät ist automatisch
   unter seinem Namen erreichbar; Reservierungen, eigene DNS-Einträge, unbekannte Geräte mit einem Klick freigeben,
   Import vom alten ISC-dhcpd, Verlauf mit Zurückholen.
-- **Zugriff nur aus LAN/VPN** (Netz-Allowlist), Passwort-Login, CSRF-Schutz, gehärteter systemd-Dienst
+- **HTTPS mit Let's-Encrypt-Zertifikat:** Ein öffentlicher Webserver erneuert das Zertifikat, der Pi holt es über
+  das VPN ab; HTTP leitet automatisch auf HTTPS um.
+- **Zugriff nur aus LAN/VPN:** Die Allowlist folgt automatisch den eigenen Netzen (WLAN, VPN-Tunnel);
+  Passwort-Login, CSRF-Schutz, gehärteter systemd-Dienst
+- **Fehlersuche per Kartenleser:** Einrichtungs-, Start- und Ablaufprotokolle liegen auf der Boot-Partition
 - **Keine Abhängigkeiten** außer Python 3 (Standardbibliothek) – kein pip, kein Node, keine Datenbank, kein CDN
 
 ```
@@ -29,6 +38,38 @@ aus dem Intranet und über VPN.
 
 Warum ein Pi? Magic Packets sind Layer-2-Broadcasts und kommen nicht durch einen VPN-Tunnel. Der Pi steht im
 Heimnetz und schickt das Paket dort stellvertretend ab. Dafür baut er selbst den OpenVPN-Tunnel nach außen auf.
+
+### Hardware und Stromverbrauch im Dauerbetrieb
+
+Gedacht für den **Raspberry Pi Zero W** (512 MB RAM, ein Kern, nur WLAN). Er reicht für alles hier, weil der
+Server mit der Python-Standardbibliothek auskommt, im Leerlauf nicht pollt und Logs nur im RAM hält.
+
+| | Leistung | pro Jahr (24/7) | Kosten bei 35 ct/kWh |
+|---|---|---|---|
+| Pi Zero W im Leerlauf, WLAN verbunden, HDMI und Bluetooth aus | ca. 0,4–0,7 W | ca. 3,5–6 kWh | ca. 1,20–2,10 € |
+| zum Vergleich: kleiner PC oder NAS im Dauerbetrieb | 15–30 W | 130–260 kWh | 46–92 € |
+
+Die Werte für den Zero sind typische Angaben (ca. 80–140 mA bei 5 V), keine eigene Messung. `lowpower.sh` schaltet
+HDMI (ca. 25 mA), Bluetooth und Audio ab. WLAN-Powersave bleibt bewusst aus, weil Erreichbarkeit vorgeht;
+`over_voltage=2` (für die Stabilität unter Last, siehe [Speicher sparen](#speicher-sparen-lowmemsh)) kostet
+etwas mehr. Ein stabiles Netzteil mit mindestens 1,2 A ist wichtig: Unterspannung äußert sich auf dem Zero W
+in zufälligen Abstürzen.
+
+### Screenshots
+
+| | |
+|---|---|
+| ![Zeitpläne](docs/screenshots/zeitplaene.png) | ![Netzwerk: Übersicht](docs/screenshots/netzwerk-uebersicht.png) |
+| **Zeitpläne** pro Gerät, werktags oder täglich | **Netzwerk:** DHCP, DNS, Reservierungen und unbekannte Geräte auf einen Blick |
+| ![Reservierungen](docs/screenshots/netzwerk-reservierungen.png) | ![Einstellungen](docs/screenshots/netzwerk-einstellungen.png) |
+| **Reservierungen** mit Hersteller, Status und Aufwecken direkt aus der Liste | **Einstellungen** für DHCP, DNS und Server, mit Prüfen vor dem Übernehmen |
+| ![System](docs/screenshots/system.png) | ![Dunkles Design](docs/screenshots/geraete-dunkel.png) |
+| **System:** WLAN, VPN, Zugriff, HTTPS-Status | **Dunkles Design** folgt der Systemeinstellung |
+
+<p align="center">
+  <img src="docs/screenshots/handy.png" alt="Netzwerk-Übersicht auf dem Handy" width="260"><br>
+  <em>Auch auf dem Handy bedienbar</em>
+</p>
 
 ---
 
