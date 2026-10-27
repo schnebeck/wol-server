@@ -1279,8 +1279,9 @@ function statCard(title, value, lines, cls = "") {
 function renderNetOverview() {
   const st = net.status;
   const cfg = net.config.config;
-  const online = new Set(net.config.meta.online);
-  const reservedOnline = cfg.reservations.filter((r) => online.has(r.mac)).length;
+  const leased = net.config.meta.leases;
+  const reservedLeased = cfg.reservations.filter((r) => leased[r.mac]).length;
+  const disabled = cfg.reservations.filter((r) => !r.enabled).length;
   $("#net-stats").replaceChildren(
     statCard("DHCP", st.dhcp_enabled ? "an" : "aus", [
       st.dhcp_enabled && (st.mode === "known-only" ? "Nur bekannte Geräte" : `Bereich ${cfg.dhcp.range_start} – ${cfg.dhcp.range_end}`),
@@ -1293,8 +1294,8 @@ function renderNetOverview() {
       `${st.counts.records} eigene Einträge`,
     ], st.dns_enabled ? "on" : "off"),
     statCard("Reservierungen", String(st.counts.reservations), [
-      `${reservedOnline} gerade im Netz`,
-      `${cfg.reservations.filter((r) => !r.enabled).length} inaktiv`,
+      st.dhcp_enabled && `${reservedLeased} mit Lease vom WOL-Server`,
+      disabled && `${disabled} abgeschaltet`,
       `Nächste freie IP: ${net.config.meta.next_ip || "–"}`,
     ]),
     statCard("Server", el("span", { class: "mono" }, st.server.address || "–"), [
