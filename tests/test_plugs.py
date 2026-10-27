@@ -279,6 +279,38 @@ class PlugApiTest(unittest.TestCase):
         self.assertEqual(self.call("DELETE", "/api/plugs/%s" % plug["id"])[0], 200)
         self.assertEqual(self.call("DELETE", "/api/plugs/%s" % plug["id"])[0], 404)
 
+    def test_plug_schedules(self):
+        status, plug = self.call("POST", "/api/plugs", {"host": "plug-1", "name": "Printer"})
+        base = {"plug_id": plug["id"], "time": "23:00", "days": [0, 1, 2, 3, 4, 5, 6]}
+        status, res = self.call("POST", "/api/schedules", dict(base, action="wake"))
+        self.assertEqual(status, 400)
+        status, res = self.call("POST", "/api/schedules", dict(base, plug_id="nope", action="power_off"))
+        self.assertEqual((status, res["error"]), (400, "Unknown plug"))
+        status, sched = self.call("POST", "/api/schedules", dict(base, action="power_off"))
+        self.assertEqual((status, sched["plug_id"], sched["force"]), (201, plug["id"], False))
+        self.assertNotIn("device_id", sched)
+        # Scheduled "off" while 50 W are drawn: skipped and logged, nobody can confirm at night
+        ok, message = self.app.run_plug_action(plug["id"], "power_off", False, "schedule")
+        self.assertEqual((ok, message), (False, "Skipped: Printer is drawing 50 W"))
+        self.assertTrue(fake.FakePlug.devices["plug-1"].on)
+        events = self.call("GET", "/api/events")[1]["events"]
+        self.assertEqual((events[0]["action"], events[0]["source"], events[0]["ok"]), ("power_off", "schedule", False))
+        # With force the schedule switches anyway
+        ok, message = self.app.run_plug_action(plug["id"], "power_off", True, "schedule")
+        self.assertTrue(ok)
+        self.assertFalse(fake.FakePlug.devices["plug-1"].on)
+        # The scheduler hands plug schedules to run_plug
+        calls = []
+        sched_obj = self.app.scheduler
+        sched_obj.run_plug = lambda *args: calls.append(args)
+        ts = time.mktime(time.strptime("2026-10-26 23:00", "%Y-%m-%d %H:%M"))
+        sched_obj.tick(int(ts) - 60, int(ts))
+        time.sleep(0.2)
+        self.assertEqual(calls, [(plug["id"], "power_off", False, "schedule")])
+        # Removing the plug removes its schedules
+        self.call("DELETE", "/api/plugs/%s" % plug["id"])
+        self.assertEqual(self.call("GET", "/api/schedules")[1]["schedules"], [])
+
 
 if __name__ == "__main__":
     unittest.main()

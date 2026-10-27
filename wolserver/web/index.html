@@ -56,12 +56,12 @@
         <span class="brand-host" id="hostname"></span>
       </div>
       <nav class="tabs" aria-label="Sections">
-        <button type="button" class="tab" data-view="devices">Devices</button>
-        <button type="button" class="tab" data-view="plugs">Plugs</button>
-        <button type="button" class="tab" data-view="schedules">Schedules</button>
-        <button type="button" class="tab" data-view="events">Log</button>
-        <button type="button" class="tab" data-view="network">Network<span class="tab-badge" id="net-tab-badge" hidden></span></button>
-        <button type="button" class="tab" data-view="system">System</button>
+        <button type="button" class="tab" data-view="devices" data-icon="device"><span class="tab-label">Devices</span></button>
+        <button type="button" class="tab" data-view="plugs" data-icon="plug"><span class="tab-label">Plugs</span></button>
+        <button type="button" class="tab" data-view="schedules" data-icon="clock"><span class="tab-label">Schedules</span></button>
+        <button type="button" class="tab" data-view="events" data-icon="log"><span class="tab-label">Log</span></button>
+        <button type="button" class="tab" data-view="network" data-icon="network"><span class="tab-label">Network</span><span class="tab-badge" id="net-tab-badge" hidden></span></button>
+        <button type="button" class="tab" data-view="system" data-icon="settings"><span class="tab-label">System</span></button>
       </nav>
       <div class="lang-switch" data-lang-switch></div>
       <button type="button" id="logout" class="btn ghost small" hidden>Sign out</button>
@@ -615,15 +615,18 @@ echo "$USER ALL=(root) NOPASSWD: /usr/bin/systemctl suspend, /usr/bin/systemctl 
     <div class="dialog-content">
       <div class="form-grid">
         <label class="field span2">
-          <span>Device</span>
-          <select name="device_id" required></select>
+          <span>Device or plug</span>
+          <select name="target" required></select>
         </label>
         <div class="field span2">
           <span>Action</span>
-          <div class="segmented" role="radiogroup">
-            <label><input type="radio" name="action" value="wake"><span>Wake</span></label>
-            <label><input type="radio" name="action" value="sleep"><span>Put to sleep</span></label>
-          </div>
+          <div class="segmented" role="radiogroup" id="schedule-actions"></div>
+        </div>
+        <div class="span2" id="schedule-force-row" hidden>
+          <label class="check">
+            <input type="checkbox" name="force"> <span>Also switch while the consumer still draws power</span>
+          </label>
+          <small class="muted" id="schedule-force-hint">Otherwise the schedule is skipped while the consumer draws more than its standby threshold, and the log says so.</small>
         </div>
         <label class="field">
           <span>Time of day</span>

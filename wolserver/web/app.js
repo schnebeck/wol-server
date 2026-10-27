@@ -58,6 +58,9 @@ const ICONS = {
   device: ["M4 5h16v11H4z", "M9 20h6", "M12 16v4"],
   undo: ["M9 14L4 9l5-5", "M4 9h10a6 6 0 0 1 0 12h-3"],
   plug: ["M9 3v5", "M15 3v5", "M6 8h12v3a6 6 0 0 1-12 0z", "M12 17v4"],
+  log: ["M9 6h11", "M9 12h11", "M9 18h11", "M4.5 6h.01", "M4.5 12h.01", "M4.5 18h.01"],
+  network: ["M9.5 3h5v5h-5z", "M12 8v4", "M5.5 12h13", "M5.5 12v4", "M18.5 12v4", "M3 16h5v5H3z", "M16 16h5v5h-5z"],
+  settings: ["M4 7h9", "M17 7h3", "M15 5v4", "M4 17h3", "M11 17h9", "M9 15v4"],
 };
 
 function icon(name) {
@@ -200,6 +203,7 @@ function fmtDays(days) {
 }
 
 const deviceById = (id) => state.devices.find((d) => d.id === id);
+const plugById = (id) => state.plugs.find((p) => p.id === id);
 
 // ---------- Sign-in ----------
 
@@ -249,10 +253,10 @@ async function refreshView() {
     renderDevices();
     refreshStatus();
   } else if (state.view === "schedules") {
-    await Promise.all([loadDevices(), loadSchedules()]);
+    await Promise.all([loadDevices(), loadSchedules(), loadPlugs(false)]);
     renderSchedules();
   } else if (state.view === "plugs") {
-    await loadPlugs();
+    await Promise.all([loadPlugs(), loadSchedules()]);
     renderPlugs();
   } else if (state.view === "events") {
     await renderEvents();
@@ -294,9 +298,9 @@ async function refreshStatus() {
   }
 }
 
-function nextActionFor(deviceId) {
+function nextActionFor(id, key = "device_id") {
   return state.schedules
-    .filter((s) => s.device_id === deviceId && s.next_run)
+    .filter((s) => s[key] === id && s.next_run)
     .sort((a, b) => a.next_run.localeCompare(b.next_run))[0];
 }
 
@@ -448,24 +452,26 @@ function renderSchedules() {
   $("#server-time").textContent = state.serverNow
     ? t("Server time: {0}", state.serverNow.slice(11, 16))
     : " ";
-  if (!state.devices.length) {
+  if (!state.devices.length && !state.plugs.length) {
     list.replaceChildren(el("div", { class: "empty" },
       el("h3", {}, t("No devices")),
-      el("p", { class: "muted" }, t("Every schedule belongs to a device. Devices are added in the \"Devices\" tab."))));
+      el("p", { class: "muted" }, t("Every schedule belongs to a device or a plug. They are added in the \"Devices\" and \"Plugs\" tabs."))));
     return;
   }
   if (!state.schedules.length) {
     list.replaceChildren(el("div", { class: "empty" },
       el("h3", {}, t("No schedules")),
-      el("p", { class: "muted" }, t("Wake devices or put them to sleep automatically at fixed times.")),
+      el("p", { class: "muted" }, t("Wake devices, put them to sleep or switch plugs automatically at fixed times.")),
       el("button", { class: "btn primary", type: "button", onclick: () => openScheduleDialog() }, t("Create schedule"))));
     return;
   }
   list.replaceChildren(...state.schedules.map(scheduleRow));
 }
 
+const ACTION_ICONS = { wake: "power", sleep: "moon", power_on: "plug", power_off: "plug", power_cycle: "undo" };
+
 function scheduleRow(s) {
-  const device = deviceById(s.device_id);
+  const target = s.plug_id ? plugById(s.plug_id) : deviceById(s.device_id);
   return el("div", { class: `row sched ${s.enabled ? "" : "disabled"}` },
     el("label", { class: "switch", title: s.enabled ? t("Disable") : t("Enable") },
       el("input", { type: "checkbox", checked: s.enabled, "aria-label": t("Enabled"), onchange: (e) => toggleSchedule(s, e.currentTarget) }),
@@ -473,9 +479,9 @@ function scheduleRow(s) {
     el("div", { class: "sched-time mono" }, s.time),
     el("div", { class: "sched-main" },
       el("div", { class: "sched-title" },
-        el("span", { class: `badge ${s.action}` }, s.action === "wake" ? icon("power") : icon("moon"), ACTIONS[s.action]),
-        el("span", { class: "sched-device" }, device ? device.name : "?")),
-      el("div", { class: "muted small" }, [fmtDays(s.days), s.label].filter(Boolean).join(" · "))),
+        el("span", { class: `badge ${s.action}` }, icon(ACTION_ICONS[s.action] || "clock"), ACTIONS[s.action]),
+        el("span", { class: "sched-device" }, !target ? "?" : s.plug_id && target.consumer ? `${target.name} (${target.consumer.label})` : target.name)),
+      el("div", { class: "muted small" }, [fmtDays(s.days), s.label, s.force && t("switches even under load")].filter(Boolean).join(" · "))),
     el("div", { class: "days", "aria-label": fmtDays(s.days) },
       DAYS.map((name, i) => el("span", { class: s.days.includes(i) ? "day on" : "day" }, name))),
     el("div", { class: "sched-next small" },
@@ -510,36 +516,61 @@ function openScheduleDialog(schedule = null) {
   const form = $("#schedule-form");
   form.reset();
   showError(form, "");
-  const select = form.elements.device_id;
-  select.replaceChildren(...state.devices.map((d) => el("option", { value: d.id }, d.name)));
-  const s = schedule || { device_id: state.devices[0]?.id, action: "wake", time: "07:00", days: [0, 1, 2, 3, 4], enabled: true, label: "" };
-  select.value = s.device_id;
-  for (const radio of form.querySelectorAll("input[name=action]")) radio.checked = radio.value === s.action;
+  const select = form.elements.target;
+  select.replaceChildren(...[
+    state.devices.length && el("optgroup", { label: t("Devices") }, state.devices.map((d) => el("option", { value: `device:${d.id}` }, d.name))),
+    state.plugs.length && el("optgroup", { label: t("Plugs") }, state.plugs.map((p) => el("option", { value: `plug:${p.id}` },
+      p.consumer ? `${p.name} (${p.consumer.label})` : p.name))),
+  ].filter(Boolean));
+  const first = state.devices.length ? `device:${state.devices[0].id}` : state.plugs.length ? `plug:${state.plugs[0].id}` : "";
+  const s = schedule || { action: "", time: "07:00", days: [0, 1, 2, 3, 4], enabled: true, label: "", force: false };
+  select.value = schedule ? (s.plug_id ? `plug:${s.plug_id}` : `device:${s.device_id}`) : first;
+  renderScheduleActions(s.action);
+  form.elements.force.checked = Boolean(s.force);
+  updateForceRow();
   form.elements.time.value = s.time;
   form.elements.label.value = s.label || "";
   form.elements.enabled.checked = s.enabled;
   setDays(s.days);
-  updateSleepAvailability();
   $("#schedule-dialog-title").textContent = schedule ? t("Edit schedule") : t("New schedule");
   $("#delete-schedule").hidden = !schedule;
   $("#schedule-dialog").showModal();
 }
 
-function updateSleepAvailability() {
+// The actions depend on the target: wake/sleep for devices, on/off/restart for plugs
+function renderScheduleActions(selected) {
   const form = $("#schedule-form");
-  const device = deviceById(form.elements.device_id.value);
-  const sleepRadio = form.querySelector("input[name=action][value=sleep]");
-  const canSleep = device && device.sleep_method !== "none";
-  sleepRadio.disabled = !canSleep;
-  sleepRadio.closest("label").title = canSleep ? "" : t("No sleep method is configured for this device");
-  if (!canSleep && sleepRadio.checked) form.querySelector("input[name=action][value=wake]").checked = true;
+  const [kind, id] = form.elements.target.value.split(":");
+  const current = selected || (form.querySelector("input[name=action]:checked") || {}).value;
+  let actions;
+  if (kind === "plug") {
+    actions = [["power_on", t("Power on")], ["power_off", t("Power off")], ["power_cycle", t("Restart")]];
+  } else {
+    const device = deviceById(id);
+    const canSleep = device && device.sleep_method !== "none";
+    actions = [["wake", t("Wake")], ["sleep", t("Put to sleep"), !canSleep && t("No sleep method is configured for this device")]];
+  }
+  const fallback = actions[0][0];
+  const value = actions.some(([v, , off]) => v === current && !off) ? current : fallback;
+  $("#schedule-actions").replaceChildren(...actions.map(([v, label, off]) => el("label", { title: off || "" },
+    el("input", { type: "radio", name: "action", value: v, checked: v === value, disabled: Boolean(off), onchange: updateForceRow }),
+    el("span", {}, label))));
+  updateForceRow();
+}
+
+function updateForceRow() {
+  const form = $("#schedule-form");
+  const action = (form.querySelector("input[name=action]:checked") || {}).value;
+  $("#schedule-force-row").hidden = !["power_off", "power_cycle"].includes(action);
 }
 
 async function onScheduleSubmit(event) {
   event.preventDefault();
   const form = event.currentTarget;
+  const [kind, id] = form.elements.target.value.split(":");
   const data = {
-    device_id: form.elements.device_id.value,
+    [kind === "plug" ? "plug_id" : "device_id"]: id,
+    force: kind === "plug" && form.elements.force.checked,
     action: (form.querySelector("input[name=action]:checked") || {}).value,
     time: form.elements.time.value,
     label: form.elements.label.value,
@@ -602,8 +633,8 @@ async function onClearEvents() {
 const POWER_ON_STATES = { restore: t("Restore last state"), on: t("On"), off: t("Off"), other: t("other (set on the plug)") };
 const PLUG_ERRORS = { overtemp: t("Overtemperature"), overpower: t("Overload"), overvoltage: t("Overvoltage"), undervoltage: t("Undervoltage") };
 
-async function loadPlugs() {
-  const data = await api("GET", "/api/plugs");
+async function loadPlugs(live = true) {
+  const data = await api("GET", live ? "/api/plugs" : "/api/plugs?live=0");
   state.plugs = data.plugs;
   state.plugDrivers = data.drivers;
 }
@@ -658,10 +689,17 @@ function plugCard(p) {
     st && st.errors.length ? el("p", { class: "plug-error" }, icon("alert"), " ", st.errors.map((e) => PLUG_ERRORS[e] || e).join(", ")) : null,
     !st && live.error ? el("p", { class: "plug-error" }, tr(live.error)) : null,
     el("dl", { class: "meta" }, meta.map(([k, v]) => el("div", {}, el("dt", {}, k), el("dd", {}, v)))),
+    plugNextLine(p),
     el("div", { class: "card-actions" },
       el("button", { class: "btn wake", type: "button", disabled: !st || st.on, onclick: (e) => plugAction(p, "on", e.currentTarget) }, icon("power"), t("On")),
       el("button", { class: "btn", type: "button", disabled: !st || !st.on, onclick: (e) => plugAction(p, "off", e.currentTarget) }, t("Off")),
       el("button", { class: "btn", type: "button", disabled: !st || !st.on, title: t("Off, on again after 10 s - runs on the plug itself"), onclick: (e) => plugAction(p, "cycle", e.currentTarget) }, icon("undo"), t("Restart"))));
+}
+
+function plugNextLine(p) {
+  const next = nextActionFor(p.id, "plug_id");
+  return el("p", { class: next ? "next" : "next muted" }, icon("clock"),
+    next ? el("span", {}, el("strong", {}, ACTIONS[next.action]), " ", fmtNext(next.next_run)) : t("No active schedule"));
 }
 
 async function plugAction(plug, action, button, confirm = false) {
@@ -2448,7 +2486,14 @@ function bind() {
   renderLangSwitch();
   $("#login-form").addEventListener("submit", onLogin);
   $("#logout").addEventListener("click", onLogout);
-  for (const tab of $$(".tab")) tab.addEventListener("click", () => setView(tab.dataset.view));
+  for (const tab of $$(".tab")) {
+    // Icons for the menu bar; on narrow screens the labels shrink or disappear, the name stays for screen readers
+    const label = $(".tab-label", tab).textContent;
+    tab.prepend(icon(tab.dataset.icon));
+    tab.setAttribute("aria-label", label);
+    tab.title = label;
+    tab.addEventListener("click", () => setView(tab.dataset.view));
+  }
   $("#add-device").addEventListener("click", () => openDeviceDialog());
   $("#add-schedule").addEventListener("click", () => openScheduleDialog());
   $("#clear-events").addEventListener("click", onClearEvents);
@@ -2459,7 +2504,7 @@ function bind() {
     btn.addEventListener("click", () => { $("#device-form").elements.ssh_command.value = btn.dataset.cmd; });
   }
   $("#schedule-form").addEventListener("submit", onScheduleSubmit);
-  $("#schedule-form").elements.device_id.addEventListener("change", updateSleepAvailability);
+  $("#schedule-form").elements.target.addEventListener("change", () => renderScheduleActions());
   $("#delete-schedule").addEventListener("click", onScheduleDelete);
   for (const btn of $$("[data-days]")) {
     btn.addEventListener("click", () => setDays(btn.dataset.days.split(",").map(Number)));
