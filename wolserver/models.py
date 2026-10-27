@@ -134,6 +134,8 @@ def validate_schedule(data, device_lookup, plug_lookup=lambda plug_id: None):
             raise ValidationError("Unknown plug")
         if action not in PLUG_ACTIONS:
             raise ValidationError("Action for a plug must be 'power_on', 'power_off' or 'power_cycle'")
+        if plug.get("locked") and action != "power_on":
+            raise ValidationError("%s supplies the WOL-Server or the network: it is never switched off" % plug["name"])
         target = {"plug_id": plug["id"], "force": bool(data.get("force"))}
     else:
         device = device_lookup(data.get("device_id") or "")

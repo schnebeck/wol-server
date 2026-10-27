@@ -277,7 +277,8 @@ details.menu > summary .icon:last-child { width: 14px; height: 14px; }
 .plug-options { display: grid; gap: 14px; }
 .plug-options .segmented span { padding: 5px 10px; }
 .check small { display: block; }
-.plug-options .check { align-items: flex-start; }
+.plug-options .check, .lock-check { align-items: flex-start; }
+.lock-check input { margin-top: 2px; }
 .plug-options .check input { margin-top: 2px; }
 
 /* Consumption */

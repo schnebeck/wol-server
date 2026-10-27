@@ -395,7 +395,7 @@ function deviceCard(d) {
 
 // "Power" on the device card: the plug's switch, with the same safety rules as in the Plugs tab
 function powerMenu(plug, power) {
-  const off = !power.reachable || !power.on;
+  const off = !power.reachable || !power.on || power.locked;
   const item = (action, label, disabled, title) => el("button", {
     type: "button", class: "menu-item", disabled, title,
     onclick: (e) => {
@@ -464,7 +464,8 @@ function fillDevicePlug(device) {
   const linked = device ? state.plugs.find((p) => p.consumer && p.consumer.kind === "device" && p.consumer.id === device.id) : null;
   $("#device-plug-group").hidden = !state.plugs.length;
   $("#device-plug").replaceChildren(el("option", { value: "" }, t("– none –")), ...state.plugs.map((p) => {
-    const other = p.consumer && p.consumer.kind === "device" && (!device || p.consumer.id !== device.id) ? p.consumer_name || deviceById(p.consumer.id)?.name : null;
+    const other = p.consumer && (p.consumer.kind === "self" || (p.consumer.kind === "device" && (!device || p.consumer.id !== device.id)))
+      ? p.consumer_name || deviceById(p.consumer.id)?.name : null;
     return el("option", { value: p.id }, other ? `${p.name} (${t("now: {0}", other)})` : p.name);
   }));
   form.elements.plug_id.value = linked ? linked.id : "";
@@ -649,7 +650,8 @@ function renderScheduleActions(selected) {
   const current = selected || (form.querySelector("input[name=action]:checked") || {}).value;
   let actions;
   if (kind === "plug") {
-    actions = [["power_on", t("Power on")], ["power_off", t("Power off")], ["power_cycle", t("Restart")]];
+    const locked = plugById(id)?.locked && t("Never switched off: supplies the WOL-Server or the network");
+    actions = [["power_on", t("Power on")], ["power_off", t("Power off"), locked], ["power_cycle", t("Restart"), locked]];
   } else {
     const device = deviceById(id);
     const canSleep = device && device.sleep_method !== "none";
@@ -818,7 +820,7 @@ function plugCard(p) {
     [t("Today"), energy ? fmtKwh(energy.day) : "–"],
     [t("This month"), energy ? fmtKwh(energy.month) : "–"],
     [t("Voltage"), st.voltage_v == null ? "–" : `${Math.round(st.voltage_v)} V`],
-    [t("Current"), st.current_a == null ? "–" : `${st.current_a.toLocaleString(I18N.locale, { maximumFractionDigits: 2 })} A`],
+    [t("Current"), st.current_a == null ? "–" : `${st.current_a.toLocaleString(I18N.locale, { maximumFractionDigits: st.current_a < 0.1 ? 3 : 2 })} A`],
     [t("Temperature"), st.temperature_c == null ? "–" : `${Math.round(st.temperature_c)} °C`],
     [t("Energy counter"), fmtKwh(st.energy_wh)],
     [t("Switch cycles"), st.switch_count == null ? "–" : st.switch_count.toLocaleString(I18N.locale)],
@@ -840,10 +842,11 @@ function plugCard(p) {
     !st && live.error ? el("p", { class: "plug-error" }, tr(live.error)) : null,
     el("dl", { class: "meta" }, meta.map(([k, v]) => el("div", {}, el("dt", {}, k), el("dd", {}, v)))),
     plugNextLine(p),
+    p.locked ? el("p", { class: "next muted" }, icon("lock"), t("Never switched off: supplies the WOL-Server or the network")) : null,
     el("div", { class: "card-actions" },
       el("button", { class: "btn wake", type: "button", disabled: !st || st.on, onclick: (e) => plugAction(p, "on", e.currentTarget) }, icon("power"), t("On")),
-      el("button", { class: "btn", type: "button", disabled: !st || !st.on, onclick: (e) => plugAction(p, "off", e.currentTarget) }, t("Off")),
-      el("button", { class: "btn", type: "button", disabled: !st || !st.on, title: t("Off, on again after 10 s - runs on the plug itself"), onclick: (e) => plugAction(p, "cycle", e.currentTarget) }, icon("undo"), t("Restart"))));
+      el("button", { class: "btn", type: "button", disabled: !st || !st.on || p.locked, onclick: (e) => plugAction(p, "off", e.currentTarget) }, t("Off")),
+      el("button", { class: "btn", type: "button", disabled: !st || !st.on || p.locked, title: t("Off, on again after 10 s - runs on the plug itself"), onclick: (e) => plugAction(p, "cycle", e.currentTarget) }, icon("undo"), t("Restart"))));
 }
 
 function plugNextLine(p) {
@@ -945,19 +948,32 @@ function openPlugDialog(plug = null, prefill = {}) {
 }
 
 const CONSUMER_OTHER = "__label";
+const CONSUMER_SELF = "__self";
 
 function fillPlugConsumer(plug) {
   const form = $("#plug-form");
   const consumer = (plug && plug.consumer) || null;
   const taken = new Map(state.plugs.filter((p) => p !== plug && p.consumer && p.consumer.kind === "device").map((p) => [p.consumer.id, p.name]));
+  const selfPlug = state.plugs.find((p) => p !== plug && p.consumer && p.consumer.kind === "self");
   $("#plug-consumer").replaceChildren(
     el("option", { value: "" }, t("– nothing –")),
+    el("option", { value: CONSUMER_SELF, disabled: Boolean(selfPlug) }, selfPlug ? `${t("This WOL-Server")} (${selfPlug.name})` : t("This WOL-Server")),
     state.devices.length ? el("optgroup", { label: t("Devices") }, state.devices.map((d) => el("option", { value: d.id, disabled: taken.has(d.id) },
       taken.has(d.id) ? `${d.name} (${taken.get(d.id)})` : d.name))) : null,
     el("option", { value: CONSUMER_OTHER }, t("Something else …")));
-  form.elements.consumer_device.value = !consumer ? "" : consumer.kind === "device" ? consumer.id : CONSUMER_OTHER;
+  form.elements.consumer_device.value = !consumer ? "" : consumer.kind === "device" ? consumer.id : consumer.kind === "self" ? CONSUMER_SELF : CONSUMER_OTHER;
   form.elements.consumer_label.value = consumer && consumer.kind === "label" ? consumer.label : "";
-  $("#plug-consumer-label").hidden = form.elements.consumer_device.value !== CONSUMER_OTHER;
+  form.elements.locked.checked = Boolean(plug && plug.locked);
+  updatePlugConsumer();
+}
+
+// The plug of the WOL-Server itself is always locked: switching it off would cut the server that switches it on again
+function updatePlugConsumer() {
+  const form = $("#plug-form");
+  const value = form.elements.consumer_device.value;
+  $("#plug-consumer-label").hidden = value !== CONSUMER_OTHER;
+  form.elements.locked.disabled = value === CONSUMER_SELF;
+  if (value === CONSUMER_SELF) form.elements.locked.checked = true;
 }
 
 async function detectPlug() {
@@ -987,8 +1003,9 @@ async function onPlugSubmit(event) {
   const consumer = form.elements.consumer_device.value;
   const data = {
     host: form.elements.host.value.trim(), name: form.elements.name.value.trim(),
-    consumer_device: consumer && consumer !== CONSUMER_OTHER ? consumer : null,
+    consumer_device: consumer && consumer !== CONSUMER_OTHER && consumer !== CONSUMER_SELF ? consumer : null,
     consumer_label: consumer === CONSUMER_OTHER ? form.elements.consumer_label.value.trim() : "",
+    consumer_self: consumer === CONSUMER_SELF, locked: form.elements.locked.checked,
     password: form.elements.password.value, driver: form.elements.driver.value, channel: Number(form.elements.channel.value) || 0,
     standby_w: form.elements.standby_w.value, running_w: form.elements.running_w.value,
   };
@@ -3145,9 +3162,8 @@ function bind() {
   $("#plug-detect").addEventListener("click", detectPlug);
   $("#plug-delete").addEventListener("click", onPlugDelete);
   $("#plug-consumer").addEventListener("change", (e) => {
-    const other = e.target.value === CONSUMER_OTHER;
-    $("#plug-consumer-label").hidden = !other;
-    if (other) $("#plug-consumer-label").focus();
+    updatePlugConsumer();
+    if (e.target.value === CONSUMER_OTHER) $("#plug-consumer-label").focus();
   });
   $("#device-plug").addEventListener("change", updateDevicePlug);
   for (const radio of $$("#device-form input[name=wake_method]")) radio.addEventListener("change", updateDevicePlug);

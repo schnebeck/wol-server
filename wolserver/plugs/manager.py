@@ -150,6 +150,8 @@ class PlugManager:
 
     def consumer_name(self, plug):
         consumer = plug.get("consumer") or {}
+        if consumer.get("kind") == "self":
+            return "WOL-Server"
         if consumer.get("kind") == "device":
             device = self.device_lookup(consumer.get("id"))
             return device["name"] if device else plug["name"]
@@ -189,10 +191,12 @@ class PlugManager:
                 plug["mac"] = normalize_mac(mac).lower()
             except ValueError as e:
                 raise PlugError(str(e)) from None
-        if "consumer_device" in data or "consumer_label" in data:
+        if "consumer_device" in data or "consumer_label" in data or "consumer_self" in data:
             device_id = data.get("consumer_device")
             label = _text(data, "consumer_label", 64, "Consumer")
-            if device_id:
+            if data.get("consumer_self"):
+                plug["consumer"] = {"kind": "self"}
+            elif device_id:
                 if self.device_lookup(device_id) is None:
                     raise PlugError("Unknown device")
                 plug["consumer"] = {"kind": "device", "id": device_id}
@@ -208,6 +212,9 @@ class PlugManager:
         if not 0 <= plug["standby_w"] <= 500:
             raise PlugError("Standby threshold must be between 0 and 500 W")
         self._validate_device_options(data, plug)
+        # Rule 6: the plug of the WOL-Server itself, the router or a switch is never switched off (monitoring is fine)
+        plug["locked"] = (bool(data.get("locked", old.get("locked", False)))
+                          or (plug.get("consumer") or {}).get("kind") == "self")
         return plug
 
     def _validate_device_options(self, data, plug):
@@ -229,8 +236,12 @@ class PlugManager:
                 raise PlugError("Running threshold must be above the standby threshold (max. 4000 W)")
 
     def _check_unique_consumer(self, plug):
-        """A device has at most one plug."""
+        """A device (and the WOL-Server itself) has at most one plug."""
         consumer = plug.get("consumer") or {}
+        if consumer.get("kind") == "self":
+            for other in self._plugs:
+                if other["id"] != plug.get("id") and (other.get("consumer") or {}).get("kind") == "self":
+                    raise PlugError("The WOL-Server is already plugged into %s" % other["name"])
         if consumer.get("kind") == "device":
             for other in self._plugs:
                 if other["id"] != plug.get("id") and (other.get("consumer") or {}).get("id") == consumer["id"]:
@@ -460,6 +471,8 @@ class PlugManager:
             raise PlugError("Unknown action: %s" % action)
         plug = self.get(plug_id)
         driver = self._driver(plug)
+        if action in ("off", "cycle") and plug.get("locked"):
+            raise PlugError("%s supplies the WOL-Server or the network: it is never switched off" % plug["name"])
         if action in ("off", "cycle") and not confirm:
             # Rule 1: cut the power only without asking when nothing is drawing more than standby
             if "metering" not in driver.capabilities:
@@ -508,8 +521,9 @@ class PlugManager:
         if cached and cached[1] == key and time.monotonic() - cached[0] < max_age:
             return cached[2]
         totals = self.energy.totals([p["id"] for p in plugs])
-        for p in plugs:
-            totals[p["id"]]["standby_year"] = self.energy.standby(p["id"], p.get("standby_w", self.DEFAULT_STANDBY_W))
+        for p in plugs:  # a locked plug is never switched off: its standby cannot be saved, so it is not shown
+            totals[p["id"]]["standby_year"] = None if p.get("locked") else self.energy.standby(
+                p["id"], p.get("standby_w", self.DEFAULT_STANDBY_W))
         with self._lock:
             self._summary = (time.monotonic(), key, totals)
         return totals

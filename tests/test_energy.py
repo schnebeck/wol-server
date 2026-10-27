@@ -273,6 +273,29 @@ class LinkedDeviceTest(unittest.TestCase):
         event = self.call("GET", "/api/events")[1]["events"][0]
         self.assertEqual(event["message"], "Power not cut: Office PC still draws 60 W after 0 minutes")
 
+    def test_never_switched_off(self):
+        # The WOL-Server measures its own plug, but never cuts it (rule 6)
+        status, res = self.call("PUT", "/api/plugs/%s" % self.plug["id"], {"host": "plug-1", "name": "plug-office",
+                                                                              "consumer_self": True})
+        self.assertEqual((status, res["consumer"], res["locked"]), (200, {"kind": "self"}, True))
+        self.assertEqual(self.call("GET", "/api/plugs")[1]["plugs"][0]["consumer_name"], "WOL-Server")
+        for action in ("off", "cycle"):
+            status, res = self.call("POST", "/api/plugs/%s/%s" % (self.plug["id"], action), {"confirm": True})
+            self.assertEqual((status, res["error"]),
+                             (400, "plug-office supplies the WOL-Server or the network: it is never switched off"))
+        self.assertTrue(self.dev.on)
+        self.assertEqual(self.call("POST", "/api/plugs/%s/on" % self.plug["id"], {})[0], 200)
+        base = {"plug_id": self.plug["id"], "time": "23:00", "days": [0]}
+        self.assertEqual(self.call("POST", "/api/schedules", dict(base, action="power_off", force=True))[0], 400)
+        self.assertEqual(self.call("POST", "/api/schedules", dict(base, action="power_on"))[0], 201)
+        # A second plug cannot also supply the WOL-Server; a locked router plug is fine
+        fake.FakePlug.devices["plug-2"] = fake.FakeDevice(mac="02:00:00:00:00:02")
+        status, res = self.call("POST", "/api/plugs", {"host": "plug-2", "name": "other", "consumer_self": True})
+        self.assertEqual((status, res["error"]), (400, "The WOL-Server is already plugged into plug-office"))
+        status, res = self.call("POST", "/api/plugs", {"host": "plug-2", "name": "router", "consumer_label": "Router",
+                                                       "locked": True})
+        self.assertEqual((status, res["locked"]), (201, True))
+
     def test_energy_api_and_settings(self):
         status, res = self.call("GET", "/api/energy?period=day")
         self.assertEqual(status, 200)

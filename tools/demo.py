@@ -136,6 +136,7 @@ PLUGGED = {  # MAC of the device -> simulation
     "00:11:32:4C:19:E2": {"plug": "192.168.1.33", "host": "nas.home.arpa", "runs": nas_runs, "load": (16, 23)},
     "A8:B8:E0:07:4B:4E": {"plug": "192.168.1.34", "host": "192.168.1.10", "runs": backup_runs, "load": (38, 55),
                           "relay": backup_relay},
+    "self": {"plug": "192.168.1.32", "host": "", "runs": lambda lt: True, "load": (0.9, 1.4)},  # the Pi Zero itself
 }
 for sim in PLUGGED.values():
     sim["override"] = None
@@ -390,10 +391,12 @@ fakeplug.FakePlug.devices = {
                                         temperature_c=29.1),
     "192.168.1.34": fakeplug.FakeDevice(model="S3PL-30110EU", mac="a8:03:2a:fc:d5:1a", standby_w=1.1,
                                         temperature_c=26.0),
+    "192.168.1.32": fakeplug.FakeDevice(model="S3PL-30110EU", mac="a8:03:2a:3c:91:0e", password="demo",
+                                        temperature_c=23.5),
     # The unknown Shelly in the overview: approving it gives it the next free address, then "Detect" finds it
     "192.168.1.11": fakeplug.FakeDevice(model="S3PL-30110EU", mac="a8:03:2a:d4:e5:f7"),
 }
-for dev, energy, count in zip(fakeplug.FakePlug.devices.values(), (15342.1, 9120.4, 412.7, 0), (312, 87, 41, 0)):
+for dev, energy, count in zip(fakeplug.FakePlug.devices.values(), (15342.1, 9120.4, 412.7, 980.3), (312, 87, 41, 2)):
     dev.energy_wh, dev.switch_count = energy, count
 
 app = App(dict(DEFAULTS, listen="127.0.0.1", port=args.port, data_dir=os.path.join(RUN, "data"),
@@ -413,9 +416,10 @@ plug_ids = {}
 for host, name, consumer, password, options in (
         ("192.168.1.31", "plug-office-pc", "Office PC", "demo", {"running_w": 30}),
         ("192.168.1.33", "plug-nas", "NAS", "demo", {"running_w": 10}),
-        ("192.168.1.34", "plug-backup", "Backup-Server", "", {"running_w": 20, "wake_method": "power"})):
-    plug_ids[name] = app.plugs.add(dict(options, host=host, name=name, consumer_device=device_ids[consumer],
-                                        password=password))["id"]
+        ("192.168.1.34", "plug-backup", "Backup-Server", "", {"running_w": 20, "wake_method": "power"}),
+        ("192.168.1.32", "plug-wol", None, "demo", {"consumer_self": True, "standby_w": 0.5})):
+    plug_ids[name] = app.plugs.add(dict(options, host=host, name=name, password=password,
+                                        consumer_device=device_ids.get(consumer)))["id"]
 app.plugs.set_settings({"price_kwh": 0.32, "currency": "€"})
 
 

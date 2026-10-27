@@ -62,8 +62,10 @@ These rules are enforced in WOL-Server itself, not only in the GUI.
    - on any error flag;
    - above a fixed limit;
    - on a slow rise over days at the same load, which is a sign of a worn contact.
-6. **No lock-out:** WOL-Server refuses to cut the power of a plug whose linked device is the WOL-Server itself
-   or the gateway (router). The README warns against plugging the Pi or the router into a plug it controls.
+6. **No lock-out:** the WOL-Server, the router or a switch may well hang on a plug: WOL-Server then measures
+   its own consumption, too. But such a plug is **never switched off**: the consumer "This WOL-Server" locks it
+   by itself, "Never switch off" locks the plug of the router or a switch. A locked plug can be switched on,
+   never off or restarted, neither in the GUI nor by the API or a schedule.
 7. **Relay wear:** the plug counts its switching cycles (`counts.switch_on`). The GUI shows "312 of 10,000
    cycles" and warns at 80 %.
 
@@ -301,7 +303,7 @@ Log entries like the existing ones, with the source (GUI, schedule, API):
 | Risk | Mitigation |
 |---|---|
 | **Data loss from cutting the power** of a running or suspended device | Rules 1 and 2 (section 3): only at standby level, cut after sleep only with a confirmed shutdown, the API cannot cut a running device |
-| **Lock-out:** the plug of the Pi or the router is switched off | Rule 6; note in the README |
+| **Lock-out:** the plug of the Pi or the router is switched off | Rule 6: such plugs are locked and never switched off |
 | Relay wear from inrush current, welded contacts | Switching under load is avoided; switching cycles shown; welded contacts detected by measurement (rule 4) |
 | Worn contact gets hot | Temperature and error flags of the plug, warning on a slow rise (rule 5) |
 | Device without power after an outage | Plug setting "restore last state"; WOL-Server shows the setting and warns if it is "off" |
@@ -345,5 +347,5 @@ What differs from the plan above, and what is still open:
 | Status from power | In the GUI (Online, Standby, No power, Starting or shutting down, Not responding after 5 minutes above the running threshold). `GET /api/status` includes the power per device. |
 | Wake methods, cut after sleep | Implemented as planned; "Power on" with the relay already on and the device at standby runs a short power cycle. |
 | Alerts | Welded contacts, error flags, temperature above 70 °C, relay wear above 80 %, plug unreachable for 5 minutes: once into the log when raised and when cleared, and as a notice in the Plugs tab. **Open:** the slow temperature rise over days. |
-| Rule 6 (no lock-out) | **Open:** the check for the WOL-Server itself and the gateway. |
+| Rule 6 (no lock-out) | Consumer "This WOL-Server" (at most one plug) and "Never switch off" for the router or a switch: on and measuring yes, off and restart never (GUI, API, schedules). |
 
