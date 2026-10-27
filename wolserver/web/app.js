@@ -27,7 +27,7 @@ const ACTIONS = { wake: t("Wake"), sleep: t("Put to sleep"), net: t("Change"), p
 const SLEEP_METHODS = { none: "–", ssh: "SSH", http: "HTTP", sol: "Sleep-on-LAN" };
 const STATUS_INTERVAL = 10000;
 const PLUG_INTERVAL = 5000;
-const VIEWS = ["devices", "schedules", "plugs", "events", "network", "system"];
+const VIEWS = ["devices", "plugs", "schedules", "events", "network", "system"];
 
 const state = {
   view: "devices",
