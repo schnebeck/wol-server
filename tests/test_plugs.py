@@ -56,8 +56,8 @@ class DigestTest(unittest.TestCase):
         self.assertEqual(self.response("MD5"), "8ca523f5e9506fed4657c9700eebdbec")
 
     def test_parse_challenge(self):
-        c = parse_challenge('Digest qop="auth", realm="shellyplugmg3-a1b2", nonce="60dc59c6", algorithm=SHA-256')
-        self.assertEqual(c, {"qop": "auth", "realm": "shellyplugmg3-a1b2", "nonce": "60dc59c6", "algorithm": "SHA-256"})
+        c = parse_challenge('Digest qop="auth", realm="shellyplugmg3-a8032a", nonce="60dc59c6", algorithm=SHA-256')
+        self.assertEqual(c, {"qop": "auth", "realm": "shellyplugmg3-a8032a", "nonce": "60dc59c6", "algorithm": "SHA-256"})
         self.assertIsNone(parse_challenge('Basic realm="x"'))
 
 
@@ -65,7 +65,7 @@ class FakeShelly(BaseHTTPRequestHandler):
     """Answers like a Shelly Gen2+ and requires digest authentication (SHA-256) for /rpc."""
 
     password = "geheim"
-    realm = "shellyplugmg3-a1b2c3d4e5f6"
+    realm = "shellyplugmg3-a8032ad4e5f6"
     calls = []
     requests = 0
     output = True
@@ -134,7 +134,7 @@ class ShellyTest(unittest.TestCase):
     def test_probe_without_password(self):
         info = ShellyGen2.probe(self.host)
         self.assertEqual((info.driver, info.model, info.mac, info.firmware, info.auth),
-                         ("shelly-gen2", "S3PL-30110EU", "a1:b2:c3:d4:e5:f6", "1.7.1", True))
+                         ("shelly-gen2", "S3PL-30110EU", "a8:03:2a:d4:e5:f6", "1.7.1", True))
         self.assertEqual(plugs.probe_all(self.host).driver, "shelly-gen2")
 
     def test_status_is_normalized(self):

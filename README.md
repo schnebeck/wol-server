@@ -653,6 +653,21 @@ python3 -m unittest discover -s tests -t .   # tests
 ./deploy/make-image.sh --image raspios.img.xz -o test.img   # build an image from an existing OS image
 ```
 
+### Demo for GUI tests
+
+```bash
+python3 tools/demo.py                        # http://127.0.0.1:8090, invented sample data
+node tools/screenshots.mjs                   # README screenshots (EN + DE) from the running demo
+```
+
+The demo runs the real web server and the real code of the network service with stand-ins for systemctl,
+nmcli and journalctl. Wi-Fi, VPN, plugs, pings, magic packets and SSH are simulated, so it sends nothing into
+the network and changes nothing on the system. Every start begins with fresh data (sample reservations, leases,
+unknown devices, devices, plugs, schedules); all names, addresses and MACs are invented. If dnsmasq is installed,
+a real dnsmasq answers DNS on 127.0.0.1:15353 (no DHCP, no root); `--no-dnsmasq` simulates it as well.
+`screenshots.mjs` needs Node 22 or later and a Chromium-based browser (`CHROME=/path/to/browser` if it is not
+found).
+
 ## 10. Troubleshooting
 
 | Problem | Solution |
