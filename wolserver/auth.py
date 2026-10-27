@@ -134,3 +134,84 @@ class LoginLimiter:
     def reset(self, ip):
         with self._lock:
             self._failures.pop(ip, None)
+
+
+class ApiTokens:
+    """API tokens for scripts, stored as SHA-256 hashes in <data_dir>/api_tokens.json (mode 0600).
+
+    A token carries 256 random bits, so a fast hash is enough (unlike passwords). The plain token
+    is shown only once, when it is created.
+    """
+
+    PREFIX = "wol_"
+    MAX_TOKENS = 20
+    TOUCH_SECONDS = 60  # write "last used" at most once a minute (spares the SD card)
+
+    def __init__(self, data_dir, clock=time.time):
+        self.path = os.path.join(data_dir, "api_tokens.json")
+        self.clock = clock
+        self._lock = threading.Lock()
+        try:
+            with open(self.path, encoding="utf-8") as f:
+                self._tokens = json.load(f).get("tokens", [])
+        except FileNotFoundError:
+            self._tokens = []
+
+    def _save(self):
+        tmp = self.path + ".tmp"
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump({"tokens": self._tokens}, f)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, self.path)
+
+    @staticmethod
+    def _hash(token):
+        return hashlib.sha256(token.encode()).hexdigest()
+
+    @staticmethod
+    def _public(entry):
+        return {k: entry[k] for k in ("id", "name", "created", "last_used")}
+
+    def list(self):
+        with self._lock:
+            return [self._public(t) for t in self._tokens]
+
+    def create(self, name):
+        name = " ".join(str(name or "").split())[:40]
+        if not name:
+            raise ValueError("Name is required")
+        with self._lock:
+            if len(self._tokens) >= self.MAX_TOKENS:
+                raise ValueError("At most %d API tokens" % self.MAX_TOKENS)
+            token = self.PREFIX + _b64(os.urandom(32))
+            entry = {"id": _b64(os.urandom(6)), "name": name, "hash": self._hash(token),
+                     "created": int(self.clock()), "last_used": None}
+            self._tokens.append(entry)
+            self._save()
+            return dict(self._public(entry), token=token)
+
+    def revoke(self, token_id):
+        with self._lock:
+            before = len(self._tokens)
+            self._tokens = [t for t in self._tokens if t["id"] != token_id]
+            if len(self._tokens) == before:
+                return False
+            self._save()
+            return True
+
+    def verify(self, token):
+        """Matching entry (without hash) or None."""
+        if not token or not token.startswith(self.PREFIX):
+            return None
+        digest = self._hash(token)
+        with self._lock:
+            entry = next((t for t in self._tokens if hmac.compare_digest(t["hash"], digest)), None)
+            if entry is None:
+                return None
+            now = int(self.clock())
+            if not entry["last_used"] or now - entry["last_used"] >= self.TOUCH_SECONDS:
+                entry["last_used"] = now
+                self._save()
+            return self._public(entry)

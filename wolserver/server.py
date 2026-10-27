@@ -14,12 +14,12 @@ import ssl
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, unquote, urlsplit
 
 from . import __version__, dnsclient, models, netinfo, power, wifi, wol
-from .auth import Auth, LoginLimiter
+from .auth import ApiTokens, Auth, LoginLimiter
 from .scheduler import Scheduler, next_run
-from .status import StatusMonitor
+from .status import StatusMonitor, check_host
 from .store import Store
 from .tls import TlsState
 
@@ -58,12 +58,14 @@ class ApiError(Exception):
 
 
 class Request:
-    def __init__(self, body, client, authenticated, via_hotspot=False, secure=False):
+    def __init__(self, body, client, authenticated, via_hotspot=False, secure=False, query=None, token=None):
         self.body = body
         self.client = client
         self.authenticated = authenticated
         self.via_hotspot = via_hotspot
         self.secure = secure
+        self.query = query or {}
+        self.token = token  # API token entry for script requests, else None
         self.cookies = []
 
 
@@ -155,6 +157,7 @@ class App:
         os.makedirs(data_dir, exist_ok=True)
         self.store = Store(os.path.join(data_dir, "data.json"))
         self.auth = Auth(data_dir, config["session_days"])
+        self.tokens = ApiTokens(data_dir)
         self.limiter = LoginLimiter()
         self.access = AccessList(config["allowed_networks"])
         self.tls = TlsState(config["tls_dir"])
@@ -175,12 +178,16 @@ class App:
             R("POST", r"/api/logout", self.api_logout, auth=False),
             R("GET", r"/api/info", self.api_info),
             R("POST", r"/api/password", self.api_password),
-            R("GET", r"/api/devices", self.api_devices),
+            R("GET", r"/api/devices", self.api_devices, token=True),
             R("POST", r"/api/devices", self.api_device_create),
             R("PUT", r"/api/devices/(?P<item_id>\w+)", self.api_device_update),
             R("DELETE", r"/api/devices/(?P<item_id>\w+)", self.api_device_delete),
-            R("POST", r"/api/devices/(?P<item_id>\w+)/(?P<action>wake|sleep)", self.api_device_action),
-            R("GET", r"/api/status", self.api_status),
+            # Device by ID or name; also allowed for API tokens (scripts)
+            R("POST", r"/api/devices/(?P<item_id>[^/]+)/(?P<action>wake|sleep)", self.api_device_action, token=True),
+            R("GET", r"/api/status", self.api_status, token=True),
+            R("GET", r"/api/tokens", self.api_tokens),
+            R("POST", r"/api/tokens", self.api_token_create),
+            R("DELETE", r"/api/tokens/(?P<token_id>[\w-]+)", self.api_token_delete),
             R("GET", r"/api/schedules", self.api_schedules),
             R("POST", r"/api/schedules", self.api_schedule_create),
             R("PUT", r"/api/schedules/(?P<item_id>\w+)", self.api_schedule_update),
@@ -231,16 +238,17 @@ class App:
         self._net_logged = self._read_net_logged()
 
     @staticmethod
-    def _route(method, pattern, handler, auth=True):
-        return method, re.compile("^%s$" % pattern), handler, auth
+    def _route(method, pattern, handler, auth=True, token=False):
+        """token=True: also reachable with an API token (scripts); otherwise only with a session."""
+        return method, re.compile("^%s$" % pattern), handler, auth, token
 
     def resolve(self, method, path):
         allowed = False
-        for m, regex, handler, needs_auth in self.routes:
+        for m, regex, handler, needs_auth, token_ok in self.routes:
             match = regex.match(path)
             if match:
                 if m == method:
-                    return handler, match.groupdict(), needs_auth
+                    return handler, match.groupdict(), needs_auth, token_ok
                 allowed = True
         raise ApiError(405 if allowed else 404, "Method not allowed" if allowed else "Not found")
 
@@ -384,6 +392,19 @@ class App:
             raise ApiError(404, "Device not found")
         return device
 
+    def _device_by_ref(self, ref):
+        """Device by ID or by name (case-insensitive), e.g. /api/devices/backup-server/wake."""
+        ref = unquote(ref)
+        device = self.store.get("devices", ref)
+        if device is not None:
+            return device
+        matches = [d for d in self.store.list("devices") if d["name"].casefold() == ref.casefold()]
+        if len(matches) > 1:
+            raise ApiError(409, "Several devices are named \"%s\" - use the ID" % ref)
+        if not matches:
+            raise ApiError(404, "Device not found")
+        return matches[0]
+
     def api_devices(self, req):
         return 200, {"devices": self.store.list("devices")}
 
@@ -409,12 +430,63 @@ class App:
         self.status.invalidate(item_id)
         return 200, {"ok": True}
 
+    MAX_WAIT = 300  # s
+
     def api_device_action(self, req, item_id, action):
-        device = self._device_or_404(item_id)
+        device = self._device_by_ref(item_id)
         if action == "sleep" and device["sleep_method"] == "none":
             raise ApiError(400, "No sleep method is configured for this device")
-        ok, message = self.run_action(device, action, "manual")
-        return (200 if ok else 502), {"ok": ok, "message": message}
+        try:
+            wait = min(self.MAX_WAIT, max(0, int((req.query.get("wait") or ["0"])[0])))
+        except ValueError:
+            raise ApiError(400, "wait: number of seconds expected") from None
+        if wait and not device.get("host"):
+            raise ApiError(400, "wait needs a host or IP address for the device")
+        source = "API: %s" % req.token["name"] if req.token else "manual"
+        ok, message = self.run_action(device, action, source)
+        if not ok:
+            return 502, {"ok": False, "message": message}
+        result = {"ok": True, "message": message, "device": device["name"]}
+        if wait:
+            # Scripts can rely on the device: wake -> until it answers, sleep -> until it is gone
+            want = action == "wake"
+            start = time.monotonic()
+            online = check_host(device["host"])
+            while online != want and time.monotonic() - start < wait:
+                time.sleep(3)
+                online = check_host(device["host"])
+            self.status.invalidate(device["id"])
+            result.update(online=online, waited=round(time.monotonic() - start))
+            if online != want:
+                result.update(ok=False, message=("%s did not come online within %d s" if want
+                                                 else "%s is still online after %d s") % (device["name"], wait))
+                return 504, result
+        return 200, result
+
+    # -- API tokens (managed in the GUI with a session, used by scripts) --
+
+    def api_tokens(self, req):
+        if req.token:
+            raise ApiError(403, "API tokens cannot manage tokens")
+        return 200, {"tokens": self.tokens.list()}
+
+    def api_token_create(self, req):
+        if req.token:
+            raise ApiError(403, "API tokens cannot manage tokens")
+        try:
+            entry = self.tokens.create(req.body.get("name"))
+        except ValueError as e:
+            raise ApiError(400, str(e)) from None
+        log.info("API token \"%s\" created by %s", entry["name"], req.client)
+        return 201, entry
+
+    def api_token_delete(self, req, token_id):
+        if req.token:
+            raise ApiError(403, "API tokens cannot manage tokens")
+        if not self.tokens.revoke(token_id):
+            raise ApiError(404, "Token not found")
+        log.info("API token %s revoked by %s", token_id, req.client)
+        return 200, {"ok": True}
 
     def api_status(self, req):
         return 200, {"status": self.status.get(self.store.list("devices")), "checked": time.time()}
@@ -822,12 +894,23 @@ class Handler(BaseHTTPRequestHandler):
     def _handle_api(self, method, path, raw, client, via_hotspot=False):
         req = None
         try:
-            handler, params, needs_auth = self.app.resolve(method, path)
-            if method != "GET" and self.headers.get(CSRF_HEADER) != CSRF_VALUE:
-                raise ApiError(403, "Invalid request (CSRF protection)")
-            authenticated = True
-            if self.app.auth.required:
-                authenticated = self.app.auth.verify_token(self._cookie(COOKIE))
+            handler, params, needs_auth, token_ok = self.app.resolve(method, path)
+            token = None
+            bearer = self.headers.get("Authorization", "")
+            if bearer.lower().startswith("bearer "):
+                # Scripts: the browser never sends this header by itself, so no CSRF header is needed
+                token = self.app.tokens.verify(bearer[7:].strip())
+                if token is None:
+                    raise ApiError(401, "Invalid API token")
+                if not token_ok:
+                    raise ApiError(403, "API tokens may only list devices, query the status and wake devices or put them to sleep")
+                authenticated = True
+            else:
+                if method != "GET" and self.headers.get(CSRF_HEADER) != CSRF_VALUE:
+                    raise ApiError(403, "Invalid request (CSRF protection)")
+                authenticated = True
+                if self.app.auth.required:
+                    authenticated = self.app.auth.verify_token(self._cookie(COOKIE))
             if needs_auth and not authenticated:
                 raise ApiError(401, "Login required")
             body = {}
@@ -838,7 +921,8 @@ class Handler(BaseHTTPRequestHandler):
                     raise ApiError(400, "Invalid JSON") from None
                 if not isinstance(body, dict):
                     raise ApiError(400, "JSON object expected")
-            req = Request(body, client, authenticated, via_hotspot, self.secure)
+            req = Request(body, client, authenticated, via_hotspot, self.secure,
+                          parse_qs(urlsplit(self.path).query), token)
             status, payload = handler(req, **params)
         except ApiError as e:
             status, payload = e.status, {"error": e.message}

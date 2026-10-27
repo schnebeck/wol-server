@@ -583,12 +583,37 @@ more days. For the redirect to work, the name must point to the Pi on the home n
 
 ### API
 
-All endpoints return JSON. Write requests require the header `X-Requested-With: wol-server`.
+All endpoints return JSON. Write requests from the browser require the header `X-Requested-With: wol-server`.
+
+#### Scripts: API tokens
+
+For scripts, create a token under *System → API tokens for scripts*. It is shown only once and can be revoked
+there at any time. A token may only list devices, query their status and wake them or put them to sleep; it
+cannot change settings. The device can be given by ID or by name (case-insensitive). `?wait=SECONDS`
+(at most 300) keeps the answer back until the device answers (wake) or is gone (sleep); the device needs a
+host or IP address for this. The result: HTTP 200 when done, 504 on timeout. Each action appears in the log
+as `API: <token name>`.
+
+Example: a backup script wakes the backup server first and puts it to sleep afterwards.
+
+```bash
+#!/bin/sh
+WOL=https://wol.home.arpa
+AUTH="Authorization: Bearer $(cat ~/.config/wol-token)"   # token from System → API tokens
+
+curl -fsS -X POST -H "$AUTH" "$WOL/api/devices/backup-server/wake?wait=180" || exit 1
+rsync -a /home/ backup-server:/srv/backup/home/
+curl -fsS -X POST -H "$AUTH" "$WOL/api/devices/backup-server/sleep"
+```
+
+#### Endpoints
+
 
 ```
 GET    /api/session                 POST /api/login {password}      POST /api/logout
 GET    /api/devices                 POST /api/devices               PUT/DELETE /api/devices/<id>
-POST   /api/devices/<id>/wake       POST /api/devices/<id>/sleep    GET  /api/status
+POST   /api/devices/<id|name>/wake[?wait=s]  POST /api/devices/<id|name>/sleep[?wait=s]  GET /api/status
+GET    /api/tokens                  POST /api/tokens {name}         DELETE /api/tokens/<id>
 GET    /api/schedules               POST /api/schedules             PUT/DELETE /api/schedules/<id>
 GET    /api/events                  DELETE /api/events
 GET    /api/info                    POST /api/password {current, new}

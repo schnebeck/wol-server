@@ -586,12 +586,37 @@ gelten. Damit die Umleitung funktioniert, muss der Name im Heimnetz auf den Pi z
 
 ### API
 
-Alle Endpunkte liefern JSON. Schreibende Anfragen brauchen den Header `X-Requested-With: wol-server`.
+Alle Endpunkte liefern JSON. Schreibende Anfragen aus dem Browser brauchen den Header `X-Requested-With: wol-server`.
+
+#### Scripte: API-Tokens
+
+Für Scripte unter *System → API-Tokens für Scripte* einen Token erzeugen. Er wird nur einmal angezeigt und lässt
+sich dort jederzeit widerrufen. Ein Token darf nur Geräte auflisten, ihren Status abfragen und sie aufwecken oder
+schlafen legen; Einstellungen kann er nicht ändern. Das Gerät lässt sich per ID oder per Name angeben (Groß- und
+Kleinschreibung egal). `?wait=SEKUNDEN` (höchstens 300) hält die Antwort zurück, bis das Gerät antwortet (Wecken)
+bzw. weg ist (Schlafen); dafür braucht das Gerät einen Host oder eine IP. Ergebnis: HTTP 200, wenn erledigt, 504
+bei Zeitüberschreitung. Jede Aktion erscheint im Protokoll als `API: <Name des Tokens>`.
+
+Beispiel: Ein Backup-Script weckt zuerst den Backup-Server und legt ihn danach wieder schlafen.
+
+```bash
+#!/bin/sh
+WOL=https://wol.home.arpa
+AUTH="Authorization: Bearer $(cat ~/.config/wol-token)"   # Token aus System → API-Tokens
+
+curl -fsS -X POST -H "$AUTH" "$WOL/api/devices/backup-server/wake?wait=180" || exit 1
+rsync -a /home/ backup-server:/srv/backup/home/
+curl -fsS -X POST -H "$AUTH" "$WOL/api/devices/backup-server/sleep"
+```
+
+#### Endpunkte
+
 
 ```
 GET    /api/session                 POST /api/login {password}      POST /api/logout
 GET    /api/devices                 POST /api/devices               PUT/DELETE /api/devices/<id>
-POST   /api/devices/<id>/wake       POST /api/devices/<id>/sleep    GET  /api/status
+POST   /api/devices/<id|name>/wake[?wait=s]  POST /api/devices/<id|name>/sleep[?wait=s]  GET /api/status
+GET    /api/tokens                  POST /api/tokens {name}         DELETE /api/tokens/<id>
 GET    /api/schedules               POST /api/schedules             PUT/DELETE /api/schedules/<id>
 GET    /api/events                  DELETE /api/events
 GET    /api/info                    POST /api/password {current, new}
