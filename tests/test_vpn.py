@@ -39,7 +39,7 @@ class ParseTest(unittest.TestCase):
         text, info = vpn.parse_config(GOOD.replace("\n", "\r\n"))
         self.assertNotIn("\r", text)
         self.assertEqual(info, {"remote": "vpn.example.org:1194", "needs_auth": False})
-        self.assertIn("up /bin/evil", text)  # Inhalt eines Inline-Blocks ist keine Option
+        self.assertIn("up /bin/evil", text)  # content of an inline block is not an option
 
     def test_auth_user_pass_is_normalised(self):
         text, info = vpn.parse_config(GOOD + "auth-user-pass /etc/zugang.txt\n")
@@ -51,18 +51,18 @@ class ParseTest(unittest.TestCase):
                      "status /root/x", "management 0.0.0.0 7505", "management-hold", "  Down /x"):
             with self.subTest(line=line), self.assertRaises(vpn.VpnError) as ctx:
                 vpn.parse_config(GOOD + line + "\n")
-            self.assertIn("nicht erlaubt", str(ctx.exception))
+            self.assertIn("not allowed", str(ctx.exception))
 
     def test_rejects_file_references(self):
         for line in ("ca ca.crt", "tls-crypt ta.key", "tls-auth ta.key 1", "pkcs12 /etc/x.p12"):
             with self.subTest(line=line), self.assertRaises(vpn.VpnError) as ctx:
                 vpn.parse_config(GOOD + line + "\n")
-            self.assertIn("eingebetteten", str(ctx.exception))
-        vpn.parse_config(GOOD + "tls-auth [inline] 1\n")  # erlaubt
+            self.assertIn("embedded", str(ctx.exception))
+        vpn.parse_config(GOOD + "tls-auth [inline] 1\n")  # allowed
 
     def test_rejects_non_client_and_broken(self):
-        cases = {"": "leer", "remote x 1194\n": "Client", "client\n": "remote", GOOD + "<key>\nabc\n": "<key>",
-                 "client\nremote a\n" + "#" * vpn.MAX_CONFIG: "groß", "client\x00": "Textdatei"}
+        cases = {"": "empty", "remote x 1194\n": "client configuration", "client\n": "remote", GOOD + "<key>\nabc\n": "<key>",
+                 "client\nremote a\n" + "#" * vpn.MAX_CONFIG: "too large", "client\x00": "text file"}
         for text, expected in cases.items():
             with self.subTest(expected=expected), self.assertRaises(vpn.VpnError) as ctx:
                 vpn.parse_config(text)
@@ -89,7 +89,7 @@ class ManagerTest(unittest.TestCase):
         with open(os.path.join(self.tmp, "vpn", name)) as f:
             return f.read()
 
-    def finish_job(self, state="ok", message="Fertig"):
+    def finish_job(self, state="ok", message="Done"):
         request = json.loads(self.read("request"))
         with open(os.path.join(self.tmp, "vpn", "job.json"), "w") as f:
             json.dump(dict(request, state=state, message=message), f)
@@ -122,10 +122,10 @@ class ManagerTest(unittest.TestCase):
         self.mgr.upload({"config": GOOD})
         request = json.loads(self.read("request"))
         with open(os.path.join(self.tmp, "vpn", "job.json"), "w") as f:
-            json.dump(dict(request, state="running", message="Läuft …"), f)
-        job = self.mgr.status()["job"]  # wol-vpn.service ist nicht aktiv
+            json.dump(dict(request, state="running", message="Running ..."), f)
+        job = self.mgr.status()["job"]  # wol-vpn.service is not active
         self.assertEqual(job["state"], "failed")
-        self.assertIn("Abgebrochen", job["message"])
+        self.assertIn("Aborted", job["message"])
 
     def test_status(self):
         self.units[vpn.UNIT] = ("active", "enabled")
@@ -168,14 +168,14 @@ class SocketTest(unittest.TestCase):
             self.assertEqual((status, data["configured"], data["job"]), (200, False, None))
             status, data = api.call("POST", "/api/vpn/config", {"config": GOOD + "up /x\n"})
             self.assertEqual(status, 400)
-            self.assertIn("nicht erlaubt", data["error"])
-            big = GOOD + "# " + "x" * 40000 + "\n"  # größer als der alte Socket-Puffer
+            self.assertIn("not allowed", data["error"])
+            big = GOOD + "# " + "x" * 40000 + "\n"  # larger than the old socket buffer
             status, data = api.call("POST", "/api/vpn/config", {"config": big})
             self.assertEqual(status, 200, data)
             status, data = api.call("GET", "/api/vpn")
             self.assertEqual((data["job"]["state"], data["remote"]), ("running", "vpn.example.org:1194"))
             status, data = api.call("DELETE", "/api/vpn")
-            self.assertEqual(status, 400)  # Einrichtung läuft noch
+            self.assertEqual(status, 400)  # setup still running
         finally:
             api.tearDown()
 

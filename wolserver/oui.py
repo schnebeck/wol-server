@@ -1,8 +1,8 @@
-"""Hersteller zu MAC-Adressen aus den Listen des Systems (ieee-data, nmap, arp-scan).
+"""Vendors for MAC addresses from the system's lists (ieee-data, nmap, arp-scan).
 
-Es wird keine eigene Liste mitgeliefert. Fehlt eine Systemliste, bleibt der Hersteller leer –
-nur private (lokal verwaltete) Adressen werden immer erkannt. Gelesen wird bei Bedarf und nur
-für die angefragten Präfixe, damit auf dem Pi Zero nicht 30 000 Einträge im RAM liegen.
+No list of our own is shipped. Without a system list the vendor stays empty -
+only private (locally administered) addresses are always recognized. Lists are read on demand
+and only for the requested prefixes, so the Pi Zero does not keep 30,000 entries in RAM.
 """
 import csv
 import os
@@ -17,7 +17,7 @@ SOURCES = (
     ("/usr/share/arp-scan/ieee-oui.txt", "tab"),
     ("/usr/share/misc/ieee-oui.txt", "tab"),
 )
-PRIVATE = "private Adresse"
+PRIVATE = "private address"
 
 _lock = threading.Lock()
 _cache = {}
@@ -31,7 +31,7 @@ def _source():
 
 
 def _short(name):
-    """„Raspberry Pi Trading Ltd“ → „Raspberry Pi Trading“: Rechtsformen weglassen."""
+    """'Raspberry Pi Trading Ltd' → 'Raspberry Pi Trading': drop legal forms."""
     name = re.sub(r"[,.]?\s+(co\.?,?\s*ltd|ltd|limited|inc|corp(oration)?|gmbh|ag|llc|s\.?a\.?|b\.?v\.?|oy|ab|kg|plc|"
                   r"co|company|technologies|technology)\.?$", "", name.strip(), flags=re.I)
     return name.strip(" ,.")[:40]
@@ -59,7 +59,7 @@ def _scan(prefixes, path, kind):
 
 
 def lookup_many(macs, source=None):
-    """{mac: Hersteller} – leer, wenn unbekannt. Private Adressen als „private Adresse“."""
+    """{mac: vendor} - empty if unknown. Private addresses as "private address"."""
     result, missing = {}, set()
     for mac in macs:
         if not mac:

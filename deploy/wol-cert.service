@@ -1,7 +1,7 @@
 [Unit]
-Description=WOL-Server: HTTPS-Zertifikat vom Webserver abholen
+Description=WOL-Server: fetch HTTPS certificate from the web server
 Documentation=file:///opt/wol-server/README.md
-# Erst eingerichtet, wenn der Host-Schlüssel des Webservers hinterlegt ist
+# Set up only once the web server's host key is stored
 ConditionPathExists=/etc/wol-server/tls/known_hosts
 Wants=network-online.target
 After=network-online.target

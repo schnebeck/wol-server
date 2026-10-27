@@ -1,7 +1,7 @@
-"""Erreichbarkeitsprüfung: ICMP-Ping, ersatzweise TCP-Probes.
+"""Reachability check: ICMP ping, TCP probes as a fallback.
 
-Ein TCP-RST (Verbindung abgelehnt) zählt ebenfalls als "online" – damit werden auch
-Windows-Rechner erkannt, deren Firewall ICMP blockiert.
+A TCP RST (connection refused) also counts as "online" - this also detects
+Windows machines whose firewall blocks ICMP.
 """
 
 import errno
@@ -20,7 +20,7 @@ log = logging.getLogger("wolserver")
 
 PROBE_PORTS = (22, 445, 3389, 80, 443, 139)
 _ALIVE_ERRNOS = (0, errno.ECONNREFUSED)
-_dgram_icmp_ok = True  # wird False, sobald der Kernel ICMP-Datagram-Sockets verweigert
+_dgram_icmp_ok = True  # becomes False as soon as the kernel refuses ICMP datagram sockets
 
 
 def _checksum(data):
@@ -34,13 +34,13 @@ def _checksum(data):
 
 def _resolve(host):
     infos = socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)
-    infos.sort(key=lambda i: i[0] != socket.AF_INET)  # IPv4 bevorzugen
+    infos.sort(key=lambda i: i[0] != socket.AF_INET)  # prefer IPv4
     family, _, _, _, sockaddr = infos[0]
     return family, sockaddr[0]
 
 
 def icmp_ping(family, addr, timeout):
-    """True/False, oder None wenn unprivilegiertes ICMP nicht erlaubt ist."""
+    """True/False, or None if unprivileged ICMP is not allowed."""
     global _dgram_icmp_ok
     if not _dgram_icmp_ok:
         return None
@@ -51,7 +51,7 @@ def icmp_ping(family, addr, timeout):
         sock = socket.socket(family, socket.SOCK_DGRAM, proto)
     except OSError:
         _dgram_icmp_ok = False
-        log.info("ICMP-Datagram-Sockets nicht erlaubt (net.ipv4.ping_group_range) – nutze Fallback")
+        log.info("ICMP datagram sockets not allowed (net.ipv4.ping_group_range) - using fallback")
         return None
     with sock:
         seq = int.from_bytes(os.urandom(2), "big")
@@ -92,7 +92,7 @@ def system_ping(addr, timeout):
         return None
     if res.returncode == 0:
         return True
-    return False if res.returncode == 1 else None  # 2 = Fehler (z. B. keine Rechte)
+    return False if res.returncode == 1 else None  # 2 = error (e.g. no permission)
 
 
 def tcp_probe(family, addr, ports=PROBE_PORTS, timeout=1.0):
@@ -140,7 +140,7 @@ def check_host(host, timeout=1.0):
 
 
 class StatusMonitor:
-    """Prüft Geräte nur bei Bedarf (wenn die GUI fragt) und cached das Ergebnis kurz."""
+    """Checks devices only on demand (when the GUI asks) and caches the result briefly."""
 
     def __init__(self, cache_seconds=5, workers=6, checker=check_host):
         self.cache_seconds = cache_seconds
@@ -166,8 +166,8 @@ class StatusMonitor:
         for dev, fut in futures:
             try:
                 online = bool(fut.result())
-            except Exception:  # noqa: BLE001 – ein defekter Check darf die API nicht stören
-                log.exception("Statusprüfung für %s fehlgeschlagen", dev["host"])
+            except Exception:  # noqa: BLE001 - a broken check must not disturb the API
+                log.exception("Status check for %s failed", dev["host"])
                 online = False
             result[dev["id"]] = online
             with self._lock:

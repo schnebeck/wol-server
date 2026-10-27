@@ -1,9 +1,9 @@
-"""OpenVPN-Client über die Web-GUI einrichten (Teil des Root-Dienstes wol-wifi).
+"""Set up the OpenVPN client via the web GUI (part of the root service wol-wifi).
 
-Der Dienst prüft hochgeladene Konfigurationen und legt sie mit einem Auftrag im eigenen
-State-Verzeichnis ab. Die eigentliche Einrichtung (Paket, /etc/openvpn, systemd) übernimmt
-wol-vpn.service, das wol-vpn.path beim Schreiben der Auftragsdatei startet. So braucht
-wol-wifi selbst weder Schreibrechte in /etc noch Rechte gegenüber systemd.
+The service checks uploaded configurations and stores them together with a job in its own
+state directory. The actual setup (package, /etc/openvpn, systemd) is done by
+wol-vpn.service, which wol-vpn.path starts when the job file is written. This way
+wol-wifi itself needs neither write access to /etc nor any rights towards systemd.
 """
 import json
 import logging
@@ -24,8 +24,8 @@ UNIT = "openvpn-client@%s.service" % NAME
 JOB_UNIT = "wol-vpn.service"
 MAX_CONFIG = 48 * 1024
 
-# Eine .ovpn-Datei läuft mit root-Rechten. Diese Optionen führen Programme aus, laden Code oder
-# schreiben Dateien an beliebige Orte – aus einer hochgeladenen Datei werden sie nicht übernommen.
+# An .ovpn file runs with root privileges. These options run programs, load code or
+# write files to arbitrary places - they are not accepted from an uploaded file.
 FORBIDDEN = {
     "up", "down", "route-up", "route-pre-down", "ipchange", "tls-verify", "auth-user-pass-verify",
     "client-connect", "client-disconnect", "learn-address", "script-security", "plugin", "iproute",
@@ -33,7 +33,7 @@ FORBIDDEN = {
     "askpass", "tmp-dir", "syslog", "dev-node", "secret", "up-delay", "down-pre", "setenv-safe",
 }
 FORBIDDEN_PREFIXES = ("management-",)
-# Verweise auf Zusatzdateien: Hochladen lässt sich nur eine einzelne Datei
+# references to additional files: only a single file can be uploaded
 FILE_OPTIONS = {"ca", "cert", "key", "tls-auth", "tls-crypt", "tls-crypt-v2", "pkcs12", "dh",
                 "extra-certs", "crl-verify", "http-proxy-user-pass"}
 INLINE_TAG = re.compile(r"^\s*<(/?)([a-z0-9-]+)>\s*$", re.I)
@@ -44,13 +44,13 @@ class VpnError(Exception):
 
 
 def parse_config(text):
-    """Prüft eine Client-Konfiguration. Liefert (bereinigter Text, Infos) oder wirft VpnError."""
+    """Checks a client configuration. Returns (cleaned text, info) or raises VpnError."""
     if not isinstance(text, str) or not text.strip():
-        raise VpnError("Die Datei ist leer.")
+        raise VpnError("The file is empty.")
     if len(text.encode("utf-8")) > MAX_CONFIG:
-        raise VpnError("Die Datei ist zu groß (max. %d KB)." % (MAX_CONFIG // 1024))
+        raise VpnError("The file is too large (max. %d KB)." % (MAX_CONFIG // 1024))
     if "\x00" in text:
-        raise VpnError("Das ist keine Textdatei.")
+        raise VpnError("This is not a text file.")
     lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
     out, inline, remotes = [], None, []
     is_client = needs_auth = False
@@ -71,32 +71,32 @@ def parse_config(text):
             continue
         option = words[0].lower().lstrip("-")
         if option in FORBIDDEN or option.startswith(FORBIDDEN_PREFIXES):
-            raise VpnError("Zeile %d: „%s“ ist aus Sicherheitsgründen nicht erlaubt "
-                           "(würde mit root-Rechten Programme ausführen oder Dateien schreiben)." % (number, words[0]))
+            raise VpnError("Line %d: \"%s\" is not allowed for security reasons "
+                           "(would run programs or write files with root privileges)." % (number, words[0]))
         if option in FILE_OPTIONS and len(words) > 1 and words[1].lower() != "[inline]":
-            raise VpnError("Zeile %d: „%s“ verweist auf die Datei „%s“. Bitte eine Konfiguration mit "
-                           "eingebetteten Zertifikaten verwenden (<%s>…</%s>)." % (number, words[0], words[1],
-                                                                              option, option))
+            raise VpnError("Line %d: \"%s\" refers to the file \"%s\". Use a configuration with "
+                           "embedded certificates (<%s>...</%s>)." % (number, words[0], words[1],
+                                                                     option, option))
         if option in ("client", "tls-client"):
             is_client = True
         elif option == "remote" and len(words) > 1:
             remotes.append(words[1] + (":" + words[2] if len(words) > 2 and words[2].isdigit() else ""))
         elif option == "auth-user-pass":
             needs_auth = True
-            line = "auth-user-pass"  # Datei setzt die Einrichtung
+            line = "auth-user-pass"  # the setup provides the file
         out.append(line)
     if inline:
-        raise VpnError("Der Block <%s> wird nicht geschlossen." % inline)
+        raise VpnError("The block <%s> is not closed." % inline)
     if not is_client:
-        raise VpnError("Das ist keine Client-Konfiguration (es fehlt „client“).")
+        raise VpnError("This is not a client configuration (\"client\" is missing).")
     if not remotes:
-        raise VpnError("In der Konfiguration fehlt der Server („remote …“).")
+        raise VpnError("The configuration lacks the server (\"remote ...\").")
     return "\n".join(out).strip("\n") + "\n", {"remote": remotes[0], "needs_auth": needs_auth}
 
 
 def validate_credential(value, what):
     if not isinstance(value, str) or not value or len(value) > 256 or any(c in value for c in "\r\n\x00"):
-        raise VpnError("%s fehlt oder ist ungültig." % what)
+        raise VpnError("%s is missing or invalid." % what)
     return value
 
 
@@ -150,11 +150,11 @@ class VpnManager:
         units = units if units is not None else self._units()
         running = units.get(JOB_UNIT, {}).get("ActiveState") in ("activating", "active", "reloading")
         if request and (not job or job.get("id") != request.get("id")):
-            # Auftrag geschrieben, wol-vpn.service hat ihn noch nicht übernommen
+            # job written, wol-vpn.service has not picked it up yet
             return {"id": request["id"], "action": request["action"], "state": "running",
-                    "message": "Wird gestartet …", "ts": request["ts"]}
+                    "message": "Starting ...", "ts": request["ts"]}
         if job and job.get("state") == "running" and not running:
-            job = dict(job, state="failed", message="Abgebrochen (Neustart oder Absturz?). Bitte erneut versuchen.")
+            job = dict(job, state="failed", message="Aborted (restart or crash?). Try again.")
         return job
 
     def status(self):
@@ -177,10 +177,10 @@ class VpnManager:
     def _request(self, action):
         job = self.job()
         if job and job.get("state") == "running":
-            raise VpnError("Eine VPN-Änderung wird bereits ausgeführt. Bitte kurz warten.")
+            raise VpnError("A VPN change is already in progress. Wait a moment.")
         os.makedirs(self.dir, mode=0o700, exist_ok=True)
         request = {"id": "%d" % (self.clock() * 1000), "action": action, "ts": self.clock()}
-        # Direkt schreiben (nicht umbenennen): wol-vpn.path reagiert auf das Schließen der Datei
+        # write directly (do not rename): wol-vpn.path reacts to the file being closed
         fd = os.open(self.path("request"), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(request, f)
@@ -191,8 +191,8 @@ class VpnManager:
         with self.lock:
             auth = None
             if info["needs_auth"]:
-                user = validate_credential(args.get("username"), "Der VPN-Benutzername")
-                auth = "%s\n%s\n" % (user, validate_credential(args.get("password"), "Das VPN-Passwort"))
+                user = validate_credential(args.get("username"), "The VPN user name")
+                auth = "%s\n%s\n" % (user, validate_credential(args.get("password"), "The VPN password"))
             os.makedirs(self.dir, mode=0o700, exist_ok=True)
             _write_private(self.path("client.ovpn"), config)
             if auth:
@@ -204,18 +204,18 @@ class VpnManager:
                     pass
             _write_private(self.path("info.json"), json.dumps({"remote": info["remote"], "ts": self.clock()}))
             self._request("apply")
-        log.info("VPN-Konfiguration für %s übernommen", info["remote"])
-        return {"ok": True, "message": "Konfiguration für %s wird eingerichtet …" % info["remote"]}
+        log.info("VPN configuration for %s accepted", info["remote"])
+        return {"ok": True, "message": "Setting up configuration for %s ..." % info["remote"]}
 
     def set_enabled(self, args):
         enabled = bool(args.get("enabled"))
         with self.lock:
             if not os.path.exists(CONF):
-                raise VpnError("Keine VPN-Konfiguration eingerichtet.")
+                raise VpnError("No VPN configuration set up.")
             self._request("enable" if enabled else "disable")
-        return {"ok": True, "message": "VPN wird %s …" % ("eingeschaltet" if enabled else "ausgeschaltet")}
+        return {"ok": True, "message": "Switching VPN on ..." if enabled else "Switching VPN off ..."}
 
     def remove(self, args=None):
         with self.lock:
             self._request("remove")
-        return {"ok": True, "message": "VPN-Konfiguration wird entfernt …"}
+        return {"ok": True, "message": "Removing VPN configuration ..."}

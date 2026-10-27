@@ -1,35 +1,35 @@
 #!/bin/bash
-# Einrichtung beim ersten Start eines WOL-Server-Images.
+# First-boot setup of a WOL-Server image.
 #
-# Wird von cloud-init aufgerufen (deploy/firstboot/user-data auf der Boot-Partition) und liest
-# die Einstellungen aus /boot/firmware/wol-setup.txt. Es braucht kein Internet: Raspberry Pi OS
-# Lite (Trixie) bringt alle Pakete mit. Nur OpenVPN wird nachinstalliert, sobald Internet da ist.
+# Called by cloud-init (deploy/firstboot/user-data on the boot partition); reads the settings
+# from /boot/firmware/wol-setup.txt. No Internet required: Raspberry Pi OS Lite (Trixie) ships
+# all packages. Only OpenVPN is installed later, once Internet is available.
 #
-# Danach werden Einstellungen, VPN-Schlüssel und Quellen von der Boot-Partition gelöscht
-# und das Protokoll als wol-setup.log dort abgelegt.
+# Afterwards the settings, VPN keys and sources are deleted from the boot partition and the
+# log is stored there as wol-setup.log.
 #
-# cloud-init startet das Skript nur einmal. Bricht der Pi mittendrin ab (Stromausfall, Hänger
-# und Hardware-Watchdog), setzt wol-firstboot.service die Einrichtung beim nächsten Start
-# fort; alle Schritte vertragen deshalb eine Wiederholung.
+# cloud-init runs the script only once. If the Pi aborts halfway (power loss, hang and
+# hardware watchdog), wol-firstboot.service resumes the setup on the next boot; every step
+# therefore tolerates being repeated.
 set -uo pipefail
 
 BOOT=/boot/firmware
 SRC_BOOT="$BOOT/wol-server"
 WORK=/var/tmp/wol-server-src
 LOG=/var/log/wol-firstboot.log
-STATUS="FEHLGESCHLAGEN"
-MARKER=/run/wol-firstboot  # solange er existiert, blinkt die LED schnell (auch über wol-wifi)
+STATUS="FAILED"
+MARKER=/run/wol-firstboot  # while it exists, the LED blinks fast (also via wol-wifi)
 RETRY_UNIT=/etc/systemd/system/wol-firstboot.service
 
-# Das Protokoll entsteht gleich auch auf der Boot-Partition: Hängt die Einrichtung, lässt es sich
-# über einen Kartenleser lesen. finish() schreibt am Ende die bereinigte Fassung.
+# The log is written to the boot partition right away: if the setup hangs, it can be read
+# with a card reader. finish() writes the cleaned-up version at the end.
 exec > >(tee -a "$LOG" "$BOOT/wol-setup.log") 2>&1
 log() {
     printf '[%s] %s\n' "$(date '+%F %T')" "$*"
     sync -f "$BOOT/wol-setup.log" 2>/dev/null
 }
 
-# Status-LED: "fast" = schnelles Blinken, "normal" = Standardanzeige (SD-Zugriffe)
+# Status LED: "fast" = fast blinking, "normal" = default indication (SD access)
 led() {
     local dir trigger
     for dir in /sys/class/leds/ACT /sys/class/leds/led0; do
@@ -45,39 +45,39 @@ led() {
     done
 } 2>/dev/null
 
-# shellcheck disable=SC2317  # wird über trap aufgerufen
+# shellcheck disable=SC2317  # called via trap
 finish() {
-    systemctl stop wol-boottrace.service >/dev/null 2>&1   # Ablaufverfolgung aus user-data
-    # Geheimnisse von der FAT-Partition entfernen – auch wenn etwas schiefging
+    systemctl stop wol-boottrace.service >/dev/null 2>&1   # boot trace from user-data
+    # Remove secrets from the FAT partition - even if something went wrong
     rm -f "$BOOT/wol-setup.txt" "$BOOT/openvpn.ovpn" "$BOOT/openvpn.auth" "$BOOT/ssh_authorized_keys"
     rm -rf "$SRC_BOOT" "$WORK"
     rm -f "$MARKER"
     systemctl disable --no-reload wol-firstboot.service >/dev/null 2>&1
     rm -f "$RETRY_UNIT" /etc/systemd/system/multi-user.target.wants/wol-firstboot.service
-    # Läuft wol-wifi, übernimmt er die LED beim nächsten Durchlauf; sonst Standardanzeige
+    # If wol-wifi is running, it takes over the LED on its next pass; otherwise default indication
     systemctl is-active -q wol-wifi || led normal
-    log "Einrichtung beendet: $STATUS"
+    log "Setup finished: $STATUS"
     sleep 1
-    # Nach einem Absturz stehen ggf. Nullbytes im Protokoll (nie geschriebene Blöcke)
+    # After a crash the log may contain null bytes (blocks never written)
     tr -d '\000' < "$LOG" > "$BOOT/wol-setup.log" 2>/dev/null || true
     sync
 }
 
-[ "$(id -u)" -eq 0 ] || { log "Muss als root laufen"; exit 1; }
+[ "$(id -u)" -eq 0 ] || { log "Must run as root"; exit 1; }
 exec 9> /run/wol-firstboot.lock
-flock -n 9 || { log "Einrichtung läuft bereits"; exit 0; }
+flock -n 9 || { log "Setup is already running"; exit 0; }
 trap finish EXIT
 
-log "WOL-Server: Einrichtung beim ersten Start"
-[ -d "$SRC_BOOT/wolserver" ] || { log "$SRC_BOOT fehlt – nichts zu tun"; exit 1; }
+log "WOL-Server: first-boot setup"
+[ -d "$SRC_BOOT/wolserver" ] || { log "$SRC_BOOT missing - nothing to do"; exit 1; }
 touch "$MARKER"
 led fast
 
-# Wiederanlauf nach einem Abbruch: beim nächsten Start erneut ausführen, bis finish() die
-# Einheit entfernt. sync, damit die Datei einen harten Reset sicher übersteht.
+# Resume after an abort: run again on the next boot until finish() removes the unit.
+# sync so the file safely survives a hard reset.
 cat > "$RETRY_UNIT" <<EOF
 [Unit]
-Description=WOL-Server: Einrichtung nach Abbruch fortsetzen
+Description=WOL-Server: resume setup after an abort
 ConditionPathExists=$SRC_BOOT/deploy/firstboot.sh
 Wants=network-online.target
 After=network-online.target NetworkManager.service userconfig.service
@@ -90,10 +90,10 @@ TimeoutStartSec=infinity
 [Install]
 WantedBy=multi-user.target
 EOF
-systemctl enable --no-reload wol-firstboot.service >/dev/null 2>&1 || log "Wiederanlauf nicht einrichtbar"
+systemctl enable --no-reload wol-firstboot.service >/dev/null 2>&1 || log "Could not set up resume after abort"
 sync
 
-# ---------------------------------------------------------------- Einstellungen lesen
+# ---------------------------------------------------------------- Read settings
 declare -A CFG=()
 if [ -f "$BOOT/wol-setup.txt" ]; then
     while IFS= read -r line || [ -n "$line" ]; do
@@ -102,14 +102,14 @@ if [ -f "$BOOT/wol-setup.txt" ]; then
         if [[ "$line" =~ ^[[:space:]]*([A-Z_]+)=(.*)$ ]]; then
             CFG[${BASH_REMATCH[1]}]=${BASH_REMATCH[2]}
         else
-            log "Zeile in wol-setup.txt nicht verstanden, ignoriert: ${line%%=*}"
+            log "Line in wol-setup.txt not understood, ignored: ${line%%=*}"
         fi
     done < "$BOOT/wol-setup.txt"
 else
-    log "Keine wol-setup.txt gefunden – verwende Standardwerte"
+    log "No wol-setup.txt found - using defaults"
 fi
 
-# setting NAME STANDARD: Wert ohne umgebende Anführungszeichen; außer bei Passwörtern auch ohne Leerraum
+# setting NAME DEFAULT: value without surrounding quotes; except for passwords also without surrounding whitespace
 setting() {
     local value=${CFG[$1]:-}
     if [[ "$1" != *PASSWORD ]]; then
@@ -132,8 +132,8 @@ WIFI_PASSWORD=$(setting WIFI_PASSWORD "")
 ADMIN=$(setting ADMIN_USER admin)
 ADMIN_PASSWORD=$(setting ADMIN_PASSWORD "")
 
-# ---------------------------------------------------------------- Quellen auf ext4 kopieren
-# Auf der FAT-Partition fehlen Unix-Rechte, und unter Windows bearbeitete Skripte haben CRLF.
+# ---------------------------------------------------------------- Copy sources to ext4
+# The FAT partition lacks Unix permissions, and scripts edited on Windows have CRLF.
 rm -rf "$WORK"
 cp -r "$SRC_BOOT" "$WORK"
 find "$WORK" -name '*.sh' -exec sed -i 's/\r$//' {} +
@@ -149,48 +149,48 @@ if [[ "$HOST" =~ ^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$ ]]; then
         printf '127.0.1.1\t%s\n' "$HOST" >> /etc/hosts
     fi
 else
-    log "Ungültiger HOSTNAME '$HOST' – Hostname bleibt $(hostname)"
+    log "Invalid HOSTNAME '$HOST' - hostname stays $(hostname)"
 fi
 
 if [ -f "/usr/share/zoneinfo/$TZONE" ]; then
-    log "Zeitzone: $TZONE"
+    log "Time zone: $TZONE"
     timedatectl set-timezone "$TZONE" 2>/dev/null || ln -sf "/usr/share/zoneinfo/$TZONE" /etc/localtime
 else
-    log "Unbekannte Zeitzone '$TZONE' – bleibt $(cat /etc/timezone 2>/dev/null || echo UTC)"
+    log "Unknown time zone '$TZONE' - stays $(cat /etc/timezone 2>/dev/null || echo UTC)"
 fi
 
 if [[ "$COUNTRY" =~ ^[A-Z]{2}$ ]]; then
-    log "WLAN-Land: $COUNTRY"
-    raspi-config nonint do_wifi_country "$COUNTRY" || log "WLAN-Land konnte nicht gesetzt werden"
+    log "Wi-Fi country: $COUNTRY"
+    raspi-config nonint do_wifi_country "$COUNTRY" || log "Could not set Wi-Fi country"
 else
-    log "Ungültiges COUNTRY '$COUNTRY' – verwende DE"
+    log "Invalid COUNTRY '$COUNTRY' - using DE"
     COUNTRY=DE
     raspi-config nonint do_wifi_country DE || true
 fi
 if command -v rfkill >/dev/null; then rfkill unblock wifi || true; fi
 
-# ---------------------------------------------------------------- Wartungszugang
-# Raspberry Pi OS legt den Benutzer aus userconf.txt an (userconfig.service) – abwarten
+# ---------------------------------------------------------------- Maintenance access
+# Raspberry Pi OS creates the user from userconf.txt (userconfig.service) - wait for it
 for _ in $(seq 60); do
     [ "$(systemctl show -p ActiveState --value userconfig.service 2>/dev/null)" = activating ] || break
     sleep 2
 done
 first_user=$(getent passwd 1000 | cut -d: -f1)
 if [ "$ADMIN" = root ]; then
-    # Wartung direkt als root: kein Umbenennen, Schlüssel und Passwort gelten für root.
-    # SSH erlaubt root nur mit Schlüssel (Debian-Standard PermitRootLogin prohibit-password).
-    log "Wartungszugang als root"
+    # Maintenance directly as root: no renaming, key and password apply to root.
+    # SSH allows root only with a key (Debian default PermitRootLogin prohibit-password).
+    log "Maintenance access as root"
 elif [[ "$ADMIN" =~ ^[a-z][a-z0-9-]{0,31}$ ]] && [ -n "$first_user" ] && [ "$first_user" != "$ADMIN" ]; then
     if getent passwd "$ADMIN" >/dev/null; then
-        log "Benutzer $ADMIN existiert schon als Systembenutzer – bleibe bei $first_user"
+        log "User $ADMIN already exists as a system user - keeping $first_user"
     else
-        log "Benutzer $first_user → $ADMIN"
-        /usr/lib/userconf-pi/userconf "$ADMIN" "" || log "Umbenennen fehlgeschlagen"
+        log "User $first_user -> $ADMIN"
+        /usr/lib/userconf-pi/userconf "$ADMIN" "" || log "Renaming failed"
     fi
 fi
 [ "$ADMIN" = root ] || ADMIN=$(getent passwd 1000 | cut -d: -f1)
 if [ -n "$ADMIN_PASSWORD" ]; then
-    printf '%s:%s\n' "$ADMIN" "$ADMIN_PASSWORD" | chpasswd && log "Passwort für $ADMIN gesetzt"
+    printf '%s:%s\n' "$ADMIN" "$ADMIN_PASSWORD" | chpasswd && log "Password set for $ADMIN"
 fi
 if [ -s "$BOOT/ssh_authorized_keys" ]; then
     home=$(getent passwd "$ADMIN" | cut -d: -f6)
@@ -198,51 +198,51 @@ if [ -s "$BOOT/ssh_authorized_keys" ]; then
     tr -d '\r' < "$BOOT/ssh_authorized_keys" > "$home/.ssh/authorized_keys"
     chown "$ADMIN:$ADMIN" "$home/.ssh/authorized_keys"
     chmod 0600 "$home/.ssh/authorized_keys"
-    log "SSH-Schlüssel für $ADMIN übernommen ($(grep -c . "$home/.ssh/authorized_keys") Schlüssel)"
+    log "SSH keys installed for $ADMIN ($(grep -c . "$home/.ssh/authorized_keys") keys)"
 fi
 if yes_no SSH no; then
-    systemctl enable --no-reload --now ssh >/dev/null 2>&1 && log "SSH-Server aktiviert (Benutzer $ADMIN)"
+    systemctl enable --no-reload --now ssh >/dev/null 2>&1 && log "SSH server enabled (user $ADMIN)"
     if [ ! -s "$BOOT/ssh_authorized_keys" ] && [ -z "$ADMIN_PASSWORD" ]; then
-        log "Hinweis: SSH ist an, aber weder Schlüssel noch ADMIN_PASSWORD gesetzt – Login nicht möglich"
+        log "Note: SSH is on, but neither a key nor ADMIN_PASSWORD is set - login not possible"
     elif [ "$ADMIN" = root ] && [ ! -s "$BOOT/ssh_authorized_keys" ]; then
-        log "Hinweis: root darf sich per SSH nur mit Schlüssel anmelden – ADMIN_PASSWORD gilt nur an der Konsole"
+        log "Note: root may log in via SSH only with a key - ADMIN_PASSWORD applies only on the console"
     fi
 fi
 
-# ---------------------------------------------------------------- WLAN vorgeben
-# Vor install.sh, damit der Hotspot-Dienst das WLAN beim Start schon kennt.
+# ---------------------------------------------------------------- Preset Wi-Fi
+# Before install.sh so the hotspot service already knows the Wi-Fi when it starts.
 if [ -n "$WIFI_SSID" ]; then
-    log "WLAN '$WIFI_SSID' eintragen"
+    log "Adding Wi-Fi '$WIFI_SSID'"
     settings=(connection.autoconnect yes 802-11-wireless.powersave 2
               802-11-wireless.cloned-mac-address permanent)
     [ -n "$WIFI_PASSWORD" ] && settings+=(wifi-sec.key-mgmt wpa-psk wifi-sec.psk "$WIFI_PASSWORD")
     if nmcli connection show id "$WIFI_SSID" >/dev/null 2>&1; then
-        # Wiederanlauf: Profil besteht schon (und trägt evtl. gerade die Verbindung)
+        # Resume: profile already exists (and may be carrying the connection right now)
         args=(connection modify id "$WIFI_SSID" "${settings[@]}")
     else
         args=(connection add type wifi ifname wlan0 con-name "$WIFI_SSID" ssid "$WIFI_SSID" "${settings[@]}")
     fi
-    nmcli "${args[@]}" >/dev/null || log "WLAN-Profil konnte nicht angelegt werden – Einrichtung dann über den Hotspot"
+    nmcli "${args[@]}" >/dev/null || log "Could not create Wi-Fi profile - set up via the hotspot instead"
 fi
 
 # ---------------------------------------------------------------- WOL-Server
-log "Installiere den WOL-Server"
+log "Installing WOL-Server"
 if ! bash "$WORK/deploy/install.sh" --no-password --country "$COUNTRY"; then
-    log "install.sh ist fehlgeschlagen"
+    log "install.sh failed"
     exit 1
 fi
 sync
 if [ -n "$GUI_PASSWORD" ]; then
     if printf '%s\n' "$GUI_PASSWORD" | /usr/local/bin/wol-server passwd --stdin >/dev/null; then
-        log "GUI-Passwort gesetzt"
+        log "GUI password set"
     else
-        log "GUI-Passwort ungültig (mindestens 8 Zeichen) – bitte in der GUI festlegen"
+        log "GUI password invalid (at least 8 characters) - please set it in the GUI"
     fi
 fi
 
-# ---------------------------------------------------------------- OpenVPN (sobald Internet da ist)
+# ---------------------------------------------------------------- OpenVPN (once Internet is available)
 if [ -s "$BOOT/openvpn.ovpn" ]; then
-    log "OpenVPN-Konfiguration gefunden – wird installiert, sobald Internet verfügbar ist"
+    log "OpenVPN configuration found - will be installed once Internet is available"
     install -d -m 0700 /etc/wol-server/firstboot
     install -m 0600 "$BOOT/openvpn.ovpn" /etc/wol-server/firstboot/client.ovpn
     if [ -s "$BOOT/openvpn.auth" ]; then
@@ -252,11 +252,11 @@ if [ -s "$BOOT/openvpn.ovpn" ]; then
     fi
     cat > /usr/local/sbin/wol-openvpn-pending <<'EOF'
 #!/bin/sh
-# Installiert OpenVPN und richtet den Client ein, sobald Internet da ist (einmalig nach dem Erststart).
+# Installs OpenVPN and sets up the client once Internet is available (once, after the first boot).
 PENDING=/etc/wol-server/firstboot/client.ovpn
 [ -f "$PENDING" ] || exit 0
-apt-get update -q --error-on=any || exit 1   # noch kein Internet – systemd versucht es später erneut
-/opt/wol-server/deploy/openvpn-setup.sh "$PENDING" || true   # Tunnel darf auch später erst stehen
+apt-get update -q --error-on=any || exit 1   # no Internet yet - systemd retries later
+/opt/wol-server/deploy/openvpn-setup.sh "$PENDING" || true   # tunnel may come up later
 if command -v openvpn >/dev/null && [ -f /etc/openvpn/client/wol.conf ]; then
     rm -rf /etc/wol-server/firstboot
     systemctl disable wol-openvpn-pending.service
@@ -267,7 +267,7 @@ EOF
     chmod 0755 /usr/local/sbin/wol-openvpn-pending
     cat > /etc/systemd/system/wol-openvpn-pending.service <<'EOF'
 [Unit]
-Description=WOL-Server: OpenVPN einrichten, sobald Internet verfügbar ist
+Description=WOL-Server: set up OpenVPN once Internet is available
 Wants=network-online.target
 After=network-online.target wol-server.service
 StartLimitIntervalSec=0
@@ -281,22 +281,22 @@ RestartSec=120
 [Install]
 WantedBy=multi-user.target
 EOF
-    systemctl enable wol-openvpn-pending.service >/dev/null   # lädt selbst neu
+    systemctl enable wol-openvpn-pending.service >/dev/null   # reloads by itself
     systemctl start --no-block wol-openvpn-pending.service
 fi
 
-# ---------------------------------------------------------------- Abschluss
-# cloud-init wird nicht mehr gebraucht; abgeschaltet startet der Zero spürbar schneller.
+# ---------------------------------------------------------------- Finish
+# cloud-init is no longer needed; with it disabled the Zero boots noticeably faster.
 touch /etc/cloud/cloud-init.disabled
 
-STATUS="OK – GUI unter http://$(hostname).local/"
-# Treiber-Sperren, Swap und Firmware-Einstellungen wirken erst nach einem Neustart
-log "Speichersparmodus einrichten"
-bash /opt/wol-server/deploy/lowmem.sh || log "lowmem.sh fehlgeschlagen – Pi läuft ohne Speichersparmodus weiter"
+STATUS="OK - GUI at http://$(hostname).local/"
+# Driver blacklists, swap and firmware settings take effect only after a reboot
+log "Setting up low-memory mode"
+bash /opt/wol-server/deploy/lowmem.sh || log "lowmem.sh failed - Pi continues without low-memory mode"
 if yes_no LOWPOWER yes; then
-    log "Stromsparmodus einrichten"
-    bash /opt/wol-server/deploy/lowpower.sh || log "lowpower.sh fehlgeschlagen – Pi läuft ohne Stromsparmodus weiter"
+    log "Setting up low-power mode"
+    bash /opt/wol-server/deploy/lowpower.sh || log "lowpower.sh failed - Pi continues without low-power mode"
 fi
-STATUS="$STATUS (Neustart in 1 min)"
-shutdown -r +1 "WOL-Server eingerichtet – Neustart für Speicher- und Stromsparmodus" || true
+STATUS="$STATUS (reboot in 1 min)"
+shutdown -r +1 "WOL-Server set up - rebooting for low-memory and low-power mode" || true
 exit 0

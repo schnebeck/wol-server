@@ -1,39 +1,39 @@
-# WOL-Server – Einstellungen für die automatische Einrichtung beim ersten Start
+# WOL-Server - settings for the automatic setup on the first boot
 #
-# Diese Datei liegt auf der Boot-Partition der SD-Karte ("bootfs"). Beim ersten Start
-# übernimmt der Pi die Werte und löscht die Datei danach, weil sie Passwörter enthält.
-# Das Ergebnis steht anschließend in wol-setup.log auf derselben Partition.
+# This file is on the boot partition of the SD card ("bootfs"). On the first boot the Pi
+# applies the values and then deletes the file, because it contains passwords.
+# The result is then in wol-setup.log on the same partition.
 #
-# Format: SCHLÜSSEL=Wert (ohne Leerzeichen um das "="). Leerer Wert = Standard.
+# Format: KEY=value (no spaces around the "="). Empty value = default.
 
-# Name im Netz. Die GUI ist später unter http://<HOSTNAME>.local/ erreichbar.
+# Name on the network. The GUI will be reachable at http://<HOSTNAME>.local/.
 HOSTNAME=wol
 
-# Zeitzone, wichtig für die Zeitpläne
+# Time zone, important for the schedules
 TIMEZONE=Europe/Berlin
 
-# WLAN-Land (erlaubte Kanäle und Sendeleistung)
+# Wi-Fi country (allowed channels and transmit power)
 COUNTRY=DE
 
-# Passwort für die Web-GUI (mindestens 8 Zeichen). Dringend empfohlen: Ohne Passwort
-# kann beim ersten Start jeder in Funkreichweite über den offenen Hotspot die GUI nutzen.
+# Password for the web GUI (at least 8 characters). Strongly recommended: without a password,
+# anyone within radio range can use the GUI via the open hotspot on the first boot.
 GUI_PASSWORD=
 
-# Optional: WLAN gleich vorgeben. Leer lassen = Einrichtung über den Hotspot "WOL-Setup-XXXX".
+# Optional: preset the Wi-Fi. Leave empty = set up via the hotspot "WOL-Setup-XXXX".
 WIFI_SSID=
 WIFI_PASSWORD=
 
-# Stromsparmodus: HDMI und Bluetooth aus.
+# Low-power mode: HDMI and Bluetooth off.
 LOWPOWER=yes
 
-# Wartungszugang. Standard: kein Login, das Gerät braucht keinen.
-# SSH=yes aktiviert den SSH-Server. Angemeldet wird mit einem Schlüssel aus der Datei
-# ssh_authorized_keys (neben diese Datei legen) oder mit ADMIN_PASSWORD.
-# ADMIN_USER=root: Wartung direkt als root – per SSH dann nur mit Schlüssel.
+# Maintenance access. Default: no login, the device does not need one.
+# SSH=yes enables the SSH server. Log in with a key from the file
+# ssh_authorized_keys (place it next to this file) or with ADMIN_PASSWORD.
+# ADMIN_USER=root: maintenance directly as root - via SSH then only with a key.
 ADMIN_USER=admin
 ADMIN_PASSWORD=
 SSH=no
 
-# OpenVPN: die Client-Konfiguration als "openvpn.ovpn" neben diese Datei legen,
-# Zugangsdaten (falls nötig) als "openvpn.auth" (Zeile 1: Benutzer, Zeile 2: Passwort).
-# Der Pi installiert OpenVPN, sobald er über das WLAN Internet hat.
+# OpenVPN: place the client configuration as "openvpn.ovpn" next to this file,
+# credentials (if needed) as "openvpn.auth" (line 1: user, line 2: password).
+# The Pi installs OpenVPN as soon as it has Internet via Wi-Fi.

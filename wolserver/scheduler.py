@@ -1,9 +1,9 @@
-"""Zeitplaner: wacht einmal pro Minute auf und führt fällige Aktionen aus.
+"""Scheduler: wakes up once per minute and runs due actions.
 
-Der Pi Zero W hat keine Echtzeituhr. Springt die Uhr nach dem Booten per NTP nach vorn,
-werden höchstens MAX_CATCHUP_MINUTES verpasste Minuten nachgeholt; Rücksprünge lösen
-nichts aus. Jede Ausführung wird pro Schedule/Datum/Uhrzeit gemerkt, damit die doppelte
-Stunde bei der Zeitumstellung nicht zweimal auslöst.
+The Pi Zero W has no real-time clock. If the clock jumps forward via NTP after booting,
+at most MAX_CATCHUP_MINUTES missed minutes are caught up; backward jumps trigger
+nothing. Each run is remembered per schedule/date/time so that the repeated
+hour at the DST change does not trigger twice.
 """
 
 import datetime
@@ -17,7 +17,7 @@ MAX_CATCHUP_MINUTES = 10
 
 
 def next_run(schedule, now=None):
-    """Nächster Ausführungszeitpunkt als naive lokale datetime (oder None)."""
+    """Next run time as a naive local datetime (or None)."""
     if not schedule.get("enabled") or not schedule.get("days"):
         return None
     now = now or datetime.datetime.now()
@@ -53,8 +53,8 @@ class Scheduler:
             now = self._minute(self.clock())
             try:
                 self.tick(last, now)
-            except Exception:  # noqa: BLE001 – der Zeitplaner darf nie sterben
-                log.exception("Fehler im Zeitplaner")
+            except Exception:  # noqa: BLE001 - the scheduler must never die
+                log.exception("Error in the scheduler")
             last = now
 
     @staticmethod
@@ -62,7 +62,7 @@ class Scheduler:
         return int(ts // 60 * 60)
 
     def tick(self, last, now):
-        """Führt alle Schedules aus, die in den Minuten (last, now] fällig waren."""
+        """Runs all schedules that were due in the minutes (last, now]."""
         if now <= last:
             return []
         start = max(last + 60, now - (MAX_CATCHUP_MINUTES - 1) * 60)
@@ -87,9 +87,9 @@ class Scheduler:
             device = self.store.get("devices", sched["device_id"])
             if device is None:
                 continue
-            log.info("Zeitplan: %s → %s (%s)", device["name"], sched["action"], hhmm)
+            log.info("Schedule: %s -> %s (%s)", device["name"], sched["action"], hhmm)
             threading.Thread(
-                target=self.run_action, args=(device, sched["action"], "Zeitplan"),
+                target=self.run_action, args=(device, sched["action"], "schedule"),
                 name="action-%s" % sched["id"], daemon=True,
             ).start()
             fired.append(sched["id"])

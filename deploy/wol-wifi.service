@@ -1,12 +1,12 @@
 [Unit]
-Description=WOL-Server WLAN-Verwaltung (Einrichtungs-Hotspot)
+Description=WOL-Server Wi-Fi management (setup hotspot)
 Documentation=file:///opt/wol-server/README.md
 After=NetworkManager.service
 Wants=NetworkManager.service
 
 [Service]
 Type=simple
-# root für NetworkManager; Gruppe wol, damit der Web-Server den Socket nutzen kann
+# root for NetworkManager; group wol so the web server can use the socket
 User=root
 Group=wol
 WorkingDirectory=/opt/wol-server
@@ -20,14 +20,14 @@ RuntimeDirectoryMode=0750
 StateDirectory=wol-wifi
 StateDirectoryMode=0700
 
-# Härtung: nmcli spricht nur per D-Bus mit NetworkManager, braucht also keine Capabilities.
+# Hardening: nmcli talks to NetworkManager only via D-Bus, so no capabilities are needed.
 CapabilityBoundingSet=
 NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=yes
 PrivateTmp=yes
 ProtectKernelTunables=yes
-# Ausnahme: Status-LED (/sys/class/leds/ACT zeigt dorthin)
+# Exception: status LED (/sys/class/leds/ACT points there)
 ReadWritePaths=-/sys/devices/platform/leds
 ProtectKernelModules=yes
 ProtectControlGroups=yes

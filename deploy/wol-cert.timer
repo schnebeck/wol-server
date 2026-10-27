@@ -1,5 +1,5 @@
 [Unit]
-Description=WOL-Server: HTTPS-Zertifikat täglich abholen
+Description=WOL-Server: fetch HTTPS certificate daily
 
 [Timer]
 OnBootSec=5min

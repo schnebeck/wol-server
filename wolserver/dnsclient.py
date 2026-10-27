@@ -1,4 +1,4 @@
-"""Kleiner DNS-Client (UDP) für Testabfragen und die Cache-Statistik von dnsmasq."""
+"""Small DNS client (UDP) for test queries and the dnsmasq cache statistics."""
 import ipaddress
 import os
 import socket
@@ -6,8 +6,8 @@ import struct
 
 TYPES = {"A": 1, "NS": 2, "CNAME": 5, "PTR": 12, "MX": 15, "TXT": 16, "AAAA": 28, "SRV": 33}
 TYPE_NAMES = {v: k for k, v in TYPES.items()}
-RCODES = {0: "OK", 1: "Formatfehler", 2: "Serverfehler", 3: "Name unbekannt (NXDOMAIN)", 4: "Nicht unterstützt",
-          5: "Abgelehnt"}
+RCODES = {0: "OK", 1: "Format error", 2: "Server failure", 3: "Name unknown (NXDOMAIN)", 4: "Not supported",
+          5: "Refused"}
 CLASS_IN, CLASS_CHAOS = 1, 3
 
 
@@ -27,14 +27,14 @@ def encode_name(name):
         except UnicodeError:
             raw = b""
         if not raw or len(raw) > 63:
-            raise DnsError("Ungültiger Name: %s" % name)
+            raise DnsError("Invalid name: %s" % name)
         out += bytes([len(raw)]) + raw
     return out + b"\x00"
 
 
 def build_query(name, qtype, qclass=CLASS_IN, qid=None):
     qid = qid if qid is not None else struct.unpack("!H", os.urandom(2))[0]
-    header = struct.pack("!HHHHHH", qid, 0x0100, 1, 0, 0, 0)  # RD gesetzt
+    header = struct.pack("!HHHHHH", qid, 0x0100, 1, 0, 0, 0)  # RD set
     return qid, header + encode_name(name) + struct.pack("!HH", qtype, qclass)
 
 
@@ -43,11 +43,11 @@ def _read_name(data, pos, depth=0):
     jumped, end = False, pos
     while True:
         if pos >= len(data) or depth > 20:
-            raise DnsError("Antwort beschädigt")
+            raise DnsError("Response corrupted")
         length = data[pos]
         if length & 0xC0 == 0xC0:
             if pos + 1 >= len(data):
-                raise DnsError("Antwort beschädigt")
+                raise DnsError("Response corrupted")
             pointer = ((length & 0x3F) << 8) | data[pos + 1]
             if not jumped:
                 end = pos + 2
@@ -85,10 +85,10 @@ def _rdata(data, pos, rtype, length):
 
 def parse_response(data, qid=None):
     if len(data) < 12:
-        raise DnsError("Antwort zu kurz")
+        raise DnsError("Response too short")
     rid, flags, qd, an, ns, ar = struct.unpack("!HHHHHH", data[:12])
     if qid is not None and rid != qid:
-        raise DnsError("Antwort passt nicht zur Anfrage")
+        raise DnsError("Response does not match the query")
     pos = 12
     for _ in range(qd):
         _, pos = _read_name(data, pos)
@@ -109,7 +109,7 @@ def parse_response(data, qid=None):
 def query(name, qtype="A", server="127.0.0.1", port=53, timeout=2.0, qclass=CLASS_IN):
     code = TYPES.get(qtype.upper()) if isinstance(qtype, str) else qtype
     if not code:
-        raise DnsError("Unbekannter Typ: %s" % qtype)
+        raise DnsError("Unknown type: %s" % qtype)
     qid, packet = build_query(name, code, qclass)
     family = socket.AF_INET6 if ":" in server else socket.AF_INET
     with socket.socket(family, socket.SOCK_DGRAM) as sock:
@@ -121,19 +121,19 @@ def query(name, qtype="A", server="127.0.0.1", port=53, timeout=2.0, qclass=CLAS
                 try:
                     return parse_response(data, qid)
                 except DnsError as e:
-                    if "passt nicht" not in str(e):
+                    if "does not match" not in str(e):
                         raise
         except socket.timeout:
-            raise DnsError("Keine Antwort von %s (Zeitüberschreitung)" % server) from None
+            raise DnsError("No response from %s (timeout)" % server) from None
         except OSError as e:
-            raise DnsError("DNS-Server %s nicht erreichbar: %s" % (server, e.strerror or e)) from None
+            raise DnsError("DNS server %s unreachable: %s" % (server, e.strerror or e)) from None
 
 
 def lookup(text, server="127.0.0.1", port=53, timeout=2.0):
-    """Testabfrage wie in der GUI: IP → PTR, sonst A und AAAA (CNAME-Ketten inklusive)."""
+    """Test query as in the GUI: IP → PTR, otherwise A and AAAA (including CNAME chains)."""
     text = (text or "").strip().rstrip(".")
     if not text or len(text) > 253:
-        raise DnsError("Bitte einen Namen oder eine IP-Adresse eingeben")
+        raise DnsError("Enter a name or an IP address")
     try:
         ipaddress.ip_address(text)
         res = query(reverse_name(text), "PTR", server, port, timeout)
@@ -153,7 +153,7 @@ def lookup(text, server="127.0.0.1", port=53, timeout=2.0):
 
 
 def dnsmasq_stats(server="127.0.0.1", port=53, timeout=1.5):
-    """Cache-Zahlen über die CHAOS-TXT-Abfragen von dnsmasq (cachesize.bind, hits.bind …)."""
+    """Cache figures via the dnsmasq CHAOS TXT queries (cachesize.bind, hits.bind …)."""
     stats = {}
     for key in ("cachesize", "insertions", "evictions", "misses", "hits"):
         res = query("%s.bind" % key, TYPES["TXT"], server, port, timeout, CLASS_CHAOS)

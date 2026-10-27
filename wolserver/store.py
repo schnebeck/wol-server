@@ -1,4 +1,4 @@
-"""Persistenz in einer einzigen JSON-Datei (atomar geschrieben, SD-Karten-schonend)."""
+"""Persistence in a single JSON file (written atomically, easy on the SD card)."""
 
 import copy
 import json
@@ -29,7 +29,7 @@ class Store:
             return
         except (OSError, ValueError) as e:
             broken = "%s.broken-%d" % (self.path, time.time())
-            log.error("Datendatei %s unlesbar (%s) – verschiebe nach %s", self.path, e, broken)
+            log.error("Data file %s unreadable (%s) - moving it to %s", self.path, e, broken)
             os.replace(self.path, broken)
             return
         for key in self._data:
@@ -44,7 +44,7 @@ class Store:
             os.fsync(f.fileno())
         os.replace(tmp, self.path)
 
-    # -- generische CRUD-Operationen für "devices" und "schedules" --
+    # -- generic CRUD operations for "devices" and "schedules" --
 
     def list(self, collection):
         with self._lock:
@@ -88,7 +88,7 @@ class Store:
             self._save()
             return True
 
-    # -- Ereignisprotokoll --
+    # -- event log --
 
     def add_event(self, **event):
         with self._lock:

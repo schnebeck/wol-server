@@ -19,7 +19,7 @@ NAME = "wol.lan.example.org"
 
 
 def make_cert(directory, name=NAME, days=90, tag="a"):
-    """Selbstsigniertes Zertifikat mit openssl → (Schlüssel, Zertifikat) als Bytes."""
+    """Self-signed certificate with openssl -> (key, certificate) as bytes."""
     key, cert = os.path.join(directory, tag + ".key"), os.path.join(directory, tag + ".crt")
     subprocess.run(["openssl", "req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:prime256v1",
                     "-nodes", "-keyout", key, "-out", cert, "-days", str(days), "-subj", "/CN=" + name,
@@ -51,16 +51,16 @@ class BundleTest(unittest.TestCase):
         self.assertEqual(info["names"], [NAME])
         self.assertGreater(info["not_after"], time.time() + 80 * 86400)
         self.assertEqual(oct(os.stat(os.path.join(self.tls_dir, tls.KEY)).st_mode & 0o777), "0o640")
-        # Unverändert: nichts tun; Reihenfolge im Bündel egal
+        # unchanged: do nothing; order in the bundle does not matter
         self.assertFalse(tls.install_bundle(self.cert + self.key, self.tls_dir, NAME))
         self.assertEqual(sorted(os.listdir(self.tls_dir)), [tls.CERT, tls.KEY])
 
         other_key, other_cert = make_cert(self.tmp, name="anders.example.org", tag="b")
         cases = [
-            (other_key + self.cert, "ungültig"),                 # Schlüssel passt nicht
-            (other_key + other_cert, "gilt nicht für"),          # falscher Name
-            (self.cert, "genau einen Schlüssel"),
-            (b"Hallo", "genau einen Schlüssel"),
+            (other_key + self.cert, "invalid"),                  # key does not match
+            (other_key + other_cert, "not valid for"),           # wrong name
+            (self.cert, "exactly one key"),
+            (b"Hello", "exactly one key"),
         ]
         for data, message in cases:
             with self.assertRaises(tls.FetchError) as cm:
@@ -68,7 +68,7 @@ class BundleTest(unittest.TestCase):
             self.assertIn(message, str(cm.exception))
         with self.assertRaises(tls.FetchError):
             tls.install_bundle(self.key + self.cert, self.tls_dir, NAME, wall=lambda: time.time() + 89 * 86400)
-        # Fehlschläge lassen das bisherige Zertifikat unangetastet
+        # failures leave the previous certificate untouched
         self.assertEqual(tls.cert_info(os.path.join(self.tls_dir, tls.CERT))["names"], [NAME])
         self.assertEqual(sorted(os.listdir(self.tls_dir)), [tls.CERT, tls.KEY])
 
@@ -98,17 +98,17 @@ class BundleTest(unittest.TestCase):
         self.assertIsNone(state.current())
         self.assertEqual(state.status(), {"active": False})
         tls.install_bundle(self.key + self.cert, self.tls_dir, NAME)
-        self.assertIsNone(state.current())  # erst nach CHECK_SECONDS
+        self.assertIsNone(state.current())  # only after CHECK_SECONDS
         now[0] += tls.TlsState.CHECK_SECONDS
         self.assertIsNotNone(state.current())
         self.assertEqual(state.host(), NAME)
-        # Kaputte Dateien: bisheriges Zertifikat bleibt
+        # broken files: the previous certificate stays
         first = state.current()
         with open(os.path.join(self.tls_dir, tls.CERT), "wb") as f:
             f.write(b"kaputt")
         now[0] += tls.TlsState.CHECK_SECONDS
         self.assertIs(state.current(), first)
-        # Abgelaufen: kein Ziel für die Umleitung
+        # expired: no target for the redirect
         expired = tls.TlsState(self.tls_dir, clock=lambda: now[0], wall=lambda: time.time() + 400 * 86400)
         tls.install_bundle(self.key + self.cert, self.tls_dir, NAME)
         self.assertIsNone(expired.host())
@@ -149,10 +149,10 @@ class HttpsServerTest(unittest.TestCase):
         resp = conn.getresponse()
         self.assertEqual(resp.status, 200)
         self.assertIn("authenticated", json.loads(resp.read()))
-        self.assertEqual(conn.sock.getpeercert(binary_form=True)[:1], b"0")  # DER-Zertifikat geliefert
+        self.assertEqual(conn.sock.getpeercert(binary_form=True)[:1], b"0")  # DER certificate delivered
         conn.close()
 
-        # HTTP von außen (nicht Loopback) leitet um; Loopback (CLI, Tests) nicht
+        # HTTP from outside (not loopback) redirects; loopback (CLI, tests) does not
         conn = http.client.HTTPConnection("127.0.0.1", self.http.server_address[1], timeout=10)
         conn.request("GET", "/api/session")
         self.assertEqual(conn.getresponse().status, 200)

@@ -1,11 +1,11 @@
-"""Nach DHCP-Servern im Netz suchen (DHCPDISCOVER senden, Angebote sammeln).
+"""Search for DHCP servers on the network (send DHCPDISCOVER, collect offers).
 
-Wird als root von wol-dns-apply.service aufgerufen (Port 68 und SO_BINDTODEVICE brauchen
-Rechte):  python3 -m wolserver.dhcpprobe --iface wlan0 --mac b8:27:eb:… --out probe.json
+Called as root by wol-dns-apply.service (port 68 and SO_BINDTODEVICE need
+privileges):  python3 -m wolserver.dhcpprobe --iface wlan0 --mac b8:27:eb:… --out probe.json
 
-Gesendet wird mit der eigenen MAC: Server im Modus „nur bekannte Geräte“ antworten nur bekannten
-Clients, und der WOL-Server ist auf dem alten Server meist bekannt. Es wird nie ein Angebot
-angenommen (kein DHCPREQUEST), am Netz ändert sich also nichts.
+The probe is sent with the own MAC: servers in "known devices only" mode answer only known
+clients, and the WOL-Server is usually known to the old server. An offer is never
+accepted (no DHCPREQUEST), so nothing changes on the network.
 """
 import argparse
 import ipaddress
@@ -92,7 +92,7 @@ def probe(iface, mac, timeout=4.0):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description="Nach DHCP-Servern suchen")
+    parser = argparse.ArgumentParser(description="Search for DHCP servers")
     parser.add_argument("--iface", default="wlan0")
     parser.add_argument("--mac", required=True)
     parser.add_argument("--out")

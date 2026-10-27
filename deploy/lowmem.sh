@@ -1,41 +1,41 @@
 #!/bin/bash
-# Stellt einen Raspberry Pi Zero W (512 MB RAM) auf wenig Speicherverbrauch ein.
-# Mehrfach ausführbar; config.txt wird vorher gesichert.
+# Configures a Raspberry Pi Zero W (512 MB RAM) for low memory usage.
+# Can be run repeatedly; config.txt is backed up first.
 #
-#   sudo ./deploy/lowmem.sh    danach neu starten (firstboot.sh ruft es auf und startet neu)
+#   sudo ./deploy/lowmem.sh    reboot afterwards (firstboot.sh calls it and reboots)
 #
-# Die Kernel-Parameter (cmdline.txt) bleiben unverändert. Alles wirkt erst nach dem Neustart am Ende
-# der Einrichtung; der erste Start läuft mit den Original-Boot-Dateien.
+# The kernel parameters (cmdline.txt) stay unchanged. Everything takes effect only after the reboot
+# at the end of the setup; the first boot runs with the original boot files.
 #
-# Rückgängig: Block "# >>> wol-server lowmem" aus config.txt entfernen, die Dateien wol-server-lowmem*
-# in /etc/modprobe.d, /etc/sysctl.d und /etc/rpi/swap.conf.d löschen, die genannten Timer aktivieren.
+# Undo: remove the block "# >>> wol-server lowmem" from config.txt, delete the files wol-server-lowmem*
+# in /etc/modprobe.d, /etc/sysctl.d and /etc/rpi/swap.conf.d, enable the listed timers.
 set -euo pipefail
 
 case "${1:-}" in
     -h|--help) sed -n '2,12p' "$0"; exit 0 ;;
     "") ;;
-    *) echo "Unbekannte Option: $1" >&2; exit 1 ;;
+    *) echo "Unknown option: $1" >&2; exit 1 ;;
 esac
 say() { printf '\033[1;32m==>\033[0m %s\n' "$*"; }
 
-[ "$(id -u)" -eq 0 ] || { echo "Bitte mit sudo ausführen." >&2; exit 1; }
+[ "$(id -u)" -eq 0 ] || { echo "Please run with sudo." >&2; exit 1; }
 CONFIG=/boot/firmware/config.txt
 [ -f "$CONFIG" ] || CONFIG=/boot/config.txt
-[ -f "$CONFIG" ] || { echo "config.txt nicht gefunden – ist das ein Raspberry Pi?" >&2; exit 1; }
+[ -f "$CONFIG" ] || { echo "config.txt not found - is this a Raspberry Pi?" >&2; exit 1; }
 
 # ---------------------------------------------------------------- config.txt
-# Ohne KMS-Treiber, Audio sowie Kamera- und Display-Erkennung lädt der Kernel deren Treiber gar nicht
-# erst. gpu_mem bleibt beim Standard: Mit gpu_mem=16 läuft die Firmware über und überschreibt
-# Speicher (zufällige Kernel-Oopses unter Last); Kamera- und Codec-Puffer liegen ohnehin im CMA.
-# over_voltage=2 (nur Zero W): Manche Boards laufen mit den 6.x-Kerneln bei Standardspannung unter
-# Speicher- und Kartenlast nicht stabil (raspberrypi/linux#5572). Ohne force_turbo bleibt die
-# Garantie erhalten.
-say "Firmware: Treiber und Spannung"
-# Neue Fassung erst fertig schreiben, dann austauschen: Ein Reset mitten im Schreiben hinterließ
-# sonst eine leere config.txt auf der FAT-Partition.
+# Without the KMS driver, audio and camera/display detection the kernel does not load their drivers
+# at all. gpu_mem stays at the default: with gpu_mem=16 the firmware overflows and overwrites
+# memory (random kernel oopses under load); camera and codec buffers live in CMA anyway.
+# over_voltage=2 (Zero W only): some boards are not stable with the 6.x kernels at default voltage
+# under memory and card load (raspberrypi/linux#5572). Without force_turbo the warranty is
+# preserved.
+say "Firmware: drivers and voltage"
+# Write the new version completely first, then swap it in: otherwise a reset while writing would
+# leave an empty config.txt on the FAT partition.
 NEW="$CONFIG.wol-neu"
 {
-    sed -e 's/^dtoverlay=vc4-kms-v3d/#&  # deaktiviert von wol-server lowmem/' \
+    sed -e 's/^dtoverlay=vc4-kms-v3d/#&  # disabled by wol-server lowmem/' \
         -e 's/^max_framebuffers=/#&/' \
         -e '/^# >>> wol-server lowmem/,/^# <<< wol-server lowmem/d' "$CONFIG"
     echo "# >>> wol-server lowmem"
@@ -57,10 +57,10 @@ else
     sync
 fi
 
-# ---------------------------------------------------------------- Treiber
-say "Kamera-, Video- und Audiotreiber sperren"
+# ---------------------------------------------------------------- Drivers
+say "Blacklisting camera, video and audio drivers"
 cat > /etc/modprobe.d/wol-server-lowmem.conf <<'EOF'
-# wol-server lowmem: headless, ohne Kamera, Video-Codecs und Audio
+# wol-server lowmem: headless, without camera, video codecs and audio
 blacklist bcm2835_codec
 blacklist bcm2835_isp
 blacklist bcm2835_v4l2
@@ -71,33 +71,33 @@ blacklist snd_bcm2835
 EOF
 
 # ---------------------------------------------------------------- Swap
-# Raspberry Pi OS lagert ruhende zram-Seiten standardmäßig in /var/swap auf der SD-Karte aus.
-# Nur zram: kein Verschleiß der Karte, rpi-swap entfernt die Datei beim nächsten Start.
-say "Swap nur komprimiert im RAM (zram)"
+# By default Raspberry Pi OS writes idle zram pages out to /var/swap on the SD card.
+# zram only: no card wear, rpi-swap removes the file on the next boot.
+say "Swap only compressed in RAM (zram)"
 install -d /etc/rpi/swap.conf.d
 cat > /etc/rpi/swap.conf.d/60-wol-server-lowmem.conf <<'EOF'
 [Main]
 Mechanism=zram
 EOF
 cat > /etc/sysctl.d/60-wol-server-lowmem.conf <<'EOF'
-# zram ist schneller als das erneute Lesen verdrängter Dateien von der SD-Karte.
-# page-cluster=0: zram braucht kein Vorauslesen beim Einlagern.
+# zram is faster than re-reading evicted files from the SD card.
+# page-cluster=0: zram needs no read-ahead when swapping in.
 vm.swappiness = 100
 vm.page-cluster = 0
 EOF
 sysctl -q -p /etc/sysctl.d/60-wol-server-lowmem.conf || true
 
 # ---------------------------------------------------------------- Timer
-# Ohne unattended-upgrades lädt apt-daily nur Paketlisten (auf dem Zero viel RAM und minutenlang
-# CPU). Updates spielt install.sh bzw. apt von Hand ein.
-say "Tägliche Wartungsläufe abschalten"
+# Without unattended-upgrades apt-daily only downloads package lists (on the Zero a lot of RAM and
+# minutes of CPU). Updates are installed by install.sh or by running apt manually.
+say "Disabling daily maintenance runs"
 for unit in apt-daily.timer apt-daily-upgrade.timer man-db.timer e2scrub_all.timer \
             e2scrub_reap.service rpi-eeprom-update.service; do
     systemctl cat "$unit" >/dev/null 2>&1 || continue
-    # --no-reload: Neuladen dauert auf dem Zero 12–20 s; der Neustart danach liest alles neu ein
+    # --no-reload: a reload takes 12-20 s on the Zero; the reboot afterwards reads everything anew
     systemctl disable --no-reload --now "$unit" >/dev/null 2>&1 || true
-    echo "    $unit deaktiviert"
+    echo "    $unit disabled"
 done
 
 echo
-say "Fertig. Wirksam nach einem Neustart: sudo reboot"
+say "Done. Takes effect after a reboot: sudo reboot"

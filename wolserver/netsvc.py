@@ -1,9 +1,9 @@
-"""DHCP und DNS verwalten – Teil des Root-Dienstes wol-wifi (ohne Capabilities).
+"""Manage DHCP and DNS - part of the root service wol-wifi (without capabilities).
 
-Die GUI bearbeitet einen Entwurf (draft.json). „Übernehmen“ erzeugt daraus die dnsmasq-Dateien
-in einem Zwischenstand und legt einen Auftrag in requests/ ab. wol-dns-apply.service (root)
-prüft, installiert, startet dnsmasq neu und testet; erst nach Erfolg wird der Entwurf zum
-aktiven Stand (network.json) und landet im Verlauf. So bleibt ein Fehler ohne Folgen fürs Netz.
+The GUI edits a draft (draft.json). "Apply" renders the dnsmasq files from it into a staging
+area and drops a job into requests/. wol-dns-apply.service (root) checks, installs, restarts
+dnsmasq and tests; only after success does the draft become the active state (network.json)
+and enter the History. That way an error has no consequences for the network.
 """
 import copy
 import ipaddress
@@ -73,7 +73,7 @@ def _prefix(info):
 
 
 def read_arp(path="/proc/net/arp"):
-    """{ip: mac} der Nachbarn mit gültigem Eintrag (Flags 0x2)."""
+    """{ip: mac} of the neighbours with a valid entry (flags 0x2)."""
     result = {}
     for line in (_read(path, "") or "").splitlines()[1:]:
         parts = line.split()
@@ -103,7 +103,7 @@ class NetManager:
         self._unknown_cache = (0.0, None)
         self._syncing = False
 
-    # -- Dateien --
+    # -- Files --
 
     def path(self, *parts):
         return os.path.join(self.dir, *parts)
@@ -156,19 +156,19 @@ class NetManager:
 
     def active(self):
         if not self._syncing:
-            self._sync()  # erfolgreiche Übernahmen zuerst einarbeiten
+            self._sync()  # merge successful applies first
         cfg = _read_json(self.path("network.json"))
         if cfg is None:
             return self._defaults()
         try:
             return netcfg.validate_config(cfg)
         except NetError as e:
-            log.error("network.json ungültig (%s) – verwende Standard", e)
+            log.error("network.json invalid (%s) - using defaults", e)
             return self._defaults()
 
     def draft(self):
         if not self._syncing:
-            self._sync()  # eine erfolgreiche Übernahme des Entwurfs schließt ihn
+            self._sync()  # a successful apply of the draft closes it
         cfg = _read_json(self.path("draft.json"))
         if cfg is None:
             return None
@@ -194,7 +194,7 @@ class NetManager:
         except FileNotFoundError:
             pass
 
-    # -- Aufträge an wol-dns-apply.service --
+    # -- Jobs for wol-dns-apply.service --
 
     def _request(self, action, **extra):
         request_id = "%013d-%s" % (int(self.clock() * 1000), uuid.uuid4().hex[:6])
@@ -216,7 +216,7 @@ class NetManager:
         return sorted(n[:-5] for n in os.listdir(self.path("requests")) if n.endswith(".json"))
 
     def _sync(self):
-        """Ergebnisse fertiger Aufträge einarbeiten: erfolgreiche Übernahmen werden aktiv."""
+        """Merge the results of finished jobs: successful applies become active."""
         with self.lock:
             if self._syncing:
                 return
@@ -227,7 +227,7 @@ class NetManager:
                 self._syncing = False
 
     def _sync_jobs(self):
-        # alte Auftragsergebnisse aufräumen
+        # clean up old job results
         names = sorted(n for n in os.listdir(self.path("jobs")) if n.endswith(".json"))
         for name in names[:-JOBS_KEEP]:
             self._drop("jobs", name)
@@ -250,7 +250,7 @@ class NetManager:
                 draft = self.draft()
                 if draft is not None and applying.get("from_draft") and draft == new:
                     self._drop("draft.json")
-                log.info("Netzwerk-Konfiguration übernommen (%s)", request_id)
+                log.info("Network configuration applied (%s)", request_id)
             self._drop("applying", name)
             shutil.rmtree(self.path("staging", request_id), ignore_errors=True)
 
@@ -262,14 +262,14 @@ class NetManager:
         if last and last.get("state") == "running":
             rc, out = self.runner(["systemctl", "show", "-p", "ActiveState", "--value", JOB_UNIT])
             if rc == 0 and out.strip() not in ("activating", "active") and not pending:
-                last = dict(last, state="failed", message="Abgebrochen (Neustart?). Bitte erneut versuchen.")
+                last = dict(last, state="failed", message="Aborted (reboot?). Please try again.")
                 running = False
         return running, last, pending
 
     def _busy_check(self):
         running, _, _ = self._job_state()
         if running:
-            raise NetError("Eine Änderung wird bereits ausgeführt. Bitte kurz warten.")
+            raise NetError("A change is already in progress. Please wait a moment.")
 
     def _apply(self, cfg, client="", from_draft=True, note=""):
         cfg = netcfg.validate_config(cfg)
@@ -293,7 +293,7 @@ class NetManager:
                 "port": cfg["server"]["port"], "test_name": "%s.%s" % (cfg["server"]["name"], cfg["dns"]["domain"]),
                 "expect": cfg["server"]["ip"]}
         _write_json(self.path("requests", request_id + ".json"), data)
-        log.info("Netzwerk-Änderung beauftragt (%s): %s", request_id, "; ".join(changes) or "unverändert")
+        log.info("Network change requested (%s): %s", request_id, "; ".join(changes) or "unchanged")
         return request_id, changes
 
     def _history_add(self, old, new, applying):
@@ -305,7 +305,7 @@ class NetManager:
         for name in names[:-HISTORY_KEEP]:
             self._drop("history", name)
 
-    # -- Daten für die GUI --
+    # -- Data for the GUI --
 
     def _leases(self):
         text = _read(os.path.join(self.data_dir, "dnsmasq.leases"), "")
@@ -338,7 +338,7 @@ class NetManager:
     def _service(self):
         rc, out = self.runner(["systemctl", "show", "-p", "ActiveState,UnitFileState", UNIT])
         props = dict(line.split("=", 1) for line in out.splitlines() if "=" in line) if rc == 0 else {}
-        return {"state": props.get("ActiveState") or "unbekannt", "enabled": props.get("UnitFileState") == "enabled"}
+        return {"state": props.get("ActiveState") or "unknown", "enabled": props.get("UnitFileState") == "enabled"}
 
     def status(self, args=None):
         with self.lock:
@@ -352,16 +352,16 @@ class NetManager:
             probe = _read_json(self.path("probe.json"))
             warnings = []
             if server["hotspot"]:
-                warnings.append("Einrichtungs-Hotspot aktiv: DHCP und DNS sind pausiert.")
+                warnings.append("Setup hotspot active: DHCP and DNS are paused.")
             if active["dhcp"]["enabled"] and server["method"] == "auto":
-                warnings.append("DHCP ist eingeschaltet, der WOL-Server bezieht seine eigene Adresse aber per DHCP. "
-                                "Feste Adresse setzen unter Einstellungen → Server.")
+                warnings.append("DHCP is enabled, but the WOL-Server obtains its own address via DHCP. "
+                                "Set a static IP address under Settings → Server.")
             if active["dhcp"]["enabled"] and server["address"] and server["address"] != active["server"]["ip"]:
-                warnings.append("Aktuelle Adresse des WOL-Servers: %s, eingestellt: %s." % (server["address"], active["server"]["ip"]))
+                warnings.append("Current address of the WOL-Server: %s, configured: %s." % (server["address"], active["server"]["ip"]))
             if probe and probe.get("servers"):
                 others = [s for s in probe["servers"] if (s.get("server_id") or s.get("source")) != active["server"]["ip"]]
                 if others and active["dhcp"]["enabled"]:
-                    warnings.append("Weiterer DHCP-Server im Netz: %s. Zwei DHCP-Server stören sich gegenseitig."
+                    warnings.append("Another DHCP server on the network: %s. Two DHCP servers interfere with each other."
                                     % ", ".join(s.get("server_id") or s.get("source") for s in others))
             last_change = None
             names = sorted(os.listdir(self.path("history")))
@@ -393,7 +393,7 @@ class NetManager:
             self._sync()
             active = self.active()
             draft = self.draft()
-            # Während ein Auftrag läuft, zeigt die GUI schon den beauftragten Stand
+            # While a job is running, the GUI already shows the requested state
             cfg = draft or self._applying() or active
             leases = self._leases()
             events = self._events()
@@ -467,20 +467,20 @@ class NetManager:
         with self.lock:
             return {"unknown": self._unknown(self.working(), self._leases())}
 
-    # -- Änderungen: ohne offenen Entwurf sofort wirksam --
+    # -- Changes: effective immediately without an open draft --
 
     def _change(self, mutate, client, note=""):
-        """Änderung sofort übernehmen. Ist ein Entwurf offen (Import, Sicherung, Verlauf), landet sie dort."""
+        """Apply a change immediately. If a draft is open (import, backup, history), it goes there."""
         draft = self.draft()
         if draft is not None:
             self._save_draft(mutate(draft))
-            return {"ok": True, "draft": True, "message": "Im Entwurf gespeichert"}
+            return {"ok": True, "draft": True, "message": "Saved in draft"}
         active = self.active()
         new = netcfg.validate_config(mutate(copy.deepcopy(active)))
         if new == active:
-            return {"ok": True, "message": "Keine Änderung"}
+            return {"ok": True, "message": "No change"}
         request_id, changes = self._apply(new, client, from_draft=False, note=note)
-        return {"ok": True, "request": request_id, "changes": changes, "message": "Wird übernommen …"}
+        return {"ok": True, "request": request_id, "changes": changes, "message": "Applying …"}
 
     def settings(self, args):
         with self.lock:
@@ -500,11 +500,11 @@ class NetManager:
             def mutate(cfg):
                 if rid:
                     if not any(r["id"] == rid for r in cfg["reservations"]):
-                        raise NetError("Reservierung nicht gefunden")
+                        raise NetError("Reservation not found")
                     cfg["reservations"] = [item if r["id"] == rid else r for r in cfg["reservations"]]
                 else:
                     cfg["reservations"].append(item)
-                # Freigegebene MAC nicht mehr ignorieren
+                # stop ignoring an approved MAC
                 cfg["ignored"] = [i for i in cfg["ignored"] if i["mac"] != item["mac"]]
                 return cfg
 
@@ -516,7 +516,7 @@ class NetManager:
                 before = len(cfg["reservations"])
                 cfg["reservations"] = [r for r in cfg["reservations"] if r["id"] != args.get("id")]
                 if len(cfg["reservations"]) == before:
-                    raise NetError("Reservierung nicht gefunden")
+                    raise NetError("Reservation not found")
                 return cfg
 
             return self._change(mutate, args.get("client", ""))
@@ -530,7 +530,7 @@ class NetManager:
             def mutate(cfg):
                 if rid:
                     if not any(r["id"] == rid for r in cfg["records"]):
-                        raise NetError("Eintrag nicht gefunden")
+                        raise NetError("Record not found")
                     cfg["records"] = [item if r["id"] == rid else r for r in cfg["records"]]
                 else:
                     cfg["records"].append(item)
@@ -544,12 +544,12 @@ class NetManager:
                 before = len(cfg["records"])
                 cfg["records"] = [r for r in cfg["records"] if r["id"] != args.get("id")]
                 if len(cfg["records"]) == before:
-                    raise NetError("Eintrag nicht gefunden")
+                    raise NetError("Record not found")
                 return cfg
 
             return self._change(mutate, args.get("client", ""))
 
-    # -- Entwurf (Import, Sicherung, Verlauf) --
+    # -- Draft (import, backup, history) --
 
     def discard(self, args=None):
         with self.lock:
@@ -561,14 +561,14 @@ class NetManager:
         with self.lock:
             draft = self.draft()
             if draft is None:
-                raise NetError("Es gibt keine Änderungen zu übernehmen.")
+                raise NetError("There are no changes to apply.")
             request_id, changes = self._apply(draft, args.get("client", ""))
             return {"ok": True, "request": request_id, "changes": changes,
-                    "message": ("Eine Änderung wird übernommen …" if len(changes) == 1
-                                else "%d Änderungen werden übernommen …" % len(changes))}
+                    "message": ("Applying one change …" if len(changes) == 1
+                                else "Applying %d changes …" % len(changes))}
 
     def _apply_direct(self, mutate, client, note):
-        """Sofort wirksame Änderung am aktiven Stand (Freigeben, Ignorieren); ein Entwurf bekommt sie auch."""
+        """Change to the active state that takes effect immediately (approve, ignore); an open draft gets it too."""
         active = self.active()
         new = mutate(copy.deepcopy(active))
         request_id, changes = self._apply(new, client, from_draft=False, note=note)
@@ -584,7 +584,7 @@ class NetManager:
         with self.lock:
             mac = netcfg._mac(args.get("mac"))
             item = netcfg.validate_reservation({"mac": mac, "ip": args.get("ip"), "name": args.get("name"),
-                                                "comment": args.get("comment") or "freigegeben am %s" % time.strftime("%d.%m.%Y"),
+                                                "comment": args.get("comment") or "approved on %s" % time.strftime("%d.%m.%Y"),
                                                 "enabled": True}, netcfg.network_of(self.active()))
 
             def mutate(cfg):
@@ -592,17 +592,17 @@ class NetManager:
                 cfg["ignored"] = [i for i in cfg["ignored"] if i["mac"] != mac]
                 return netcfg.validate_config(cfg)
 
-            request_id, _ = self._apply_direct(mutate, args.get("client", ""), "Freigegeben: %s (%s)" % (item["name"], item["ip"]))
+            request_id, _ = self._apply_direct(mutate, args.get("client", ""), "Approved: %s (%s)" % (item["name"], item["ip"]))
             return {"ok": True, "request": request_id, "reservation": item,
-                    "message": "%s wird freigegeben und erhält %s bei der nächsten Anfrage." % (item["name"] or mac, item["ip"])}
+                    "message": "%s is approved and gets %s on its next request." % (item["name"] or mac, item["ip"])}
 
     def ignore(self, args):
         with self.lock:
             mac = netcfg._mac(args.get("mac"))
-            entry = {"mac": mac, "comment": netcfg._text(args.get("comment"), "Kommentar", 120), "ts": self.clock()}
+            entry = {"mac": mac, "comment": netcfg._text(args.get("comment"), "Comment", 120), "ts": self.clock()}
             cfg = self.working()
             cfg["ignored"] = [i for i in cfg["ignored"] if i["mac"] != mac] + [entry]
-            # Ignorieren betrifft nur die Liste in der GUI – direkt speichern, ohne dnsmasq anzufassen
+            # Ignoring only affects the list in the GUI - save directly without touching dnsmasq
             active = self.active()
             active["ignored"] = [i for i in active["ignored"] if i["mac"] != mac] + [entry]
             _write_json(self.path("network.json"), netcfg.validate_config(active))
@@ -627,27 +627,27 @@ class NetManager:
             mac = netcfg._mac(args.get("mac"))
             lease = next((x for x in self._leases() if x["mac"] == mac), None)
             if lease is None:
-                raise NetError("Für %s gibt es keine Lease." % mac)
+                raise NetError("There is no lease for %s." % mac)
             self._busy_check()
             request_id = self._request("release", mac=mac, ip=lease["ip"])
-            return {"ok": True, "request": request_id, "message": "Lease von %s wird freigegeben …" % lease["ip"]}
+            return {"ok": True, "request": request_id, "message": "Releasing lease of %s …" % lease["ip"]}
 
     def restart(self, args=None):
         with self.lock:
             self._busy_check()
-            return {"ok": True, "request": self._request("restart"), "message": "Dienst wird neu gestartet …"}
+            return {"ok": True, "request": self._request("restart"), "message": "Restarting service …"}
 
     def probe(self, args=None):
         with self.lock:
             self._busy_check()
             server = self._server_state(self.active())
             if not server["mac"]:
-                raise NetError("MAC-Adresse von %s unbekannt" % server["interface"])
+                raise NetError("MAC address of %s unknown" % server["interface"])
             return {"ok": True, "request": self._request("probe", mac=server["mac"]),
-                    "message": "Suche nach DHCP-Servern (ca. 5 s) …"}
+                    "message": "Searching for DHCP servers (approx. 5 s) …"}
 
     def wifi_changed(self, mode):
-        """Vom WLAN-Teil gemeldet: Im Hotspot dnsmasq pausieren, danach wieder starten."""
+        """Reported by the Wi-Fi part: pause dnsmasq in hotspot mode, start it again afterwards."""
         with self.lock:
             previous, self.wifi_mode = self.wifi_mode, mode
             if previous is None or (mode == "hotspot") == (previous == "hotspot"):
@@ -656,7 +656,7 @@ class NetManager:
             if active["dns"]["enabled"] or active["dhcp"]["enabled"]:
                 self._request("hotspot", hotspot=mode == "hotspot")
 
-    # -- Import, Export, Verlauf --
+    # -- Import, export, history --
 
     def import_preview(self, args):
         with self.lock:
@@ -668,12 +668,12 @@ class NetManager:
         with self.lock:
             preview = args.get("preview")
             if not isinstance(preview, dict):
-                raise NetError("Vorschau fehlt")
+                raise NetError("Preview missing")
             cfg, stats = netcfg.merge_import(self.working(), preview, bool(args.get("replace")),
                                              bool(args.get("take_settings", True)))
             self._save_draft(cfg)
             return {"ok": True, "stats": stats,
-                    "message": "%d neu, %d aktualisiert, %d übersprungen (Entwurf)."
+                    "message": "%d new, %d updated, %d skipped (draft)."
                                % (stats["added"], stats["updated"], stats["skipped"])}
 
     def export(self, args=None):
@@ -687,7 +687,7 @@ class NetManager:
                 data = data["config"]
             cfg = netcfg.validate_config(data)
             self._save_draft(cfg)
-            return {"ok": True, "message": "Gesicherte Konfiguration als Entwurf geladen."}
+            return {"ok": True, "message": "Configuration from backup loaded as draft."}
 
     def history(self, args=None):
         with self.lock:
@@ -705,11 +705,11 @@ class NetManager:
                 entry = _read_json(self.path("history", name))
                 if entry and entry.get("id") == args.get("id"):
                     self._save_draft(entry["config"])
-                    return {"ok": True, "message": "Stand vom %s als Entwurf geladen."
+                    return {"ok": True, "message": "Version from %s loaded as draft."
                                                    % time.strftime("%d.%m. %H:%M", time.localtime(entry["ts"]))}
-            raise NetError("Version nicht gefunden")
+            raise NetError("Version not found")
 
-    # -- Protokolle --
+    # -- Logs --
 
     def logs(self, args):
         kind = args.get("kind")
@@ -735,37 +735,37 @@ class NetManager:
             text = self.journal(["-n", str(lines)])
             return {"entries": [{"ts": float(l.split()[0]), "text": l.split(":", 1)[-1].strip()[:240]}
                                 for l in text.splitlines() if l[:1].isdigit()][-lines:]}
-        raise NetError("Unbekanntes Protokoll")
+        raise NetError("Unknown log")
 
-    # -- feste Adresse für den WOL-Server --
+    # -- static IP address for the WOL-Server --
 
     def static_ip(self, args):
         with self.lock:
             cfg = self.working()
             server = self._server_state(cfg)
             if not server["connection"]:
-                raise NetError("Keine aktive WLAN-Verbindung")
+                raise NetError("No active Wi-Fi connection")
             if server["hotspot"]:
-                raise NetError("Im Hotspot-Betrieb nicht möglich")
+                raise NetError("Not possible in hotspot mode")
             name = server["connection"]
             if args.get("enabled"):
                 ip = cfg["server"]["ip"] or server["address"]
                 gateway = cfg["dhcp"]["gateway"] or self._gateway(server["interface"])
                 if not ip or not gateway:
-                    raise NetError("Adresse oder Gateway unbekannt – bitte unter Einstellungen eintragen")
+                    raise NetError("Address or gateway unknown - enter them under Settings")
                 dns = "127.0.0.1 %s" % gateway if cfg["dns"]["enabled"] else gateway
                 argv = ["nmcli", "connection", "modify", name, "ipv4.method", "manual",
                         "ipv4.addresses", "%s/%d" % (ip, cfg["server"]["prefix"]), "ipv4.gateway", gateway,
                         "ipv4.dns", dns, "ipv4.ignore-auto-dns", "yes"]
-                message = "Feste Adresse %s gesetzt" % ip
+                message = "Static IP address %s set" % ip
             else:
                 argv = ["nmcli", "connection", "modify", name, "ipv4.method", "auto", "ipv4.addresses", "",
                         "ipv4.gateway", "", "ipv4.dns", "", "ipv4.ignore-auto-dns", "no"]
-                message = "Adresse wieder per DHCP"
+                message = "Address via DHCP again"
             rc, _ = self.runner(argv)
             if rc != 0:
-                raise NetError("NetworkManager hat die Änderung abgelehnt")
-            # Ohne Neuverbindung anwenden; die WLAN-Verbindung bleibt bestehen
+                raise NetError("NetworkManager rejected the change")
+            # Apply without reconnecting; the Wi-Fi connection stays up
             self.runner(["nmcli", "device", "reapply", server["interface"]], timeout=30)
             log.info("%s (%s)", message, name)
             return {"ok": True, "message": message}
