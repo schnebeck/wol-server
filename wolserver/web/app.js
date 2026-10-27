@@ -23,9 +23,11 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
 const DAYS = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"].map((d) => t(d));
-const ACTIONS = { wake: t("Wake"), sleep: t("Put to sleep"), net: t("Change") };
+const ACTIONS = { wake: t("Wake"), sleep: t("Put to sleep"), net: t("Change"), power_on: t("Power on"), power_off: t("Power off"), power_cycle: t("Power cycle") };
 const SLEEP_METHODS = { none: "–", ssh: "SSH", http: "HTTP", sol: "Sleep-on-LAN" };
 const STATUS_INTERVAL = 10000;
+const PLUG_INTERVAL = 5000;
+const VIEWS = ["devices", "schedules", "plugs", "events", "network", "system"];
 
 const state = {
   view: "devices",
@@ -37,6 +39,8 @@ const state = {
   hotspot: false,
   info: null,
   wifi: null,
+  plugs: [],
+  plugDrivers: null,
 };
 
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -53,6 +57,7 @@ const ICONS = {
   info: ["M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z", "M12 11v5.5", "M12 7.5v.01"],
   device: ["M4 5h16v11H4z", "M9 20h6", "M12 16v4"],
   undo: ["M9 14L4 9l5-5", "M4 9h10a6 6 0 0 1 0 12h-3"],
+  plug: ["M9 3v5", "M15 3v5", "M6 8h12v3a6 6 0 0 1-12 0z", "M12 17v4"],
 };
 
 function icon(name) {
@@ -246,6 +251,9 @@ async function refreshView() {
   } else if (state.view === "schedules") {
     await Promise.all([loadDevices(), loadSchedules()]);
     renderSchedules();
+  } else if (state.view === "plugs") {
+    await loadPlugs();
+    renderPlugs();
   } else if (state.view === "events") {
     await renderEvents();
   } else if (state.view === "network") {
@@ -587,6 +595,228 @@ async function onClearEvents() {
   if (!(await confirmDialog(t("Clear log?"), t("All entries will be deleted."), t("Clear"), true))) return;
   await api("DELETE", "/api/events");
   await renderEvents();
+}
+
+// ---------- Wireless plugs ----------
+
+const POWER_ON_STATES = { restore: t("Restore last state"), on: t("On"), off: t("Off"), other: t("other (set on the plug)") };
+const PLUG_ERRORS = { overtemp: t("Overtemperature"), overpower: t("Overload"), overvoltage: t("Overvoltage"), undervoltage: t("Undervoltage") };
+
+async function loadPlugs() {
+  const data = await api("GET", "/api/plugs");
+  state.plugs = data.plugs;
+  state.plugDrivers = data.drivers;
+}
+
+function fmtWatt(w) {
+  if (w == null) return "–";
+  return w < 10 ? w.toLocaleString(I18N.locale, { maximumFractionDigits: 1 }) : Math.round(w).toLocaleString(I18N.locale);
+}
+
+function fmtKwh(wh) {
+  return wh == null ? "–" : `${(wh / 1000).toLocaleString(I18N.locale, { maximumFractionDigits: wh < 10000 ? 2 : 1 })} kWh`;
+}
+
+function renderPlugs() {
+  const list = $("#plug-list");
+  const reachable = state.plugs.filter((p) => p.live && p.live.status);
+  const total = reachable.reduce((sum, p) => sum + (p.live.status.power_w || 0), 0);
+  $("#plugs-line").textContent = state.plugs.length
+    ? t("{0} plugs · together {1} W", state.plugs.length, fmtWatt(total)) : " ";
+  if (!state.plugs.length) {
+    list.replaceChildren(el("div", { class: "empty" },
+      el("h3", {}, t("No plugs")),
+      el("p", { class: "muted" }, t("Metering wireless plugs switch and measure consumers. Approve a new plug under Network → Overview, or add one by its address.")),
+      el("button", { class: "btn primary", type: "button", onclick: () => openPlugDialog() }, t("Add plug"))));
+    return;
+  }
+  list.replaceChildren(...state.plugs.map(plugCard));
+}
+
+function plugCard(p) {
+  const live = p.live || {};
+  const st = live.status;
+  const cls = !st ? "unknown" : st.on ? "online" : "offline";
+  const label = !st ? (live.unreachable ? t("Not reachable") : t("Error")) : st.on ? t("On") : t("Off");
+  const consumer = p.consumer && p.consumer.label;
+  const meta = st ? [
+    [t("Plugged in"), consumer || "–"],
+    [t("Voltage"), st.voltage_v == null ? "–" : `${Math.round(st.voltage_v)} V`],
+    [t("Current"), st.current_a == null ? "–" : `${st.current_a.toLocaleString(I18N.locale, { maximumFractionDigits: 2 })} A`],
+    [t("Temperature"), st.temperature_c == null ? "–" : `${Math.round(st.temperature_c)} °C`],
+    [t("Energy counter"), fmtKwh(st.energy_wh)],
+    [t("Switch cycles"), st.switch_count == null ? "–" : st.switch_count.toLocaleString(I18N.locale)],
+  ] : [[t("Plugged in"), consumer || "–"], [t("Address"), p.host]];
+  return el("article", { class: `card plug ${st ? (st.on ? "on" : "off") : "unknown"}` },
+    el("header", { class: "card-head" },
+      el("span", { class: `dot ${cls}`, "aria-hidden": "true" }),
+      el("div", { class: "card-title" },
+        el("h3", {}, p.name),
+        el("span", { class: `status-label ${cls}` }, label)),
+      el("button", { class: "icon-btn", type: "button", title: t("Edit"), "aria-label": t("Edit {0}", p.name), onclick: () => openPlugDialog(p) }, icon("edit"))),
+    st ? el("div", { class: "plug-power" }, el("strong", {}, fmtWatt(st.power_w)), el("span", {}, "W")) : null,
+    st && st.errors.length ? el("p", { class: "plug-error" }, icon("alert"), " ", st.errors.map((e) => PLUG_ERRORS[e] || e).join(", ")) : null,
+    !st && live.error ? el("p", { class: "plug-error" }, tr(live.error)) : null,
+    el("dl", { class: "meta" }, meta.map(([k, v]) => el("div", {}, el("dt", {}, k), el("dd", {}, v)))),
+    el("div", { class: "card-actions" },
+      el("button", { class: "btn wake", type: "button", disabled: !st || st.on, onclick: (e) => plugAction(p, "on", e.currentTarget) }, icon("power"), t("On")),
+      el("button", { class: "btn", type: "button", disabled: !st || !st.on, onclick: (e) => plugAction(p, "off", e.currentTarget) }, t("Off")),
+      el("button", { class: "btn", type: "button", disabled: !st || !st.on, title: t("Off, on again after 10 s - runs on the plug itself"), onclick: (e) => plugAction(p, "cycle", e.currentTarget) }, icon("undo"), t("Restart"))));
+}
+
+async function plugAction(plug, action, button, confirm = false) {
+  let res;
+  await busy(button, async () => {
+    try {
+      res = await api("POST", `/api/plugs/${plug.id}/${action}`, { confirm });
+    } catch (e) {
+      toast(`${plug.name}: ${e.message}`, "error");
+    }
+  });
+  if (!res) return;
+  if (res.confirm) {
+    const title = action === "cycle" ? t("Restart {0} the hard way?", plug.name) : t("Switch off {0}?", plug.name);
+    const text = `${res.message}. ${t("Cutting the power of a running device can lose unsaved data.")}`;
+    if (await confirmDialog(title, text, action === "cycle" ? t("Restart") : t("Switch off"), true)) {
+      await plugAction(plug, action, button, true);
+    }
+    return;
+  }
+  toast(`${plug.name}: ${res.message}`, "success");
+  for (const delay of action === "cycle" ? [500, 12000] : [500]) {
+    setTimeout(() => state.view === "plugs" && refreshPlugs(), delay);
+  }
+}
+
+let plugsBusy = false;
+
+async function refreshPlugs() {
+  if (plugsBusy) return;
+  plugsBusy = true;
+  try {
+    await loadPlugs();
+    renderPlugs();
+  } catch (e) {
+    if (e.status !== 401) $("#plugs-line").textContent = e.message;
+  } finally {
+    plugsBusy = false;
+  }
+}
+
+let editingPlug = null;
+let plugPowerOnState = null;
+
+function openPlugDialog(plug = null, prefill = {}) {
+  editingPlug = plug;
+  plugPowerOnState = null;
+  const form = $("#plug-form");
+  form.reset();
+  showError(form, "");
+  const data = plug ? { ...plug, consumer_label: plug.consumer ? plug.consumer.label : "" } : { channel: 0, standby_w: 5, ...prefill };
+  for (const key of ["host", "name", "consumer_label", "channel", "standby_w"]) form.elements[key].value = data[key] ?? "";
+  $("#plug-driver").replaceChildren(...[
+    !plug && el("option", { value: "auto" }, t("Detect automatically")),
+    ...(state.plugDrivers || []).map((d) => el("option", { value: d.name }, tr(d.label))),
+  ].filter(Boolean));
+  form.elements.driver.value = plug ? plug.driver : "auto";
+  form.elements.password.placeholder = plug && plug.has_password ? t("unchanged") : "";
+  $("#plug-detected").textContent = plug ? [plug.model, plug.firmware && t("firmware {0}", plug.firmware), plug.mac].filter(Boolean).join(" · ") : "";
+  $("#plug-wait").hidden = !prefill.waiting;
+  const pos = form.elements.power_on_state;
+  pos.disabled = true;
+  $("#plug-pos-hint").textContent = plug ? t("Reading from the plug …") : t("Can be set after adding.");
+  if (plug) {
+    api("GET", `/api/plugs/${plug.id}/power-on-state`).then((res) => {
+      if (editingPlug !== plug) return;
+      plugPowerOnState = res.state;
+      if (res.state in POWER_ON_STATES && res.state !== "other") pos.value = res.state;
+      pos.disabled = false;
+      $("#plug-pos-hint").textContent = res.state === "off" ? t("Devices stay without power after an outage.") : "";
+    }).catch((e) => { $("#plug-pos-hint").textContent = e.message; });
+  }
+  $("#plug-dialog-title").textContent = plug ? t("Edit plug") : t("New wireless plug");
+  $("#plug-delete").hidden = !plug;
+  $("#plug-submit").textContent = plug ? t("Save") : t("Add");
+  $("#plug-dialog").showModal();
+}
+
+async function detectPlug() {
+  const form = $("#plug-form");
+  showError(form, "");
+  const host = form.elements.host.value.trim();
+  if (!host) return showError(form, t("Enter a host name or an IP address"));
+  await busy($("#plug-detect"), async () => {
+    try {
+      const { info } = await api("POST", "/api/plugs/probe", { host, driver: form.elements.driver.value });
+      const driver = (state.plugDrivers || []).find((d) => d.name === info.driver);
+      $("#plug-detected").replaceChildren(icon("check"), " ", [tr(driver ? driver.label : info.driver), info.model,
+        info.firmware && t("firmware {0}", info.firmware), info.auth ? t("password protected") : t("no password")].filter(Boolean).join(" · "));
+      if (!form.elements.name.value.trim() && info.name) form.elements.name.value = info.name;
+      $("#plug-wait").hidden = true;
+    } catch (e) {
+      $("#plug-detected").textContent = "";
+      showError(form, e.message);
+    }
+  });
+}
+
+async function onPlugSubmit(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  showError(form, "");
+  const data = {
+    host: form.elements.host.value.trim(), name: form.elements.name.value.trim(), consumer_label: form.elements.consumer_label.value.trim(),
+    password: form.elements.password.value, driver: form.elements.driver.value, channel: Number(form.elements.channel.value) || 0,
+    standby_w: form.elements.standby_w.value,
+  };
+  if (!editingPlug && openPlugDialog.prefillMac) data.mac = openPlugDialog.prefillMac;
+  await busy($("#plug-submit"), async () => {
+    try {
+      if (editingPlug) {
+        await api("PUT", `/api/plugs/${editingPlug.id}`, data);
+        const pos = form.elements.power_on_state;
+        if (!pos.disabled && plugPowerOnState !== pos.value) {
+          await api("PUT", `/api/plugs/${editingPlug.id}/power-on-state`, { state: pos.value });
+        }
+      } else {
+        await api("POST", "/api/plugs", data);
+      }
+      $("#plug-dialog").close();
+      toast(editingPlug ? t("Plug saved") : t("Plug added"), "success");
+      if (state.view === "plugs") await refreshPlugs();
+      else if (state.view === "network") await renderNetwork();
+    } catch (e) {
+      showError(form, e.message);
+    }
+  });
+}
+
+async function onPlugDelete() {
+  const plug = editingPlug;
+  if (!(await confirmDialog(t("Remove {0}?", plug.name), t("The WOL-Server forgets the plug. The plug itself and its reservation stay unchanged."), t("Remove"), true))) return;
+  try {
+    await api("DELETE", `/api/plugs/${plug.id}`);
+    $("#plug-dialog").close();
+    toast(t("Plug removed"), "success");
+    await refreshPlugs();
+  } catch (e) {
+    toast(e.message, "error");
+  }
+}
+
+// "Add as wireless plug" from a reservation (host: name.domain or IP)
+function plugAddButton(name, mac, ip) {
+  const label = t("Add as wireless plug");
+  return el("button", {
+    type: "button", class: "icon-btn", title: label, "aria-label": `${label}: ${name || mac}`,
+    onclick: () => openPlugFor(name, mac, name && net.config ? `${name}.${net.config.config.dns.domain}` : ip),
+  }, icon("plug"));
+}
+
+async function openPlugFor(name, mac, host, waiting = false) {
+  if (!state.plugDrivers) await loadPlugs().catch(() => {});
+  openPlugDialog.prefillMac = mac;
+  openPlugDialog(null, { name: name || "", host, waiting });
 }
 
 // ---------- System ----------
@@ -1439,6 +1669,10 @@ function openApprove(u) {
   form.elements.ip.value = u.suggested_ip || "";
   $("#approve-name-hint").textContent = u.name && u.name !== u.suggested_name ? t("reported by the device: \"{0}\"", u.name) : "";
   $("#approve-private").hidden = !u.private;
+  // Only a hint from the reported name; whether it really is a plug is checked after approving ("Detect")
+  const looksLikePlug = /shelly|tasmota|plug/i.test(u.name || "");
+  for (const r of $$("#approve-type input")) r.checked = r.value === (looksLikePlug ? "plug" : "device");
+  $("#approve-type-hint").textContent = looksLikePlug ? t("The reported name suggests a wireless plug.") : "";
   $("#approve-dialog").showModal();
 }
 
@@ -1455,6 +1689,7 @@ async function onApproveSubmit(event) {
       await loadNetStatus();
       renderNetHeader();
       watchNetJob(t("{0} approved", data.name));
+      if (($("#approve-type input:checked") || {}).value === "plug") openPlugFor(data.name, approving.mac, data.ip, true);
     } catch (e) {
       showError(form, e.message);
     }
@@ -1479,12 +1714,13 @@ function renderReservations() {
   const cfg = net.config.config;
   const meta = net.config.meta;
   const devices = net.config.devices || {};
+  const plugsByMac = net.config.plugs || {};
   const online = new Set(meta.online);
   const search = $("#res-search").value.trim().toLowerCase();
   const filter = ($("#res-filter input:checked") || {}).value || "all";
   const rows = cfg.reservations.map((r) => ({
     ...r, vendor: meta.vendors[r.mac] || "", seen: meta.last_seen[r.mac] || null, online: online.has(r.mac),
-    lease: meta.leases[r.mac] || null, device: devices[r.mac] || null, _cls: r.enabled ? "" : "is-disabled",
+    lease: meta.leases[r.mac] || null, device: devices[r.mac] || null, plug: plugsByMac[r.mac] || null, _cls: r.enabled ? "" : "is-disabled",
   })).filter((r) => {
     if (filter === "online" && !r.online) return false;
     if (filter === "wol" && !r.device) return false;
@@ -1504,8 +1740,11 @@ function renderReservations() {
     { key: "vendor", label: t("Vendor"), cls: "hide-md", sort: (r) => r.vendor || "~", render: (r) => el("span", { class: "small" }, tr(r.vendor) || "–") },
     { key: "seen", label: t("Last seen"), cls: "hide-sm", sort: (r) => -(r.online ? Infinity : r.seen || 0), render: (r) => el("span", { class: "small" }, r.online ? t("now") : fmtAgo(r.seen)) },
     { key: "actions", label: "", cls: "actions", render: (r) => el("div", { class: "row-actions" },
-      r.device ? el("button", { type: "button", class: "icon-btn wake-btn", title: t("Wake {0}", r.device.name), "aria-label": t("Wake {0}", r.device.name),
-        onclick: (e) => deviceAction(r.device, "wake", e.currentTarget) }, icon("power")) : wolDeviceButton(r.name, r.mac, r.ip),
+      r.plug ? el("button", { type: "button", class: "icon-btn plug-link", title: t("Wireless plug {0}", r.plug.name), "aria-label": t("Wireless plug {0}", r.plug.name),
+        onclick: () => setView("plugs") }, icon("plug"))
+        : r.device ? el("button", { type: "button", class: "icon-btn wake-btn", title: t("Wake {0}", r.device.name), "aria-label": t("Wake {0}", r.device.name),
+          onclick: (e) => deviceAction(r.device, "wake", e.currentTarget) }, icon("power"))
+          : [wolDeviceButton(r.name, r.mac, r.ip), plugAddButton(r.name, r.mac, r.ip)],
       el("button", { type: "button", class: "icon-btn", title: t("Edit"), "aria-label": t("Edit {0}", r.name || r.mac), onclick: () => openResDialog(r) }, icon("edit"))) },
   ], rows, search || filter !== "all" ? t("No matching reservations.") : t("No reservations. Add one with \"Reservation\" or import under Tools.")));
   $("#res-foot").textContent = t("{0} of {1} · reachable as name.{2}", rows.length, cfg.reservations.length, domain);
@@ -2189,7 +2428,7 @@ async function startApp() {
   }
   const [fromHash, sub] = location.hash.slice(1).split("/");
   if (fromHash === "network" && NET_SUBS.includes(sub)) net.sub = sub;
-  setView(["devices", "schedules", "events", "network", "system"].includes(fromHash) ? fromHash : "devices");
+  setView(VIEWS.includes(fromHash) ? fromHash : "devices");
   refreshNetBadge();
 }
 
@@ -2250,7 +2489,14 @@ function bind() {
   $("#vpn-form").addEventListener("submit", onVpnSubmit);
   $("#vpn-toggle").addEventListener("click", onVpnToggle);
   $("#vpn-remove").addEventListener("click", onVpnRemove);
+  $("#add-plug").addEventListener("click", () => openPlugFor("", "", ""));
+  $("#plug-form").addEventListener("submit", onPlugSubmit);
+  $("#plug-detect").addEventListener("click", detectPlug);
+  $("#plug-delete").addEventListener("click", onPlugDelete);
   buildDayPicker();
+  setInterval(() => {
+    if (document.visibilityState === "visible" && !$("#app").hidden && state.view === "plugs" && !$("#plug-dialog").open) refreshPlugs();
+  }, PLUG_INTERVAL);
 
   // Poll the status only while the page is visible; this saves load on the Pi.
   setInterval(() => {
@@ -2275,7 +2521,7 @@ function bind() {
     const [view, sub] = location.hash.slice(1).split("/");
     if (view === "network" && NET_SUBS.includes(sub) && state.view === "network") {
       if (sub !== net.sub) setNetSub(sub, false);
-    } else if (["devices", "schedules", "events", "network", "system"].includes(view) && view !== state.view) {
+    } else if (VIEWS.includes(view) && view !== state.view) {
       if (view === "network" && NET_SUBS.includes(sub)) net.sub = sub;
       setView(view);
     }

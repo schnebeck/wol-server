@@ -31,7 +31,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlsplit
 
-from . import __version__, dnsclient, models, netinfo, power, wifi, wol
+from . import __version__, dnsclient, models, netinfo, plugs, power, wifi, wol
 from .auth import ApiTokens, Auth, LoginLimiter
 from .scheduler import Scheduler, next_run
 from .status import StatusMonitor, check_host
@@ -182,6 +182,7 @@ class App:
         except Exception:  # noqa: BLE001
             log.exception("Could not create SSH key")
         self.status = StatusMonitor(config["status_cache_seconds"])
+        self.plugs = plugs.PlugManager(data_dir, on_event=self.store.add_event)
         self.scheduler = Scheduler(self.store, self.run_action)
         self.started = time.time()
         self._static_cache = {}
@@ -249,6 +250,15 @@ class App:
             R("POST", r"/api/net/probe", self.api_net_probe),
             R("POST", r"/api/net/restart", self.api_net_restart),
             R("PUT", r"/api/net/static-ip", self.api_net_static_ip),
+            # Wireless plugs (driver layer in wolserver/plugs)
+            R("GET", r"/api/plugs", self.api_plugs),
+            R("POST", r"/api/plugs", self.api_plug_create),
+            R("POST", r"/api/plugs/probe", self.api_plug_probe),
+            R("PUT", r"/api/plugs/(?P<item_id>\w+)", self.api_plug_update),
+            R("DELETE", r"/api/plugs/(?P<item_id>\w+)", self.api_plug_delete),
+            R("POST", r"/api/plugs/(?P<item_id>\w+)/(?P<action>on|off|cycle)", self.api_plug_switch),
+            R("GET", r"/api/plugs/(?P<item_id>\w+)/power-on-state", self.api_plug_power_on_state),
+            R("PUT", r"/api/plugs/(?P<item_id>\w+)/power-on-state", self.api_plug_power_on_state),
         ]
         self._net_logged = self._read_net_logged()
 
@@ -276,6 +286,7 @@ class App:
     def stop(self):
         self.scheduler.stop()
         self.status.shutdown()
+        self.plugs.shutdown()
 
     # -- Actions (used by API and scheduler) --
 
@@ -650,6 +661,7 @@ class App:
     def api_net_config(self, req):
         res = self._net("net_config")
         res["devices"] = {d["mac"].lower(): {"id": d["id"], "name": d["name"]} for d in self.store.list("devices")}
+        res["plugs"] = self.plugs.by_mac()
         return 200, res
 
     def api_net_settings(self, req):
@@ -779,6 +791,54 @@ class App:
         res = self._net("net_static_ip", timeout=40, enabled=bool(req.body.get("enabled")))
         log.info("%s (by %s)", res.get("message"), req.client)
         return 200, res
+
+    # -- Wireless plugs --
+
+    def _plug_call(self, fn, *args, **kwargs):
+        """Driver and validation errors as API errors. Never 401: the GUI would show its login page."""
+        try:
+            return fn(*args, **kwargs)
+        except KeyError:
+            raise ApiError(404, "Plug not found") from None
+        except plugs.ConfirmRequired:
+            raise
+        except plugs.base.PlugUnreachable as e:
+            raise ApiError(502, str(e)) from None
+        except plugs.PlugError as e:
+            raise ApiError(400, str(e)) from None
+
+    def api_plugs(self, req):
+        return 200, {"plugs": self.plugs.list(), "drivers": plugs.describe_drivers()}
+
+    def api_plug_probe(self, req):
+        b = req.body
+        return 200, {"info": self._plug_call(self.plugs.probe, b.get("host"), b.get("driver"))}
+
+    def api_plug_create(self, req):
+        plug = self._plug_call(self.plugs.add, req.body)
+        log.info("Plug %s added by %s", plug["name"], req.client)
+        return 201, plug
+
+    def api_plug_update(self, req, item_id):
+        return 200, self._plug_call(self.plugs.update, item_id, req.body)
+
+    def api_plug_delete(self, req, item_id):
+        plug = self._plug_call(self.plugs.delete, item_id)
+        log.info("Plug %s removed by %s", plug["name"], req.client)
+        return 200, {"ok": True}
+
+    def api_plug_switch(self, req, item_id, action):
+        try:
+            message = self._plug_call(self.plugs.switch, item_id, action, bool(req.body.get("confirm")), "manual")
+        except plugs.ConfirmRequired as e:
+            # "ok" in the answer: the GUI asks and sends the request again with confirm
+            return 409, {"ok": False, "confirm": True, "power_w": e.power_w, "message": str(e)}
+        return 200, {"ok": True, "message": message}
+
+    def api_plug_power_on_state(self, req, item_id):
+        if req.body.get("state") is not None:
+            self._plug_call(self.plugs.set_power_on_state, item_id, req.body.get("state"))
+        return 200, {"state": self._plug_call(self.plugs.power_on_state, item_id)}
 
     # -- static files --
 

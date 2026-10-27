@@ -1,6 +1,6 @@
 # Proposal: smart plugs in WOL-Server
 
-As of: 2026-10-27 · Status: **draft, not implemented**
+As of: 2026-10-27 · Status: **phase 1 implemented (branch `plugs`), not yet tested with real plugs**
 
 WOL-Server learns to use metering smart plugs. A plug is a device in the network with the type "wireless plug". Linking
 it to a consumer tells WOL-Server what the plug measures and what it switches. If the consumer is a WOL device, the
@@ -36,7 +36,7 @@ The consumer can also be a network device without WOL, or just a name such as "F
 | Welded contacts | No positively driven contacts in a plug. Detection by measurement instead (section 3). |
 | Plug in the network | **A type at the reservation:** "wireless plug" next to the existing "WOL device". Name and fixed IP live in the reservation only, never on the plug. |
 | Plugs behind a hub | A DECT plug (or later Zigbee) has no IP of its own. Then the **hub** is reserved (e.g. the FRITZ!Box); its plugs are added in the Plugs tab through the hub (driver + host of the hub + channel = device ID). Type, link and safety rules are the same. |
-| Detection | **By asking the device, never by vendor prefix alone.** An Espressif MAC can be a Shelly, a Tasmota plug or any home-made ESP project. A driver's `probe` decides; the result is only a suggestion and can always be changed, including back to "normal device". |
+| Detection | **By asking the device, never by vendor prefix alone, and only on request.** An Espressif MAC can be a Shelly, a Tasmota plug or any home-made ESP project. A driver's `probe` decides; the type stays a choice of the user. |
 | Linking | **Plug → consumer:** a WOL device, a reservation (network device without WOL) or just a name. One plug has at most one consumer; a consumer has at most one plug. |
 
 ## 3. Safety rules
@@ -73,16 +73,19 @@ These rules are enforced in WOL-Server itself, not only in the GUI.
 
 - **Setup, step by step:**
   1. **On the plug's hotspot:** choose the Wi-Fi, enter the password, leave DHCP on.
-  2. **Network → Overview → Unknown devices:** the plug appears with the name it reports. WOL-Server asks the
-     drivers once, read-only (for Shelly: `GET /shelly`), and shows the result: "Shelly Plug M Gen3 detected".
-  3. **Approve:** IP and name as for every reservation, plus the **type**. "wireless plug" with the detected driver is
-     preselected; "normal device" or another driver can be chosen instead. Then WOL-Server asks for the plug's
-     password.
-- **Later changes:** the type of a reservation can be changed at any time. An existing reservation gets an
-  *As plug* button next to *As WOL device*. "Do not detect" for a MAC stops all probing of that device, e.g. for a
-  home-made ESP project that should not get unexpected HTTP requests.
+  2. **Network → Overview → Unknown devices:** the plug appears with the name it reports. An unknown device
+     has no address yet, so WOL-Server cannot ask it anything at this point. The reported name only gives a hint
+     (e.g. `ShellyPlugMG3-…`), and the approve dialog preselects the type "wireless plug" from it.
+  3. **Approve:** IP and name as for every reservation, plus the **type**: "network device" or "wireless plug".
+     With "wireless plug" the plug dialog opens next, with the reserved IP filled in. As soon as the plug has its
+     address (its next DHCP request, usually within a minute), *Detect* asks the drivers, read-only (for Shelly:
+     `GET /shelly`), and shows e.g. "Shelly (Gen2+) · S3PL-30110EU · firmware 1.7.1 · password protected".
+- **Detection only on request.** WOL-Server never probes devices by itself; only *Detect* and *Add* send
+  requests, and only to the address entered. A home-made ESP project therefore never gets unexpected requests.
+- **Later changes:** an existing reservation gets an *Add as wireless plug* button next to *Add as WOL device*.
+  Removing a plug only makes WOL-Server forget it; the reservation stays.
 - **Manual:** a plug outside the DHCP (e.g. a fixed IP) can be entered by host name or IP, with the driver chosen
-  by hand.
+  by hand or detected automatically.
 - **Password:** digest authentication as the plug requires (user `admin`, SHA-256). The password is stored on the
   server only and is never sent back to the browser.
 - **Live view:** relay state, power (W), voltage, current, temperature, energy counter, switching cycles, error
@@ -242,8 +245,7 @@ The plug control is split in two, like a hardware abstraction layer:
 - **Shared helpers:** HTTP with timeouts and digest authentication (MD5 and SHA-256) in `wolserver/plugs/http.py`,
   so a new driver is usually 100–200 lines.
 - **Registry:** each driver registers under a fixed name (`shelly-gen2`, later `tasmota`, `fritz-dect`). The
-  plug stores the name. When a new device appears, WOL-Server tries the `probe` of every driver once; the result is
-  a suggestion only.
+  plug stores the name. *Detect* tries the `probe` of every driver on the address entered.
 - **Tests:** each driver is tested against recorded answers of the real device (JSON fixtures). The core is tested
   against the fake plug, which also runs in the demo.
 
