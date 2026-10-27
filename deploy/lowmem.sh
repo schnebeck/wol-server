@@ -4,9 +4,8 @@
 #
 #   sudo ./deploy/lowmem.sh    danach neu starten (firstboot.sh ruft es auf und startet neu)
 #
-# Die Kernel-Parameter (cmdline.txt) bleiben unverändert. Ein Image mit vorab geänderten Boot-Dateien
-# (gpu_mem=16, KMS aus, cma=16M, audit=0, ohne console=tty1) startete auf dem Zero W nicht bis zur
-# Einrichtung; deshalb wirkt alles erst nach dem Neustart am Ende der Einrichtung.
+# Die Kernel-Parameter (cmdline.txt) bleiben unverändert. Alles wirkt erst nach dem Neustart am Ende
+# der Einrichtung; der erste Start läuft mit den Original-Boot-Dateien.
 #
 # Rückgängig: Block "# >>> wol-server lowmem" aus config.txt entfernen, die Dateien wol-server-lowmem*
 # in /etc/modprobe.d, /etc/sysctl.d und /etc/rpi/swap.conf.d löschen, die genannten Timer aktivieren.
@@ -25,9 +24,13 @@ CONFIG=/boot/firmware/config.txt
 [ -f "$CONFIG" ] || { echo "config.txt nicht gefunden – ist das ein Raspberry Pi?" >&2; exit 1; }
 
 # ---------------------------------------------------------------- config.txt
-# Der Grafikchip bekommt 16 statt 64 MB (mehr RAM für Linux). Ohne KMS-Treiber, Audio sowie
-# Kamera- und Display-Erkennung lädt der Kernel deren Treiber gar nicht erst.
-say "Firmware: Speicheraufteilung und Treiber"
+# Ohne KMS-Treiber, Audio sowie Kamera- und Display-Erkennung lädt der Kernel deren Treiber gar nicht
+# erst. gpu_mem bleibt beim Standard: Mit gpu_mem=16 läuft die Firmware über und überschreibt
+# Speicher (zufällige Kernel-Oopses unter Last); Kamera- und Codec-Puffer liegen ohnehin im CMA.
+# over_voltage=2 (nur Zero W): Manche Boards laufen mit den 6.x-Kerneln bei Standardspannung unter
+# Speicher- und Kartenlast nicht stabil (raspberrypi/linux#5572). Ohne force_turbo bleibt die
+# Garantie erhalten.
+say "Firmware: Treiber und Spannung"
 # Neue Fassung erst fertig schreiben, dann austauschen: Ein Reset mitten im Schreiben hinterließ
 # sonst eine leere config.txt auf der FAT-Partition.
 NEW="$CONFIG.wol-neu"
@@ -37,10 +40,12 @@ NEW="$CONFIG.wol-neu"
         -e '/^# >>> wol-server lowmem/,/^# <<< wol-server lowmem/d' "$CONFIG"
     echo "# >>> wol-server lowmem"
     echo "[all]"
-    echo "gpu_mem=16"
     echo "dtparam=audio=off"
     echo "camera_auto_detect=0"
     echo "display_auto_detect=0"
+    echo "[pi0w]"
+    echo "over_voltage=2"
+    echo "[all]"
     echo "# <<< wol-server lowmem"
 } > "$NEW"
 if cmp -s "$CONFIG" "$NEW"; then

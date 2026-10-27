@@ -205,16 +205,25 @@ Stellt Raspberry Pi OS auf die 512 MB des Zero W ein. Beim Image läuft es am En
 
 | Maßnahme | Wirkung |
 |---|---|
-| `gpu_mem=16`, KMS-Grafiktreiber aus | ca. 48 MB mehr RAM für Linux |
+| KMS-Grafiktreiber aus | weniger Treiber und Grafikspeicher |
+| `over_voltage=2` (nur Zero W) | stabiler Betrieb unter Last, siehe unten |
 | Kamera-, Video-Codec- und Audiotreiber gesperrt, Kamera-/Display-Erkennung aus | weniger Kernel-Module |
 | Swap nur als zram (`/etc/rpi/swap.conf.d`), `vm.swappiness=100`, `vm.page-cluster=0` | keine Swap-Datei auf der SD-Karte |
 | `apt-daily`, `man-db` und weitere tägliche Timer aus | keine täglichen apt-Läufe, die auf dem Zero viel RAM und CPU brauchen |
 
+`gpu_mem` bleibt bewusst beim Standard (64 MB). Mit `gpu_mem=16` läuft die Firmware über und überschreibt
+Speicher: Der Zero W stürzte damit unter Last mit zufälligen Kernel-Oopses ab ([Forum][gpu16]). Kamera- und
+Codec-Puffer liegen bei Trixie ohnehin im CMA, die Einstellung bringt kaum noch etwas. Unabhängig davon laufen
+manche Zero-W-Boards mit den 6.x-Kerneln bei Standardspannung unter Speicher- und Kartenlast nicht stabil
+([raspberrypi/linux#5572][ov]); `over_voltage=2` behebt das (ohne `force_turbo` bleibt die Garantie erhalten).
+
+[gpu16]: https://forums.raspberrypi.com/viewtopic.php?t=316155
+[ov]: https://github.com/raspberrypi/linux/issues/5572
+
 Ein eigener Kernel ist nicht nötig: Er brächte nur wenige MB und bekäme keine Updates über apt mehr.
 AppArmor und IPv6 bleiben aktiv. Speicher-Cgroups schaltet die Firmware des Zero selbst ab (`cgroup_disable=memory`),
 `MemoryMax` der Dienste wirkt dort also nicht. Die Kernel-Parameter in
-`cmdline.txt` bleiben unverändert: Ein Image mit vorab geänderten Boot-Dateien (u. a. `cma=16M`, ohne
-`console=tty1`) startete auf dem Zero W nicht. Vorher wird `config.txt` gesichert (`config.txt.bak-<datum>`).
+`cmdline.txt` bleiben unverändert. Vorher wird `config.txt` gesichert (`config.txt.bak-<datum>`).
 
 ### Stromsparen: `lowpower.sh`
 
