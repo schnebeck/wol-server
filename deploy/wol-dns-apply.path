@@ -15,7 +15,7 @@
 #
 [Unit]
 Description=WOL-Server: detect network jobs from the web GUI
-Documentation=file:///opt/wol-server/docs/vorschlag-dhcp-dns.md
+Documentation=file:///opt/wol-server/docs/proposal-dhcp-dns.md
 
 [Path]
 # wol-wifi places validated jobs there (Apply, release lease, DHCP scan, …)
