@@ -4,6 +4,8 @@
 
 > **WOL-Server** – the Low-Power Intranet Network Swiss Army Knife for the Raspberry Pi Zero W
 
+**Producer:** Thorsten Schnebeck (author, copyright and responsibility) · **Code generator:** Claude (Anthropic)
+
 A small home network hub on a Raspberry Pi Zero W that runs around the clock on less than one watt. It wakes
 computers on the home network or puts them to sleep (manually or on a schedule, from the intranet and over VPN)
 and can optionally take over DHCP and DNS for the whole network. Everything through a web GUI, with no
