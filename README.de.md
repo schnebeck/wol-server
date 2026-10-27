@@ -429,7 +429,7 @@ der GUI reicht die Leistung problemlos.
 Der WOL-Server kann DHCP und DNS für das Heimnetz übernehmen, zum Beispiel als Ersatz für einen ISC-dhcpd mit
 BIND und Webmin. Dahinter steckt **dnsmasq**: DHCP und DNS in einem Prozess, darum ist jedes Gerät, das eine
 Adresse bekommt, sofort als `name.domäne` erreichbar, auch rückwärts von der IP zum Namen. Abgelaufene Leases
-verschwinden wieder. Hintergrund und Entscheidungen: [docs/vorschlag-dhcp-dns.md](docs/vorschlag-dhcp-dns.md).
+verschwinden wieder. Hintergrund und Entscheidungen: [docs/proposal-dhcp-dns.md](docs/proposal-dhcp-dns.md) (englisch).
 
 Bis du es in der GUI einschaltest, bleibt alles aus. `hotspot-setup.sh` (läuft mit `install.sh`) stellt nur die
 Dienste bereit.
@@ -450,7 +450,7 @@ Import, Sicherung und Verlauf erzeugen einen **Entwurf**. Die Leiste oben zeigt 
 | Einstellungen | DHCP (Modus „nur bekannte Geräte“ oder Adressbereich, Lease-Zeit, Gateway, DNS, NTP, Suchdomänen), DNS (Domäne, Upstream, bedingte Weiterleitungen), Server (feste Adresse setzen), Netzwerkstart (PXE) |
 | Werkzeuge | Import aus `dhcpd.conf` mit Vorschau, Sicherung als JSON, Suche nach anderen DHCP-Servern, dnsmasq neu starten, Verlauf mit Zurückholen, DHCP-/Dienstprotokoll, ignorierte Geräte |
 
-**Umzug von einem ISC-dhcpd** (Ablauf mit Rückweg im [Vorschlag](docs/vorschlag-dhcp-dns.md#6-umzug-von-10)):
+**Umzug von einem ISC-dhcpd** (Ablauf mit Rückweg im [Vorschlag](docs/proposal-dhcp-dns.md#6-migrating-from-10), englisch):
 1. *Einstellungen → Server → Feste Adresse setzen.* Ein DHCP-Server braucht eine feste eigene Adresse.
 2. *Werkzeuge → dhcpd.conf importieren.* Namen werden für DNS bereinigt (`LinuxCNC_Alfa` → `linuxcnc-alfa`). Der
    Eintrag des WOL-Servers selbst wird übersprungen.
