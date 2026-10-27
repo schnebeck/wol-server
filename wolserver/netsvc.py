@@ -251,6 +251,7 @@ class NetManager:
                 if draft is not None and applying.get("from_draft") and draft == new:
                     self._drop("draft.json")
                 log.info("Network configuration applied (%s)", request_id)
+                self._own_resolver(new)
             self._drop("applying", name)
             shutil.rmtree(self.path("staging", request_id), ignore_errors=True)
 
@@ -646,9 +647,37 @@ class NetManager:
             return {"ok": True, "request": self._request("probe", mac=server["mac"]),
                     "message": "Searching for DHCP servers (approx. 5 s) …"}
 
+    def _own_resolver(self, cfg):
+        """The WOL-Server's own lookups follow the DNS setting.
+
+        With DNS on it asks itself first (127.0.0.1): otherwise names in the local domain go to the
+        router and, with a public wildcard for the domain, resolve to the internet - the online check
+        then probes the wrong host. The previous servers stay as fallback. Only with a static address;
+        with DHCP the resolver comes from the DHCP server.
+        """
+        server = self._server_state(cfg)
+        name = server["connection"]
+        if not name or server["hotspot"] or server["method"] != "manual":
+            return
+        rc, out = self.runner(["nmcli", "-t", "-g", "ipv4.dns", "connection", "show", name])
+        if rc != 0:
+            return
+        current = [d for d in re.split(r"[,\s]+", out.strip()) if d]
+        fallback = [d for d in current if d != "127.0.0.1"] or cfg["dns"]["upstream"] or [cfg["dhcp"]["gateway"]]
+        wanted = (["127.0.0.1"] if cfg["dns"]["enabled"] else []) + [d for d in fallback if d]
+        if not wanted or wanted == current:
+            return
+        rc, _ = self.runner(["nmcli", "connection", "modify", name, "ipv4.dns", " ".join(wanted),
+                             "ipv4.ignore-auto-dns", "yes"])
+        if rc == 0:
+            self.runner(["nmcli", "device", "reapply", server["interface"]], timeout=30)
+            log.info("Own DNS resolver: %s (%s)", " ".join(wanted), name)
+
     def wifi_changed(self, mode):
         """Reported by the Wi-Fi part: pause dnsmasq in hotspot mode, start it again afterwards."""
         with self.lock:
+            if mode == "client":
+                self._own_resolver(self.active())
             previous, self.wifi_mode = self.wifi_mode, mode
             if previous is None or (mode == "hotspot") == (previous == "hotspot"):
                 return
