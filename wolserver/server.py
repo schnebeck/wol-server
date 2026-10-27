@@ -183,7 +183,7 @@ class App:
             log.exception("Could not create SSH key")
         self.status = StatusMonitor(config["status_cache_seconds"])
         self.plugs = plugs.PlugManager(data_dir, on_event=self.store.add_event)
-        self.scheduler = Scheduler(self.store, self.run_action)
+        self.scheduler = Scheduler(self.store, self.run_action, run_plug=self.run_plug_action)
         self.started = time.time()
         self._static_cache = {}
 
@@ -324,6 +324,26 @@ class App:
             source=source, ok=ok, message=message,
         )
         return ok, message
+
+    def run_plug_action(self, plug_id, action, force, source):
+        """Plug action from a schedule. Nobody can confirm at that moment: while the consumer draws more than
+        standby, "off" and "power cycle" are skipped unless the schedule is set to switch anyway (force)."""
+        try:
+            plug = self.plugs.get(plug_id)
+        except KeyError:
+            return False, "Plug not found"
+        try:
+            return True, self.plugs.switch(plug_id, action.replace("power_", ""), confirm=force, source=source)
+        except plugs.ConfirmRequired as e:
+            message = "Skipped: %s" % e
+        except plugs.base.PlugUnreachable as e:
+            message = str(e)  # during the check before switching: not logged yet
+        except plugs.PlugError as e:
+            return False, str(e)  # failed switching: switch() has logged it
+        log.warning("%s %s (%s): %s", action, plug["name"], source, message)
+        self.store.add_event(device_id=None, device=plug["name"], action=action, source=source, ok=False,
+                             message=message)
+        return False, message
 
     # -- Session --
 
@@ -521,7 +541,7 @@ class App:
 
     def _validate_schedule(self, body):
         try:
-            return models.validate_schedule(body, lambda i: self.store.get("devices", i))
+            return models.validate_schedule(body, lambda i: self.store.get("devices", i), self._plug_or_none)
         except models.ValidationError as e:
             raise ApiError(400, str(e)) from None
 
@@ -794,6 +814,12 @@ class App:
 
     # -- Wireless plugs --
 
+    def _plug_or_none(self, plug_id):
+        try:
+            return self.plugs.get(plug_id)
+        except KeyError:
+            return None
+
     def _plug_call(self, fn, *args, **kwargs):
         """Driver and validation errors as API errors. Never 401: the GUI would show its login page."""
         try:
@@ -808,7 +834,8 @@ class App:
             raise ApiError(400, str(e)) from None
 
     def api_plugs(self, req):
-        return 200, {"plugs": self.plugs.list(), "drivers": plugs.describe_drivers()}
+        live = (req.query.get("live") or ["1"])[0] != "0"  # ?live=0: without asking the plugs (e.g. schedules)
+        return 200, {"plugs": self.plugs.list(live), "drivers": plugs.describe_drivers()}
 
     def api_plug_probe(self, req):
         b = req.body
@@ -824,6 +851,9 @@ class App:
 
     def api_plug_delete(self, req, item_id):
         plug = self._plug_call(self.plugs.delete, item_id)
+        for sched in self.store.list("schedules"):
+            if sched.get("plug_id") == item_id:
+                self.store.delete("schedules", sched["id"])
         log.info("Plug %s removed by %s", plug["name"], req.client)
         return 200, {"ok": True}
 

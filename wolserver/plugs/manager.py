@@ -239,11 +239,13 @@ class PlugManager:
             return cached[2]
         return self._fetch(plug)
 
-    def list(self):
+    def list(self, live=True):
         """All plugs with live values (at most CACHE_SECONDS old, fetched in parallel)."""
         with self._lock:
             plugs = copy.deepcopy(self._plugs)
             cached = dict(self._live)
+        if not live:
+            return [self.public(p) for p in plugs]
         now = time.monotonic()
 
         def current(p):

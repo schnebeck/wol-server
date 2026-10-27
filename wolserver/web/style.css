@@ -177,9 +177,12 @@ pre code { background: none; border: 0; padding: 0; }
 .lang-switch button:focus-visible { outline: 2px solid var(--wake); outline-offset: -2px; }
 .login-lang { justify-self: center; margin-top: 4px; }
 .tab {
-  border: 0; background: transparent; color: var(--muted);
-  padding: 7px 12px; border-radius: 8px; font: inherit; font-weight: 550; cursor: pointer;
+  border: 0; background: transparent; color: var(--muted); position: relative;
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 7px 11px; border-radius: 8px; font: inherit; font-weight: 550; cursor: pointer;
 }
+.tab .icon { width: 16px; height: 16px; }
+@media (min-width: 761px) and (max-width: 980px) { .tab .icon { display: none; } }
 .tab:hover { color: var(--text); background: var(--border); }
 .tab.active { color: var(--text); background: var(--surface); box-shadow: inset 0 0 0 1px var(--border); }
 
@@ -262,6 +265,9 @@ pre code { background: none; border: 0; padding: 0; }
 .badge .icon { width: 14px; height: 14px; }
 .badge.wake { background: var(--wake-soft); color: var(--wake); }
 .badge.sleep { background: var(--sleep-soft); color: var(--sleep); }
+.badge.power_on { background: var(--wake-soft); color: var(--wake); }
+.badge.power_off, .badge.power_cycle { background: var(--surface-2); color: var(--text); box-shadow: inset 0 0 0 1px var(--border); }
+#schedule-force-row small { display: block; margin: 4px 0 0 26px; }
 
 .days { display: flex; gap: 3px; }
 .day {
@@ -636,9 +642,12 @@ input[type=file]::file-selector-button {
   .request-actions { width: 100%; justify-content: flex-end; }
   table.data td, table.data th { padding: 8px 9px; }
   .topbar-inner { flex-wrap: wrap; gap: 8px 12px; }
-  .tabs { order: 3; width: 100%; margin: 0; overflow-x: auto; }
-  .tab { flex: 1 1 auto; padding: 7px 4px; white-space: nowrap; font-size: 0.86rem; }
-  .tab-badge { margin-left: 3px; }
+  .tabs { order: 3; width: 100%; margin: 0; }
+  /* Menu bar on the phone: icon above a small label, all tabs in one row */
+  .tab { flex: 1 1 auto; min-width: 0; flex-direction: column; gap: 3px; padding: 6px 3px 5px; font-size: 0.66rem; letter-spacing: -0.01em; white-space: nowrap; }
+  .tab .icon { width: 20px; height: 20px; }
+  .tab-label { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+  .tab-badge { position: absolute; top: 1px; left: calc(50% + 5px); margin: 0; min-width: 16px; height: 16px; padding: 0 4px; font-size: 0.64rem; }
   .topbar .lang-switch { margin-left: auto; }
   .btn.wol-add { padding: 0 8px; }
   .wol-add-text { display: none; }
@@ -649,6 +658,10 @@ input[type=file]::file-selector-button {
   .event-time { min-width: 0; }
   .event { flex-wrap: wrap; }
   .event-main { flex-basis: 100%; }
+}
+
+@media (max-width: 340px) {
+  .tab-label { display: none; }
 }
 
 @media (max-width: 480px) {
