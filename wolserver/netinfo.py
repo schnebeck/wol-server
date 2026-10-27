@@ -6,6 +6,7 @@ Packets an die Adresse des LAN/WLAN-Interfaces gebunden (siehe lan_source()).
 """
 
 import fcntl
+import ipaddress
 import socket
 import struct
 
@@ -64,6 +65,46 @@ def interfaces():
             except OSError:
                 pass  # Interface ohne IPv4-Adresse
             result.append(info)
+    return result
+
+
+def ipv6_prefixes(path="/proc/net/if_inet6"):
+    """Globale IPv6-Präfixe (inkl. ULA) je Interface: [(name, "fd00:1::/64")]."""
+    result = []
+    try:
+        with open(path, encoding="ascii") as f:
+            for line in f:
+                fields = line.split()
+                if len(fields) != 6 or fields[3] != "00":  # Scope 00 = global; link-local fe80::/10 extra
+                    continue
+                addr = ipaddress.IPv6Address(int(fields[0], 16))
+                net = ipaddress.IPv6Network("%s/%d" % (addr, int(fields[2], 16)), strict=False)
+                result.append((fields[5], str(net)))
+    except (OSError, ValueError):
+        return []
+    return result
+
+
+def connected_networks():
+    """Netze, an denen der Rechner direkt hängt (LAN, WLAN, VPN), ohne virtuelle Brücken.
+
+    Ergebnis: [{"network": "192.168.1.0/24", "interface": "wlan0", "kind": "wifi"}, …]
+    """
+    seen, result = set(), []
+    kinds = {}
+    for i in interfaces():
+        kinds[i["name"]] = i["kind"]
+        if not i["up"] or not i["address"] or not i["netmask"] or i["kind"] in ("loopback", "virtual"):
+            continue
+        net = str(ipaddress.IPv4Interface("%s/%s" % (i["address"], i["netmask"])).network)
+        if net not in seen:
+            seen.add(net)
+            result.append({"network": net, "interface": i["name"], "kind": i["kind"]})
+    for name, net in ipv6_prefixes():
+        kind = kinds.get(name) or classify(name, 0)
+        if kind not in ("loopback", "virtual") and net not in seen:
+            seen.add(net)
+            result.append({"network": net, "interface": name, "kind": kind})
     return result
 
 

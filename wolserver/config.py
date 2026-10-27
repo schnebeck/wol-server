@@ -19,17 +19,9 @@ DEFAULTS = {
     "https_redirect": True,  # HTTP auf HTTPS umleiten, sobald ein gültiges Zertifikat da ist (nicht im Hotspot)
     "cert_source": "",  # SSH-Ziel, das Schlüssel und Zertifikat liefert, z. B. wolcert@10.1.1.3
     "data_dir": "/var/lib/wol-server",
-    # Nur Clients aus diesen Netzen dürfen die GUI/API nutzen (Intranet + VPN).
-    "allowed_networks": [
-        "127.0.0.0/8",
-        "::1/128",
-        "10.0.0.0/8",
-        "172.16.0.0/12",
-        "192.168.0.0/16",
-        "100.64.0.0/10",  # CGNAT, u. a. Tailscale
-        "fc00::/7",  # IPv6 ULA, u. a. Tailscale/WireGuard
-        "fe80::/10",
-    ],
+    # Nur Clients aus diesen Netzen dürfen die GUI/API nutzen. "auto" = localhost, IPv6-Link-local und
+    # die Netze, an denen der Server gerade hängt (LAN/WLAN, VPN); weitere Netze lassen sich ergänzen.
+    "allowed_networks": ["auto"],
     # Interface für Magic Packets; leer = automatisch (Default-Route, VPN-Interfaces ausgenommen)
     "wol_interface": "",
     # WLAN-Verwaltung (Dienst wol-wifi): Einrichtungs-Hotspot, wenn kein bekanntes WLAN erreichbar ist

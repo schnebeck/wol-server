@@ -11,6 +11,7 @@ import os
 import re
 import socket
 import ssl
+import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit
@@ -81,6 +82,62 @@ def captive_redirect(host_header, port):
     return "http://%s%s/" % (wifi.HOTSPOT_ADDRESS, "" if port == 80 else ":%d" % port)
 
 
+class AccessList:
+    """Erlaubte Quellnetze für GUI und API.
+
+    "auto" steht für localhost, IPv6-Link-local und die Netze, an denen der WOL-Server gerade hängt
+    (WLAN, LAN, VPN-Tunnel). Sie werden regelmäßig neu bestimmt, so passt sich die Liste neuen
+    Adressen und VPN-Netzen von selbst an. Feste Einträge gelten zusätzlich.
+    """
+
+    AUTO_FIXED = ("127.0.0.0/8", "::1/128", "fe80::/10")
+    REFRESH = 30  # s zwischen zwei Abfragen der Schnittstellen
+    RETRY = 5  # bei unbekanntem Absender früher erneut nachsehen (z. B. VPN gerade verbunden)
+
+    def __init__(self, entries, source=netinfo.connected_networks, clock=time.monotonic):
+        entries = [entries] if isinstance(entries, str) else list(entries)
+        self.auto = "auto" in entries
+        fixed = [e for e in entries if e != "auto"] + (list(self.AUTO_FIXED) if self.auto else [])
+        self.fixed = []
+        for entry in fixed:
+            net = ipaddress.ip_network(entry, strict=False)
+            if net not in (n for n, _ in self.fixed):
+                self.fixed.append((net, "auto" if self.auto and entry in self.AUTO_FIXED else "config"))
+        self.source, self.clock = source, clock
+        self.lock = threading.Lock()
+        self.dynamic, self.checked = [], None
+
+    def _refresh(self, min_age):
+        now = self.clock()
+        if not self.auto or (self.checked is not None and now - self.checked < min_age):
+            return
+        self.checked = now
+        try:
+            found = self.source()
+        except OSError as e:
+            log.warning("Netze der Schnittstellen nicht lesbar: %s", e)
+            return
+        self.dynamic = [(ipaddress.ip_network(n["network"]), n["interface"]) for n in found]
+
+    def _match(self, ip):
+        return any(ip.version == net.version and ip in net for net, _ in self.fixed + self.dynamic)
+
+    def allows(self, ip):
+        with self.lock:
+            self._refresh(self.REFRESH)
+            if self._match(ip):
+                return True
+            self._refresh(self.RETRY)
+            return self._match(ip)
+
+    def describe(self):
+        """Für die Anzeige: [{"network": "192.168.1.0/24", "source": "wlan0"}, …]"""
+        with self.lock:
+            self._refresh(self.REFRESH)
+            entries = self.fixed + [(n, src) for n, src in self.dynamic if n not in (f for f, _ in self.fixed)]
+            return [{"network": str(net), "source": src} for net, src in entries]
+
+
 def _read_text(path):
     try:
         with open(path, encoding="utf-8") as f:
@@ -97,7 +154,7 @@ class App:
         self.store = Store(os.path.join(data_dir, "data.json"))
         self.auth = Auth(data_dir, config["session_days"])
         self.limiter = LoginLimiter()
-        self.networks = [ipaddress.ip_network(n, strict=False) for n in config["allowed_networks"]]
+        self.access = AccessList(config["allowed_networks"])
         self.tls = TlsState(config["tls_dir"])
         self.identity = power.SshIdentity(data_dir)
         try:
@@ -186,7 +243,7 @@ class App:
         raise ApiError(405 if allowed else 404, "Methode nicht erlaubt" if allowed else "Nicht gefunden")
 
     def is_allowed(self, ip):
-        return any(ip in net for net in self.networks if net.version == ip.version)
+        return self.access.allows(ip)
 
     def start(self):
         self.scheduler.start()
@@ -294,7 +351,7 @@ class App:
             "load": os.getloadavg()[0],
             "ssh_public_key": self.identity.public_key(),
             "auth_required": self.auth.required,
-            "allowed_networks": self.config["allowed_networks"],
+            "allowed_networks": self.access.describe(),
             "client": req.client,
             "network": self._network_info(),
             "https": dict(self.tls.status(), port=int(self.config["https_port"]) or None),

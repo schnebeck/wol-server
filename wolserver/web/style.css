@@ -276,6 +276,7 @@ pre code { background: none; border: 0; padding: 0; }
 .tag.kind-wifi { color: var(--wake); background: var(--wake-soft); border-color: transparent; }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .chip { font-size: 0.78rem; padding: 2px 8px; border-radius: 6px; background: var(--surface-2); border: 1px solid var(--border); }
+.chip-src { margin-left: 6px; color: var(--muted); }
 .keybox { display: flex; gap: 8px; align-items: flex-start; }
 .keybox textarea { flex: 1; font-family: var(--mono); font-size: 0.78rem; resize: none; word-break: break-all; }
 .howto summary { cursor: pointer; font-weight: 550; }

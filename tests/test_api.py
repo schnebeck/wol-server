@@ -115,7 +115,8 @@ class ApiTest(unittest.TestCase):
         self.assertEqual(self.call("GET", "/api/devices")[0], 401)
 
     def test_client_network_allowlist(self):
-        self.app.networks = []
+        from wolserver.server import AccessList
+        self.app.access = AccessList(["10.9.9.0/24"])
         conn = http.client.HTTPConnection("127.0.0.1", self.port)
         conn.request("GET", "/api/session")
         resp = conn.getresponse()
@@ -143,3 +144,53 @@ class ApiTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AccessListTest(unittest.TestCase):
+    def test_auto_follows_interfaces(self):
+        import ipaddress
+
+        from wolserver.server import AccessList
+        nets = [{"network": "192.168.1.0/24", "interface": "wlan0", "kind": "wifi"}]
+        now = [0.0]
+        calls = []
+
+        def source():
+            calls.append(now[0])
+            return list(nets)
+        acl = AccessList(["auto", "172.20.0.0/16"], source=source, clock=lambda: now[0])
+        ip = ipaddress.ip_address
+        for allowed in ("192.168.1.12", "127.0.0.1", "::1", "fe80::1", "172.20.3.4"):
+            self.assertTrue(acl.allows(ip(allowed)), allowed)
+        self.assertFalse(acl.allows(ip("10.1.1.7")))
+        # VPN verbindet sich: Ein unbekannter Absender löst nach RETRY eine neue Abfrage aus
+        nets.append({"network": "10.1.1.0/24", "interface": "tun0", "kind": "vpn"})
+        self.assertFalse(acl.allows(ip("10.1.1.7")))  # gerade erst nachgesehen
+        now[0] += AccessList.RETRY
+        self.assertTrue(acl.allows(ip("10.1.1.7")))
+        # Bekannte Absender lösen keine Abfrage aus, solange REFRESH nicht abgelaufen ist
+        before = len(calls)
+        acl.allows(ip("192.168.1.12"))
+        self.assertEqual(len(calls), before)
+        sources = {e["network"]: e["source"] for e in acl.describe()}
+        self.assertEqual(sources["10.1.1.0/24"], "tun0")
+        self.assertEqual(sources["172.20.0.0/16"], "config")
+        self.assertEqual(sources["127.0.0.0/8"], "auto")
+        # Ohne "auto": nur die festen Einträge, keine Abfrage der Schnittstellen
+        fixed = AccessList(["192.168.1.0/24"], source=lambda: self.fail("keine Abfrage erwartet"))
+        self.assertFalse(fixed.allows(ip("127.0.0.1")))
+        self.assertTrue(fixed.allows(ip("192.168.1.5")))
+
+    def test_ipv6_prefixes(self):
+        import os
+        import tempfile
+
+        from wolserver import netinfo
+        with tempfile.NamedTemporaryFile("w", delete=False) as f:
+            f.write("fd001234000000000000000000000008 03 40 00 00     wlan0\n"
+                    "fe80000000000000023af2cf44f40ffc 03 40 20 80     wlan0\n"
+                    "00000000000000000000000000000001 01 80 10 80        lo\n")
+        try:
+            self.assertEqual(netinfo.ipv6_prefixes(f.name), [("wlan0", "fd00:1234::/64")])
+        finally:
+            os.unlink(f.name)

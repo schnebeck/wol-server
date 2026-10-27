@@ -363,11 +363,12 @@ Hinweise:
 - Pi-Zertifikat widerrufen bei Verlust der SD-Karte: Die Schlüssel liegen dort unverschlüsselt in
   `/etc/openvpn/client/`.
 
-Die GUI ist nur aus den Netzen in `allowed_networks` erreichbar. Standardmäßig sind das alle privaten Netze
-(RFC 1918, damit auch die üblichen OpenVPN-Netze `10.8.0.0/24` …), `100.64.0.0/10`, IPv6-ULA und Link-Local.
-Liegt das VPN-Netz woanders, warnt `openvpn-setup.sh`. Dann das Netz in `/etc/wol-server/config.json`
-ergänzen und `sudo systemctl restart wol-server` ausführen. Den VPN-Status samt Adresse zeigt die GUI unter
-*System → Netzwerk*.
+Die GUI ist nur aus den Netzen in `allowed_networks` erreichbar. Der Standard `"auto"` erlaubt localhost,
+IPv6-Link-local und die Netze, an denen der Pi gerade hängt, also auch das Netz des VPN-Tunnels. Die Liste
+passt sich neuen Adressen und VPN-Netzen von selbst an. Kommen VPN-Clients aus einem anderen Netz als dem des
+Tunnels (geroutete Netze), dieses in `/etc/wol-server/config.json` ergänzen, z. B.
+`"allowed_networks": ["auto", "10.9.0.0/24"]`, und `sudo systemctl restart wol-server` ausführen. Den
+VPN-Status samt Adresse zeigt die GUI unter *System → Netzwerk*.
 
 > Die GUI spricht bewusst nur HTTP: Sie ist ausschließlich im LAN/VPN erreichbar, und der VPN-Verkehr ist
 > verschlüsselt. **Den Port niemals per Portfreigabe ins Internet öffnen.**
@@ -457,7 +458,7 @@ sudo systemctl restart wol-server            # nach Änderung der config.json
 | `tls_dir` | `/etc/wol-server/tls` | Zertifikat (`cert.pem`), Schlüssel (`key.pem`) und SSH-Zugang für den Abruf |
 | `cert_source` | `""` | SSH-Ziel, das Schlüssel und Zertifikat liefert, z. B. `"wolcert@10.1.1.3"` |
 | `data_dir` | `/var/lib/wol-server` | Geräte, Zeitpläne, Protokoll, Passwort-Hash, SSH-Schlüssel |
-| `allowed_networks` | private Netze | Quellnetze mit Zugriff |
+| `allowed_networks` | `["auto"]` | Quellnetze mit Zugriff; `"auto"` = localhost, IPv6-Link-local und die Netze der eigenen Schnittstellen (WLAN, LAN, VPN), laufend aktualisiert; feste Netze lassen sich ergänzen |
 | `wol_interface` | `""` (automatisch) | Interface für Magic Packets, z. B. `"wlan0"`; automatisch heißt: das Interface der Default-Route, VPN-Interfaces ausgenommen |
 | `wifi_interface` | `"wlan0"` | WLAN-Interface für Client-Betrieb und Hotspot |
 | `hotspot_enabled` | `true` | Einrichtungs-Hotspot, wenn kein bekanntes WLAN erreichbar ist |
@@ -583,7 +584,7 @@ python3 -m unittest discover -s tests -t .   # Tests
 | SSH: `Permission denied (publickey)` | Schlüssel aus *System* in die richtige `authorized_keys` eintragen |
 | SSH: `sudo: a password is required` | sudoers-Regel aus Abschnitt 3 anlegen |
 | VPN verbindet nicht | `journalctl -u openvpn-client@wol -e`; Zugangsdaten in `/etc/openvpn/client/wol.auth` prüfen |
-| VPN steht, GUI über VPN nicht erreichbar | Auf dem Server `client-to-client`/Routing prüfen; VPN-Subnetz in `allowed_networks`? |
+| VPN steht, GUI über VPN nicht erreichbar | Auf dem Server `client-to-client`/Routing prüfen; kommt der Client aus einem anderen Netz als dem Tunnel, dieses in `allowed_networks` ergänzen |
 | Pi zeitweise weg | `journalctl -t wlan-watchdog`; Signal unter *System* prüfen (schlechter als −75 dBm: Pi näher an den Router oder Repeater nutzen) |
 | Image: Pi richtet sich nicht ein | Karte am PC öffnen, Protokolle auf der Boot-Partition lesen (siehe unten) |
 | Pi startet unter Last von selbst neu | Netzteil prüfen (mind. 1,2 A, kurzes Kabel; kein Laptop-USB-Port). `vcgencmd get_throttled` ≠ `0x0` heißt Unterspannung |
