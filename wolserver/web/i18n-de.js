@@ -1,3 +1,20 @@
+/*
+ * WOL-Server - wolserver/web/i18n-de.js
+ * German translation of the web GUI (English text -> German text).
+ *
+ *   Copyright (C) 2026 Thorsten Schnebeck <thorsten.schnebeck@gmx.net>
+ *   Produced by Thorsten Schnebeck - the idea, the decisions, the testing.
+ *   Written by Anthropic Claude Opus 5.5 - AI generated content.
+ *
+ *   Free software under the GNU General Public License, version 3 or later.
+ *   There is no warranty, to the extent permitted by law. The full text is in
+ *   LICENSES/GPL-3.0-or-later.txt.
+ *
+ * SPDX-FileCopyrightText: (C) 2026 Thorsten Schnebeck <thorsten.schnebeck@gmx.net>
+ * SPDX-FileContributor: Anthropic Claude Opus 5.5 (AI generated content)
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+
 // German translation of the web GUI: English source text -> German text.
 // Keys with {0}, {1} … are patterns (see i18n.js); keep the keys identical to the texts
 // in index.html, app.js and the server messages.

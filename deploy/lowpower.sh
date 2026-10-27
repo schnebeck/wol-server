@@ -1,4 +1,19 @@
 #!/bin/bash
+# WOL-Server - deploy/lowpower.sh
+# Tunes a Raspberry Pi Zero W for headless operation with low power.
+#
+#   Copyright (C) 2026 Thorsten Schnebeck <thorsten.schnebeck@gmx.net>
+#   Produced by Thorsten Schnebeck - the idea, the decisions, the testing.
+#   Written by Anthropic Claude Opus 5.5 - AI generated content.
+#
+#   Free software under the GNU General Public License, version 3 or later.
+#   There is no warranty, to the extent permitted by law. The full text is in
+#   LICENSES/GPL-3.0-or-later.txt.
+#
+# SPDX-FileCopyrightText: (C) 2026 Thorsten Schnebeck <thorsten.schnebeck@gmx.net>
+# SPDX-FileContributor: Anthropic Claude Opus 5.5 (AI generated content)
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
 # Optimizes a Raspberry Pi Zero W for headless continuous operation with low power
 # and little SD card wear. Can be run repeatedly; config.txt is backed up first.
 # Memory split, graphics, audio and camera drivers are handled by lowmem.sh.
@@ -17,7 +32,7 @@ for arg in "$@"; do
         --led-off) LED_OFF=1 ;;
         --keep-hdmi) KEEP_HDMI=1 ;;
         --keep-bluetooth) KEEP_BT=1 ;;
-        -h|--help) sed -n '2,9p' "$0"; exit 0 ;;
+        -h|--help) sed -n '17,24p' "$0"; exit 0 ;;
         *) echo "Unknown option: $arg" >&2; exit 1 ;;
     esac
 done

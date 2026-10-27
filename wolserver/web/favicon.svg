@@ -1,1 +1,18 @@
+<!--
+  WOL-Server - wolserver/web/favicon.svg
+  Icon of the web GUI.
+
+    Copyright (C) 2026 Thorsten Schnebeck <thorsten.schnebeck@gmx.net>
+    Produced by Thorsten Schnebeck - the idea, the decisions, the testing.
+    Written by Anthropic Claude Opus 5.5 - AI generated content.
+
+    Free software under the GNU General Public License, version 3 or later.
+    There is no warranty, to the extent permitted by law. The full text is in
+    LICENSES/GPL-3.0-or-later.txt.
+
+  SPDX-FileCopyrightText: (C) 2026 Thorsten Schnebeck <thorsten.schnebeck@gmx.net>
+  SPDX-FileContributor: Anthropic Claude Opus 5.5 (AI generated content)
+  SPDX-License-Identifier: GPL-3.0-or-later
+-->
+
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="8" fill="#1f7a55"/><path d="M16 7.5v8" stroke="#fff" stroke-width="2.6" stroke-linecap="round" fill="none"/><path d="M10.6 10.8a8 8 0 1 0 10.8 0" stroke="#fff" stroke-width="2.6" stroke-linecap="round" fill="none"/></svg>

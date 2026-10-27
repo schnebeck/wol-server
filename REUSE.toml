@@ -1,0 +1,14 @@
+# WOL-Server - REUSE.toml
+# Licensing of files that cannot carry a comment header (images, JSON, Markdown, plain data).
+#
+# SPDX-FileCopyrightText: (C) 2026 Thorsten Schnebeck <thorsten.schnebeck@gmx.net>
+# SPDX-FileContributor: Anthropic Claude Opus 5.5 (AI generated content)
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+version = 1
+
+[[annotations]]
+path = ["**/*.png", "**/*.json", "**/*.md", "deploy/firstboot/userconf.txt"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "(C) 2026 Thorsten Schnebeck <thorsten.schnebeck@gmx.net>"
+SPDX-License-Identifier = "GPL-3.0-or-later"

@@ -1,4 +1,19 @@
 #!/bin/bash
+# WOL-Server - deploy/vpn-apply.sh
+# Runs VPN jobs from the web GUI as root (wol-vpn.service).
+#
+#   Copyright (C) 2026 Thorsten Schnebeck <thorsten.schnebeck@gmx.net>
+#   Produced by Thorsten Schnebeck - the idea, the decisions, the testing.
+#   Written by Anthropic Claude Opus 5.5 - AI generated content.
+#
+#   Free software under the GNU General Public License, version 3 or later.
+#   There is no warranty, to the extent permitted by law. The full text is in
+#   LICENSES/GPL-3.0-or-later.txt.
+#
+# SPDX-FileCopyrightText: (C) 2026 Thorsten Schnebeck <thorsten.schnebeck@gmx.net>
+# SPDX-FileContributor: Anthropic Claude Opus 5.5 (AI generated content)
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
 # Runs VPN jobs from the web GUI. Started by wol-vpn.service as soon as the wol-wifi
 # service writes a request file (wol-vpn.path). Runs as root.
 #
