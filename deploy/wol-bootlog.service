@@ -1,5 +1,5 @@
 [Unit]
-Description=WOL-Server: Startbericht auf die Boot-Partition schreiben
+Description=WOL-Server: write boot report to the boot partition
 
 [Service]
 Type=oneshot

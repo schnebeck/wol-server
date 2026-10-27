@@ -1,11 +1,11 @@
 [Unit]
-Description=WOL-Server: Netzwerk-Auftrag aus der Web-GUI ausführen
-Documentation=file:///opt/wol-server/docs/vorschlag-dhcp-dns.md
+Description=WOL-Server: run network job from the web GUI
+Documentation=file:///opt/wol-server/README.md
 
 [Service]
 Type=oneshot
-# root: schreibt /etc/wol-dns, steuert wol-dns.service, sucht nach DHCP-Servern (Port 68).
-# Die Dateien hat wol-wifi aus geprüften Feldern erzeugt; hier wird nur getestet und eingespielt.
+# root: writes /etc/wol-dns, controls wol-dns.service, scans for DHCP servers (port 68).
+# wol-wifi generated the files from validated fields; here they are only tested and installed.
 WorkingDirectory=/opt/wol-server
 Environment=PYTHONUNBUFFERED=1 LC_ALL=C
 ExecStart=/usr/bin/python3 -m wolserver.dnsjob

@@ -1,8 +1,8 @@
 #!/bin/bash
-# Ablaufverfolgung beim ersten Start: schreibt alle 15 s den Zustand auf die Boot-Partition
-# (wol-trace.log, vorige Momentaufnahme in wol-trace.1.log). Hängt der Start, zeigt die letzte
-# Momentaufnahme, worauf systemd wartet – lesbar mit jedem Kartenleser.
-# Gestartet von cloud-init (bootcmd in user-data), beendet von firstboot.sh, spätestens nach 45 min.
+# Boot trace on the first boot: writes the state to the boot partition every 15 s
+# (wol-trace.log, previous snapshot in wol-trace.1.log). If the boot hangs, the last snapshot
+# shows what systemd is waiting for - readable with any card reader.
+# Started by cloud-init (bootcmd in user-data), stopped by firstboot.sh, at the latest after 45 min.
 set -u
 
 BOOT=/boot/firmware
@@ -12,14 +12,14 @@ end=$(( $(date +%s) + 45 * 60 ))
 section() { printf '\n===== %s\n' "$1"; }
 while [ "$(date +%s)" -lt "$end" ]; do
     {
-        echo "Momentaufnahme $(date '+%F %T'), seit dem Start $(cut -d' ' -f1 /proc/uptime) s, Last $(cut -d' ' -f1-3 /proc/loadavg)"
-        section "Wartende systemd-Aufträge"
+        echo "Snapshot $(date '+%F %T'), $(cut -d' ' -f1 /proc/uptime) s since boot, load $(cut -d' ' -f1-3 /proc/loadavg)"
+        section "Pending systemd jobs"
         systemctl list-jobs --no-pager --no-legend
-        section "Fehlgeschlagene Units"
+        section "Failed units"
         systemctl --failed --no-pager --no-legend --plain
-        section "Speicher"
+        section "Memory"
         free -m
-        section "Prozesse"
+        section "Processes"
         ps -eo pid,stat,etime,pcpu,rss,args --sort=-pcpu | head -15 | cut -c1-160
         section "Kernel"
         dmesg | tail -40

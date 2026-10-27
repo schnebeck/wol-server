@@ -1,4 +1,4 @@
-"""Geräte schlafen legen: SSH-Befehl, HTTP-Anfrage oder Sleep-on-LAN-Paket."""
+"""Put devices to sleep: SSH command, HTTP request or Sleep-on-LAN packet."""
 
 import logging
 import os
@@ -16,7 +16,7 @@ SSH_TIMEOUT = 25
 
 
 class SshIdentity:
-    """Eigenes Schlüsselpaar des WOL-Servers; der öffentliche Schlüssel wird in der GUI angezeigt."""
+    """The WOL-Server's own key pair; the public key is shown in the GUI."""
 
     def __init__(self, data_dir):
         self.dir = os.path.join(data_dir, ".ssh")
@@ -28,7 +28,7 @@ class SshIdentity:
             return
         keygen = shutil.which("ssh-keygen")
         if not keygen:
-            log.warning("ssh-keygen nicht gefunden – SSH-Schlafmethode nicht verfügbar")
+            log.warning("ssh-keygen not found - SSH sleep method not available")
             return
         os.makedirs(self.dir, mode=0o700, exist_ok=True)
         comment = "wol-server@%s" % socket.gethostname()
@@ -36,7 +36,7 @@ class SshIdentity:
             [keygen, "-q", "-t", "ed25519", "-N", "", "-C", comment, "-f", self.key],
             check=True, stdin=subprocess.DEVNULL, timeout=60,
         )
-        log.info("SSH-Schlüssel erzeugt: %s", self.key)
+        log.info("SSH key created: %s", self.key)
 
     def public_key(self):
         try:
@@ -47,7 +47,7 @@ class SshIdentity:
 
 
 def sleep_device(device, identity, source_ip=None):
-    """Liefert (ok, meldung)."""
+    """Returns (ok, message)."""
     method = device.get("sleep_method", "none")
     if method == "ssh":
         return _sleep_ssh(device, identity)
@@ -57,16 +57,16 @@ def sleep_device(device, identity, source_ip=None):
         wol.send_magic_packet(
             device["mac"], device["broadcast"], device["wol_port"], reverse=True, source_ip=source_ip
         )
-        return True, "Sleep-on-LAN-Paket gesendet"
-    return False, "Keine Schlaf-Methode eingerichtet"
+        return True, "Sleep-on-LAN packet sent"
+    return False, "No sleep method configured"
 
 
 def _sleep_ssh(device, identity):
     ssh = shutil.which("ssh")
     if not ssh:
-        return False, "ssh-Client nicht installiert"
+        return False, "ssh client not installed"
     if not os.path.exists(identity.key):
-        return False, "SSH-Schlüssel fehlt (%s)" % identity.key
+        return False, "SSH key missing (%s)" % identity.key
     cmd = [
         ssh, "-i", identity.key, "-p", str(device["ssh_port"]), "-l", device["ssh_user"],
         "-o", "BatchMode=yes",
@@ -84,14 +84,14 @@ def _sleep_ssh(device, identity):
             cmd, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=SSH_TIMEOUT
         )
     except subprocess.TimeoutExpired:
-        return True, "Keine Antwort nach %d s – Gerät schläft vermutlich bereits" % SSH_TIMEOUT
+        return True, "No response after %d s - device is probably already asleep" % SSH_TIMEOUT
     err = (res.stderr or res.stdout or "").strip().splitlines()
     detail = err[-1] if err else ""
     if res.returncode == 0:
-        return True, "SSH-Befehl ausgeführt"
+        return True, "SSH command executed"
     if res.returncode == 255 and ("closed by" in detail or "reset" in detail or "broken pipe" in detail.lower()):
-        return True, "Verbindung vom Gerät getrennt – geht vermutlich schlafen"
-    return False, "SSH fehlgeschlagen (Code %d): %s" % (res.returncode, detail or "keine Details")
+        return True, "Connection closed by the device - probably going to sleep"
+    return False, "SSH failed (code %d): %s" % (res.returncode, detail or "no details")
 
 
 def _sleep_http(device):
@@ -110,4 +110,4 @@ def _sleep_http(device):
         return False, "HTTP %d %s" % (e.code, e.reason)
     except (urllib.error.URLError, OSError) as e:
         reason = getattr(e, "reason", e)
-        return False, "HTTP-Anfrage fehlgeschlagen: %s" % reason
+        return False, "HTTP request failed: %s" % reason

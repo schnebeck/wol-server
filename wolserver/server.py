@@ -1,4 +1,4 @@
-"""HTTP-Server: JSON-API unter /api/ und die statische Web-GUI."""
+"""HTTP server: JSON API under /api/ and the static web GUI."""
 
 import datetime
 import errno
@@ -29,6 +29,8 @@ WEB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")
 STATIC = {
     "/": ("index.html", "text/html; charset=utf-8"),
     "/index.html": ("index.html", "text/html; charset=utf-8"),
+    "/i18n.js": ("i18n.js", "text/javascript; charset=utf-8"),
+    "/i18n-de.js": ("i18n-de.js", "text/javascript; charset=utf-8"),
     "/app.js": ("app.js", "text/javascript; charset=utf-8"),
     "/style.css": ("style.css", "text/css; charset=utf-8"),
     "/favicon.svg": ("favicon.svg", "image/svg+xml"),
@@ -36,7 +38,7 @@ STATIC = {
 COOKIE = "wol_session"
 CSRF_HEADER = "X-Requested-With"
 CSRF_VALUE = "wol-server"
-MAX_BODY = 256 * 1024  # Netzwerk-Sicherung mit vielen Reservierungen
+MAX_BODY = 256 * 1024  # network backup with many reservations
 SECURITY_HEADERS = {
     "X-Content-Type-Options": "nosniff",
     "X-Frame-Options": "DENY",
@@ -66,11 +68,11 @@ class Request:
 
 
 def captive_redirect(host_header, port):
-    """Im Hotspot fremde Hostnamen auf die GUI umleiten.
+    """In the hotspot, redirect foreign host names to the GUI.
 
-    Handys prüfen nach dem Verbinden z. B. connectivitycheck.gstatic.com oder captive.apple.com.
-    Da der Hotspot alle Namen auf den Pi auflöst, landen diese Anfragen hier; die Umleitung
-    lässt das Handy die Einrichtungsseite als Captive Portal öffnen.
+    After connecting, phones check e.g. connectivitycheck.gstatic.com or captive.apple.com.
+    Since the hotspot resolves all names to the Pi, these requests end up here; the redirect
+    makes the phone open the setup page as a captive portal.
     """
     host = (host_header or "").strip().lower()
     if host.startswith("["):
@@ -83,16 +85,16 @@ def captive_redirect(host_header, port):
 
 
 class AccessList:
-    """Erlaubte Quellnetze für GUI und API.
+    """Allowed source networks for GUI and API.
 
-    "auto" steht für localhost, IPv6-Link-local und die Netze, an denen der WOL-Server gerade hängt
-    (WLAN, LAN, VPN-Tunnel). Sie werden regelmäßig neu bestimmt, so passt sich die Liste neuen
-    Adressen und VPN-Netzen von selbst an. Feste Einträge gelten zusätzlich.
+    "auto" stands for localhost, IPv6 link-local and the networks the WOL-Server is currently attached
+    to (Wi-Fi, LAN, VPN tunnel). They are determined again regularly, so the list adapts to new
+    addresses and VPN networks by itself. Fixed entries apply in addition.
     """
 
     AUTO_FIXED = ("127.0.0.0/8", "::1/128", "fe80::/10")
-    REFRESH = 30  # s zwischen zwei Abfragen der Schnittstellen
-    RETRY = 5  # bei unbekanntem Absender früher erneut nachsehen (z. B. VPN gerade verbunden)
+    REFRESH = 30  # s between two queries of the interfaces
+    RETRY = 5  # look again sooner for an unknown sender (e.g. VPN just connected)
 
     def __init__(self, entries, source=netinfo.connected_networks, clock=time.monotonic):
         entries = [entries] if isinstance(entries, str) else list(entries)
@@ -115,7 +117,7 @@ class AccessList:
         try:
             found = self.source()
         except OSError as e:
-            log.warning("Netze der Schnittstellen nicht lesbar: %s", e)
+            log.warning("Cannot read the networks of the interfaces: %s", e)
             return
         self.dynamic = [(ipaddress.ip_network(n["network"]), n["interface"]) for n in found]
 
@@ -131,7 +133,7 @@ class AccessList:
             return self._match(ip)
 
     def describe(self):
-        """Für die Anzeige: [{"network": "192.168.1.0/24", "source": "wlan0"}, …]"""
+        """For display: [{"network": "192.168.1.0/24", "source": "wlan0"}, ...]"""
         with self.lock:
             self._refresh(self.REFRESH)
             entries = self.fixed + [(n, src) for n, src in self.dynamic if n not in (f for f, _ in self.fixed)]
@@ -160,7 +162,7 @@ class App:
         try:
             self.identity.ensure()
         except Exception:  # noqa: BLE001
-            log.exception("Konnte SSH-Schlüssel nicht erzeugen")
+            log.exception("Could not create SSH key")
         self.status = StatusMonitor(config["status_cache_seconds"])
         self.scheduler = Scheduler(self.store, self.run_action)
         self.started = time.time()
@@ -194,7 +196,7 @@ class App:
             R("POST", r"/api/vpn/config", self.api_vpn_config),
             R("PUT", r"/api/vpn", self.api_vpn_enable),
             R("DELETE", r"/api/vpn", self.api_vpn_remove),
-            # DHCP und DNS (über wol-wifi, ausgeführt von wol-dns-apply.service)
+            # DHCP and DNS (via wol-wifi, carried out by wol-dns-apply.service)
             R("GET", r"/api/net", self.api_net),
             R("GET", r"/api/net/config", self.api_net_config),
             R("PUT", r"/api/net/settings", self.api_net_settings),
@@ -240,7 +242,7 @@ class App:
                 if m == method:
                     return handler, match.groupdict(), needs_auth
                 allowed = True
-        raise ApiError(405 if allowed else 404, "Methode nicht erlaubt" if allowed else "Nicht gefunden")
+        raise ApiError(405 if allowed else 404, "Method not allowed" if allowed else "Not found")
 
     def is_allowed(self, ip):
         return self.access.allows(ip)
@@ -252,10 +254,10 @@ class App:
         self.scheduler.stop()
         self.status.shutdown()
 
-    # -- Aktionen (genutzt von API und Zeitplaner) --
+    # -- Actions (used by API and scheduler) --
 
     def wol_source(self):
-        """LAN/WLAN-Interface für Magic Packets – pro Aktion neu ermittelt (DHCP, WLAN-Reconnect)."""
+        """LAN/Wi-Fi interface for magic packets - determined anew for each action (DHCP, Wi-Fi reconnect)."""
         try:
             return netinfo.lan_source(self.config["wol_interface"])
         except OSError:
@@ -265,20 +267,22 @@ class App:
         try:
             iface = self.wol_source()
             if iface is None and self.config["wol_interface"]:
-                log.warning("Interface %s hat keine IPv4-Adresse", self.config["wol_interface"])
+                log.warning("Interface %s has no IPv4 address", self.config["wol_interface"])
             source_ip = iface["address"] if iface else None
-            via = " über %s" % iface["name"] if iface else ""
             if source_ip == wifi.HOTSPOT_ADDRESS:
-                ok, message = False, "Nicht ausgeführt: Der Pi ist nicht im Heimnetz (Einrichtungs-Hotspot aktiv)"
+                ok, message = False, "Not executed: the Pi is not on the home network (setup hotspot active)"
             elif action == "wake":
                 wol.send_magic_packet(
                     device["mac"], device["broadcast"], device["wol_port"], source_ip=source_ip
                 )
-                ok, message = True, "Magic Packet an %s%s gesendet" % (device["mac"], via)
+                if iface:
+                    ok, message = True, "Magic packet sent to %s via %s" % (device["mac"], iface["name"])
+                else:
+                    ok, message = True, "Magic packet sent to %s" % device["mac"]
             else:
                 ok, message = power.sleep_device(device, self.identity, source_ip=source_ip)
         except (OSError, ValueError) as e:
-            ok, message = False, "Fehler: %s" % e
+            ok, message = False, "Error: %s" % e
         self.status.invalidate(device["id"])
         (log.info if ok else log.warning)("%s %s (%s): %s", action, device["name"], source, message)
         self.store.add_event(
@@ -300,16 +304,16 @@ class App:
         if not self.auth.required:
             return 200, {"ok": True}
         if self.limiter.blocked(req.client):
-            raise ApiError(429, "Zu viele Fehlversuche – bitte in einigen Minuten erneut versuchen")
+            raise ApiError(429, "Too many failed attempts - try again in a few minutes")
         password = req.body.get("password")
         if isinstance(password, str) and self.auth.check_password(password):
             self.limiter.reset(req.client)
             req.cookies.append(self._session_cookie(self.auth.make_token(), self.auth.session_seconds, req.secure))
             return 200, {"ok": True}
         self.limiter.fail(req.client)
-        log.warning("Fehlgeschlagener Login von %s", req.client)
+        log.warning("Failed login from %s", req.client)
         time.sleep(1)
-        raise ApiError(401, "Falsches Passwort")
+        raise ApiError(401, "Wrong password")
 
     def api_logout(self, req):
         req.cookies.append(self._session_cookie("", 0, req.secure))
@@ -323,16 +327,16 @@ class App:
     def api_password(self, req):
         if self.auth.required and not self.auth.check_password(str(req.body.get("current", ""))):
             time.sleep(1)
-            raise ApiError(403, "Aktuelles Passwort ist falsch")
+            raise ApiError(403, "Current password is wrong")
         new = req.body.get("new")
         if not isinstance(new, str):
-            raise ApiError(400, "Neues Passwort fehlt")
+            raise ApiError(400, "New password missing")
         try:
             self.auth.set_password(new)
         except ValueError as e:
             raise ApiError(400, str(e)) from None
         req.cookies.append(self._session_cookie(self.auth.make_token(), self.auth.session_seconds, req.secure))
-        log.info("Passwort geändert von %s", req.client)
+        log.info("Password changed by %s", req.client)
         return 200, {"ok": True}
 
     def api_info(self, req):
@@ -372,12 +376,12 @@ class App:
             "port": self.config["port"],
         }
 
-    # -- Geräte --
+    # -- Devices --
 
     def _device_or_404(self, item_id):
         device = self.store.get("devices", item_id)
         if device is None:
-            raise ApiError(404, "Gerät nicht gefunden")
+            raise ApiError(404, "Device not found")
         return device
 
     def api_devices(self, req):
@@ -401,21 +405,21 @@ class App:
 
     def api_device_delete(self, req, item_id):
         if not self.store.delete("devices", item_id):
-            raise ApiError(404, "Gerät nicht gefunden")
+            raise ApiError(404, "Device not found")
         self.status.invalidate(item_id)
         return 200, {"ok": True}
 
     def api_device_action(self, req, item_id, action):
         device = self._device_or_404(item_id)
         if action == "sleep" and device["sleep_method"] == "none":
-            raise ApiError(400, "Für dieses Gerät ist keine Schlaf-Methode eingerichtet")
-        ok, message = self.run_action(device, action, "manuell")
+            raise ApiError(400, "No sleep method is configured for this device")
+        ok, message = self.run_action(device, action, "manual")
         return (200 if ok else 502), {"ok": ok, "message": message}
 
     def api_status(self, req):
         return 200, {"status": self.status.get(self.store.list("devices")), "checked": time.time()}
 
-    # -- Zeitpläne --
+    # -- Schedules --
 
     def _validate_schedule(self, body):
         try:
@@ -440,16 +444,16 @@ class App:
 
     def api_schedule_update(self, req, item_id):
         if self.store.get("schedules", item_id) is None:
-            raise ApiError(404, "Zeitplan nicht gefunden")
+            raise ApiError(404, "Schedule not found")
         updated = self.store.update("schedules", item_id, self._validate_schedule(req.body))
         return 200, self._with_next(updated)
 
     def api_schedule_delete(self, req, item_id):
         if not self.store.delete("schedules", item_id):
-            raise ApiError(404, "Zeitplan nicht gefunden")
+            raise ApiError(404, "Schedule not found")
         return 200, {"ok": True}
 
-    # -- Protokoll --
+    # -- Log --
 
     def api_events(self, req):
         return 200, {"events": self.store.list_events()}
@@ -458,15 +462,15 @@ class App:
         self.store.clear_events()
         return 200, {"ok": True}
 
-    # -- WLAN (über den Dienst wol-wifi) --
+    # -- Wi-Fi (via the wol-wifi service) --
 
     def _wifi(self, payload, timeout=35):
         try:
             res = wifi.request(self.config["wifi_socket"], payload, timeout)
         except (OSError, ValueError):
-            raise ApiError(503, "WLAN-Verwaltung nicht erreichbar (Dienst wol-wifi)") from None
+            raise ApiError(503, "Wi-Fi management not reachable (wol-wifi service)") from None
         if not res.get("ok"):
-            raise ApiError(400, res.get("error") or "WLAN-Befehl fehlgeschlagen")
+            raise ApiError(400, res.get("error") or "Wi-Fi command failed")
         return res
 
     def api_wifi(self, req):
@@ -479,7 +483,7 @@ class App:
         b = req.body
         res = self._wifi({"cmd": "connect", "ssid": b.get("ssid"), "password": b.get("password") or "",
                           "hidden": bool(b.get("hidden")), "ipv4": b.get("ipv4")})
-        log.info("WLAN „%s“ eingerichtet von %s", b.get("ssid"), req.client)
+        log.info("Wi-Fi \"%s\" set up by %s", b.get("ssid"), req.client)
         return 200, res
 
     def api_wifi_forget(self, req):
@@ -488,7 +492,7 @@ class App:
     def api_wifi_hotspot(self, req):
         return 200, self._wifi({"cmd": "hotspot_password", "password": req.body.get("password") or ""})
 
-    # -- VPN (ebenfalls über wol-wifi, der die Einrichtung an wol-vpn.service übergibt) --
+    # -- VPN (also via wol-wifi, which hands the setup over to wol-vpn.service) --
 
     def api_vpn(self, req):
         return 200, self._wifi({"cmd": "vpn_status"}, timeout=10)["status"]
@@ -497,29 +501,29 @@ class App:
         b = req.body
         res = self._wifi({"cmd": "vpn_upload", "config": b.get("config"),
                           "username": b.get("username") or "", "password": b.get("password") or ""}, timeout=15)
-        log.info("VPN-Konfiguration hochgeladen von %s", req.client)
+        log.info("VPN configuration uploaded by %s", req.client)
         return 200, res
 
     def api_vpn_enable(self, req):
         enabled = bool(req.body.get("enabled"))
         res = self._wifi({"cmd": "vpn_enable", "enabled": enabled}, timeout=10)
-        log.info("VPN %s von %s", "eingeschaltet" if enabled else "ausgeschaltet", req.client)
+        log.info("VPN %s by %s", "switched on" if enabled else "switched off", req.client)
         return 200, res
 
     def api_vpn_remove(self, req):
         res = self._wifi({"cmd": "vpn_remove"}, timeout=10)
-        log.info("VPN-Konfiguration entfernt von %s", req.client)
+        log.info("VPN configuration removed by %s", req.client)
         return 200, res
 
-    # -- DHCP und DNS --
+    # -- DHCP and DNS --
 
     def _net(self, cmd, timeout=15, **args):
         try:
             res = wifi.request(self.config["wifi_socket"], dict(args, cmd=cmd), timeout)
         except (OSError, ValueError):
-            raise ApiError(503, "Netzwerk-Verwaltung nicht erreichbar (Dienst wol-wifi)") from None
+            raise ApiError(503, "Network management not reachable (wol-wifi service)") from None
         if not res.get("ok"):
-            raise ApiError(400, res.get("error") or "Netzwerk-Befehl fehlgeschlagen")
+            raise ApiError(400, res.get("error") or "Network command failed")
         res.pop("ok", None)
         return res
 
@@ -530,7 +534,7 @@ class App:
         return _read_text(self._net_logged_path()) or ""
 
     def _log_net_job(self, status):
-        """Abgeschlossene Netzwerk-Änderungen einmal ins Protokoll schreiben."""
+        """Write completed network changes to the log once."""
         job = status.get("job") or {}
         if job.get("state") not in ("ok", "failed") or job.get("action") not in ("apply", "release"):
             return
@@ -545,11 +549,11 @@ class App:
         change = status.get("last_change") or {}
         if job["state"] == "ok" and change.get("request") == job["id"] and change.get("changes"):
             items = change["changes"]
-            message = "; ".join(items[:4]) + (" (+%d weitere)" % (len(items) - 4) if len(items) > 4 else "")
+            message = "; ".join(items[:4]) + (" (+%d more)" % (len(items) - 4) if len(items) > 4 else "")
         else:
             message = job.get("message") or ""
-        self.store.add_event(device_id=None, device="Netzwerk", action="net",
-                             source=change.get("client") or "manuell", ok=job["state"] == "ok", message=message)
+        self.store.add_event(device_id=None, device="Network", action="net",
+                             source=change.get("client") or "manual", ok=job["state"] == "ok", message=message)
 
     def api_net(self, req):
         status = self._net("net_status", timeout=10)
@@ -591,7 +595,7 @@ class App:
 
     def api_net_apply(self, req):
         res = self._net("net_apply", client=req.client)
-        log.info("Netzwerk-Änderungen übernommen von %s: %s", req.client, "; ".join(res.get("changes") or []))
+        log.info("Network changes applied by %s: %s", req.client, "; ".join(res.get("changes") or []))
         return 200, res
 
     def api_net_discard(self, req):
@@ -614,7 +618,7 @@ class App:
         b = req.body
         res = self._net("net_approve", mac=mac, name=b.get("name"), ip=b.get("ip"), comment=b.get("comment"),
                         client=req.client)
-        log.info("Gerät %s freigegeben von %s", mac, req.client)
+        log.info("Device %s approved by %s", mac, req.client)
         return 200, res
 
     def api_net_ignore(self, req, mac):
@@ -650,10 +654,10 @@ class App:
     def api_net_test(self, req):
         server, port, cfg = self._dns_target()
         if not cfg["dns"]["enabled"]:
-            raise ApiError(400, "DNS ist ausgeschaltet. Testabfragen erfordern einen eingeschalteten und übernommenen DNS-Dienst.")
+            raise ApiError(400, "DNS is switched off. Test queries require a switched-on and applied DNS service.")
         text = req.body.get("query")
         if not isinstance(text, str):
-            raise ApiError(400, "Bitte einen Namen oder eine IP-Adresse eingeben")
+            raise ApiError(400, "Enter a name or an IP address")
         query = text.strip()
         if query and "." not in query and ":" not in query:
             query = "%s.%s" % (query, cfg["dns"]["domain"])
@@ -686,10 +690,10 @@ class App:
 
     def api_net_static_ip(self, req):
         res = self._net("net_static_ip", timeout=40, enabled=bool(req.body.get("enabled")))
-        log.info("%s (von %s)", res.get("message"), req.client)
+        log.info("%s (by %s)", res.get("message"), req.client)
         return 200, res
 
-    # -- statische Dateien --
+    # -- static files --
 
     def static_file(self, name):
         path = os.path.join(WEB_DIR, name)
@@ -717,7 +721,7 @@ class Handler(BaseHTTPRequestHandler):
         self._handle("GET")
 
     def do_HEAD(self):
-        self._head_only = True  # Handler-Instanz lebt pro Keep-Alive-Verbindung
+        self._head_only = True  # one handler instance lives per keep-alive connection
         try:
             self._handle("GET")
         finally:
@@ -756,16 +760,16 @@ class Handler(BaseHTTPRequestHandler):
             ip = self._client_ip()
             via_hotspot = self._via_hotspot()
             if via_hotspot:
-                # Hotspot-Clients sind immer erlaubt (sonst wäre die Einrichtung unmöglich).
+                # Hotspot clients are always allowed (otherwise setup would be impossible).
                 location = captive_redirect(self.headers.get("Host"), self.server.server_address[1])
                 if location:
                     if self._read_body() is None:
                         return
                     return self._send(302, b"", None, {"Location": location, "Cache-Control": "no-store"})
             elif not self.app.is_allowed(ip):
-                log.warning("Zugriff verweigert für %s", ip)
+                log.warning("Access denied for %s", ip)
                 self.close_connection = True
-                return self._send(403, b"Zugriff nur aus dem lokalen Netz / VPN erlaubt.\n",
+                return self._send(403, b"Access is only allowed from the local network / VPN.\n",
                                   "text/plain; charset=utf-8")
             raw = self._read_body()
             if raw is None:
@@ -778,18 +782,18 @@ class Handler(BaseHTTPRequestHandler):
                 return self._handle_api(method, path, raw, str(ip), via_hotspot)
             if method == "GET" and path in STATIC:
                 return self._send_static(*STATIC[path])
-            self._send(404, b"Nicht gefunden\n", "text/plain; charset=utf-8")
+            self._send(404, b"Not found\n", "text/plain; charset=utf-8")
         except (BrokenPipeError, ConnectionResetError):
             pass
         except Exception:  # noqa: BLE001
-            log.exception("Unerwarteter Fehler bei %s %s", method, self.path)
+            log.exception("Unexpected error in %s %s", method, self.path)
             try:
-                self._send_json(500, {"error": "Interner Serverfehler"})
+                self._send_json(500, {"error": "Internal server error"})
             except OSError:
                 pass
 
     def _https_location(self):
-        """Ziel der Umleitung auf HTTPS oder None (schon HTTPS, abgeschaltet, kein gültiges Zertifikat)."""
+        """Target of the redirect to HTTPS, or None (already HTTPS, switched off, no valid certificate)."""
         https_port = getattr(self.server, "https_port", None)
         if self.secure or not self.app.config["https_redirect"] or not https_port:
             return None
@@ -811,7 +815,7 @@ class Handler(BaseHTTPRequestHandler):
             length = -1
         if length < 0 or length > MAX_BODY:
             self.close_connection = True
-            self._send_json(413, {"error": "Anfrage zu groß"})
+            self._send_json(413, {"error": "Request too large"})
             return None
         return self.rfile.read(length) if length else b""
 
@@ -820,20 +824,20 @@ class Handler(BaseHTTPRequestHandler):
         try:
             handler, params, needs_auth = self.app.resolve(method, path)
             if method != "GET" and self.headers.get(CSRF_HEADER) != CSRF_VALUE:
-                raise ApiError(403, "Ungültige Anfrage (CSRF-Schutz)")
+                raise ApiError(403, "Invalid request (CSRF protection)")
             authenticated = True
             if self.app.auth.required:
                 authenticated = self.app.auth.verify_token(self._cookie(COOKIE))
             if needs_auth and not authenticated:
-                raise ApiError(401, "Anmeldung erforderlich")
+                raise ApiError(401, "Login required")
             body = {}
             if raw:
                 try:
                     body = json.loads(raw.decode("utf-8"))
                 except (UnicodeDecodeError, ValueError):
-                    raise ApiError(400, "Ungültiges JSON") from None
+                    raise ApiError(400, "Invalid JSON") from None
                 if not isinstance(body, dict):
-                    raise ApiError(400, "JSON-Objekt erwartet")
+                    raise ApiError(400, "JSON object expected")
             req = Request(body, client, authenticated, via_hotspot, self.secure)
             status, payload = handler(req, **params)
         except ApiError as e:
@@ -895,22 +899,22 @@ class Server(ThreadingHTTPServer):
 
 
 class TlsServer(Server):
-    """HTTPS: Der TLS-Handshake läuft im Thread der Verbindung, nicht in der Annahmeschleife."""
+    """HTTPS: the TLS handshake runs in the connection's thread, not in the accept loop."""
 
     def finish_request(self, request, client_address):
         context = self.app.tls.current()
         if context is None:
-            return  # noch kein Zertifikat: Verbindung schließen
+            return  # no certificate yet: close the connection
         request.settimeout(Handler.timeout)
         try:
             wrapped = context.wrap_socket(request, server_side=True)
         except (ssl.SSLError, OSError) as e:
-            log.debug("TLS-Handshake mit %s gescheitert: %s", client_address[0], e)
+            log.debug("TLS handshake with %s failed: %s", client_address[0], e)
             return
         try:
             super().finish_request(wrapped, client_address)
         finally:
-            # wrap_socket hat den ursprünglichen Socket abgekoppelt; socketserver schließt nur diesen
+            # wrap_socket detached the original socket; socketserver only closes that one
             self.shutdown_request(wrapped)
 
 
@@ -921,7 +925,7 @@ def _bind(cls, app, port):
     except OSError as e:
         if host != "::" or e.errno == errno.EADDRINUSE:
             raise
-        log.warning("IPv6 nicht verfügbar (%s) – lausche nur auf IPv4", e)
+        log.warning("IPv6 not available (%s) - listening on IPv4 only", e)
         server = cls("0.0.0.0", port, app)
     https_port = int(app.config["https_port"])
     server.https_port = https_port if cls is Server else None
@@ -933,12 +937,12 @@ def create_server(app):
 
 
 def create_https_server(app):
-    """HTTPS-Server oder None (abgeschaltet oder Port nicht verfügbar)."""
+    """HTTPS server or None (switched off or port not available)."""
     port = int(app.config["https_port"])
     if not port:
         return None
     try:
         return _bind(TlsServer, app, port)
     except OSError as e:
-        log.warning("HTTPS auf Port %d nicht möglich: %s", port, e)
+        log.warning("HTTPS on port %d not possible: %s", port, e)
         return None

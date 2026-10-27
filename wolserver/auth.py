@@ -1,4 +1,4 @@
-"""Passwort-Login mit HMAC-signierten Session-Cookies."""
+"""Password login with HMAC-signed session cookies."""
 
 import base64
 import hashlib
@@ -8,7 +8,7 @@ import os
 import threading
 import time
 
-ITERATIONS = 200_000  # auf dem Pi Zero W ca. 1 s pro Login – bewusst langsam
+ITERATIONS = 200_000  # about 1 s per login on the Pi Zero W - deliberately slow
 MIN_PASSWORD_LENGTH = 8
 
 
@@ -38,7 +38,7 @@ def verify_password(password, stored):
 
 
 class Auth:
-    """Speichert Passwort-Hash und Cookie-Secret in <data_dir>/auth.json (Modus 0600)."""
+    """Stores password hash and cookie secret in <data_dir>/auth.json (mode 0600)."""
 
     def __init__(self, data_dir, session_days=30):
         self.path = os.path.join(data_dir, "auth.json")
@@ -75,7 +75,7 @@ class Auth:
     @property
     def required(self):
         with self._lock:
-            self._reload()  # Passwort kann per CLI geändert worden sein
+            self._reload()  # the password may have been changed via the CLI
             return bool(self._data.get("password_hash"))
 
     def check_password(self, password):
@@ -85,9 +85,9 @@ class Auth:
 
     def set_password(self, password):
         if len(password) < MIN_PASSWORD_LENGTH:
-            raise ValueError("Passwort muss mindestens %d Zeichen lang sein" % MIN_PASSWORD_LENGTH)
+            raise ValueError("Password must be at least %d characters long" % MIN_PASSWORD_LENGTH)
         with self._lock:
-            # neues Secret => alle bestehenden Sessions werden ungültig
+            # new secret => all existing sessions become invalid
             self._write({"password_hash": hash_password(password), "secret": _b64(os.urandom(32))})
 
     def _sign(self, message):
@@ -112,7 +112,7 @@ class Auth:
 
 
 class LoginLimiter:
-    """Einfache Brute-Force-Bremse: nach N Fehlversuchen pro IP eine Sperrzeit."""
+    """Simple brute-force brake: a lockout period after N failed attempts per IP."""
 
     def __init__(self, max_failures=5, window=300, lockout=300):
         self.max_failures, self.window, self.lockout = max_failures, window, lockout

@@ -1,13 +1,13 @@
 [Unit]
-Description=WOL-Server: VPN-Auftrag aus der Web-GUI ausführen
+Description=WOL-Server: run VPN job from the web GUI
 Documentation=file:///opt/wol-server/README.md
 After=network-online.target
 
 [Service]
 Type=oneshot
-# root: installiert openvpn, schreibt /etc/openvpn und steuert openvpn-client@wol.
-# Die Konfiguration hat wol-wifi vorher geprüft (keine Skripte, Plugins oder Dateiverweise).
+# root: installs openvpn, writes /etc/openvpn and controls openvpn-client@wol.
+# wol-wifi has validated the configuration beforehand (no scripts, plugins or file references).
 ExecStart=/bin/bash /opt/wol-server/deploy/vpn-apply.sh
-# apt auf dem Zero braucht Zeit
+# apt takes time on the Zero
 TimeoutStartSec=20min
 Nice=5

@@ -90,7 +90,7 @@ class ApiTest(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertTrue(res["ok"])
         _, events = self.call("GET", "/api/events")
-        self.assertEqual(events["events"][0]["source"], "manuell")
+        self.assertEqual(events["events"][0]["source"], "manual")
         status, res = self.call("POST", "/api/devices/%s/sleep" % dev["id"])
         self.assertEqual(status, 400)
 
@@ -124,7 +124,7 @@ class ApiTest(unittest.TestCase):
         self.assertEqual(resp.status, 403)
 
     def test_hotspot_clients_and_captive_portal(self):
-        # Anfragen, die an der Hotspot-Adresse ankommen: immer erlaubt, fremde Hosts umgeleitet
+        # requests arriving at the hotspot address: always allowed, foreign hosts redirected
         from unittest import mock
 
         from wolserver import wifi
@@ -163,12 +163,12 @@ class AccessListTest(unittest.TestCase):
         for allowed in ("192.168.1.12", "127.0.0.1", "::1", "fe80::1", "172.20.3.4"):
             self.assertTrue(acl.allows(ip(allowed)), allowed)
         self.assertFalse(acl.allows(ip("10.1.1.7")))
-        # VPN verbindet sich: Ein unbekannter Absender löst nach RETRY eine neue Abfrage aus
+        # VPN connects: an unknown sender triggers a new query after RETRY
         nets.append({"network": "10.1.1.0/24", "interface": "tun0", "kind": "vpn"})
-        self.assertFalse(acl.allows(ip("10.1.1.7")))  # gerade erst nachgesehen
+        self.assertFalse(acl.allows(ip("10.1.1.7")))  # just looked
         now[0] += AccessList.RETRY
         self.assertTrue(acl.allows(ip("10.1.1.7")))
-        # Bekannte Absender lösen keine Abfrage aus, solange REFRESH nicht abgelaufen ist
+        # known senders trigger no query as long as REFRESH has not expired
         before = len(calls)
         acl.allows(ip("192.168.1.12"))
         self.assertEqual(len(calls), before)
@@ -176,8 +176,8 @@ class AccessListTest(unittest.TestCase):
         self.assertEqual(sources["10.1.1.0/24"], "tun0")
         self.assertEqual(sources["172.20.0.0/16"], "config")
         self.assertEqual(sources["127.0.0.0/8"], "auto")
-        # Ohne "auto": nur die festen Einträge, keine Abfrage der Schnittstellen
-        fixed = AccessList(["192.168.1.0/24"], source=lambda: self.fail("keine Abfrage erwartet"))
+        # without "auto": only the fixed entries, no query of the interfaces
+        fixed = AccessList(["192.168.1.0/24"], source=lambda: self.fail("no query expected"))
         self.assertFalse(fixed.allows(ip("127.0.0.1")))
         self.assertTrue(fixed.allows(ip("192.168.1.5")))
 

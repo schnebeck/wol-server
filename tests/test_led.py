@@ -11,7 +11,7 @@ from .test_wifi import CLIENT_IP, FakeNM, make_manager
 
 
 class LedTest(unittest.TestCase):
-    """Gegen ein nachgebautes /sys/class/leds/ACT."""
+    """Against a mocked /sys/class/leds/ACT."""
 
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
@@ -62,7 +62,7 @@ class LedTest(unittest.TestCase):
         self.assertEqual(self.read("trigger"), "geändert")
 
     def test_own_trigger_is_not_normal(self):
-        # z. B. nach Absturz des Dienstes oder wenn firstboot.sh die LED schon blinken lässt
+        # e.g. after a crash of the service or when firstboot.sh already makes the LED blink
         self.write("trigger", "none mmc0 [timer] heartbeat actpwr")
         self.assertEqual(self.make().normal, "actpwr")
         self.write("trigger", "[none] mmc0 timer")  # lowpower.sh --led-off
@@ -70,12 +70,12 @@ class LedTest(unittest.TestCase):
 
     def test_missing_or_readonly_led(self):
         status = led.StatusLed(dirs=(os.path.join(self.tmp, "fehlt"),), marker=self.marker)
-        status.update("hotspot")  # kein Fehler
+        status.update("hotspot")  # no error
         status = self.make()
         with mock.patch.object(status, "_write", side_effect=PermissionError("read-only")):
             status.update("hotspot")
         self.assertIsNone(status.path)
-        status.update("offline")  # abgeschaltet, kein weiterer Versuch
+        status.update("offline")  # disabled, no further attempt
 
     def test_manager_drives_led(self):
         fake = FakeNM(["Heim"])
@@ -91,7 +91,7 @@ class LedTest(unittest.TestCase):
 
     def test_manager_without_led(self):
         mgr, _ = make_manager(FakeNM(), self.tmp)
-        mgr.tick()  # led=None: keine Ausnahme
+        mgr.tick()  # led=None: no exception
 
 
 if __name__ == "__main__":

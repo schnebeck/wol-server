@@ -1,12 +1,12 @@
 "use strict";
 
-// ---------- Hilfsfunktionen ----------
+// ---------- Helpers ----------
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
-const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
-const ACTIONS = { wake: "Aufwecken", sleep: "Schlafen legen", net: "Änderung" };
+const DAYS = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"].map((d) => t(d));
+const ACTIONS = { wake: t("Wake"), sleep: t("Put to sleep"), net: t("Change") };
 const SLEEP_METHODS = { none: "–", ssh: "SSH", http: "HTTP", sol: "Sleep-on-LAN" };
 const STATUS_INTERVAL = 10000;
 
@@ -85,7 +85,7 @@ async function api(method, path, body) {
   try {
     res = await fetch(path, opts);
   } catch (e) {
-    throw new HttpError(0, "Server nicht erreichbar");
+    throw new HttpError(0, t("Server not reachable"));
   }
   let data = null;
   try {
@@ -94,15 +94,18 @@ async function api(method, path, body) {
     data = null;
   }
   if (res.status === 401 && path !== "/api/login") showLogin();
+  // Server messages are English; show them in the chosen language
+  if (data && typeof data.message === "string") data.message = tr(data.message);
+  if (data && typeof data.error === "string") data.error = tr(data.error);
   if (!res.ok && !(data && "ok" in data)) {
-    throw new HttpError(res.status, (data && data.error) || `Fehler ${res.status}`);
+    throw new HttpError(res.status, (data && data.error) || t("Error {0}", res.status));
   }
   return data;
 }
 
 function toast(message, kind = "info") {
   const node = el("div", { class: `toast ${kind}`, role: "status" },
-    kind === "error" ? icon("x") : icon("check"), el("span", {}, message));
+    kind === "error" ? icon("x") : icon("check"), el("span", {}, tr(message)));
   $("#toasts").append(node);
   setTimeout(() => node.classList.add("leaving"), 4200);
   setTimeout(() => node.remove(), 4600);
@@ -111,8 +114,8 @@ function toast(message, kind = "info") {
 function confirmDialog(title, text, okLabel = "OK", danger = false) {
   const dlg = $("#confirm-dialog");
   $("#confirm-title").textContent = title;
-  // Text oder Liste (z. B. die Änderungen vor dem Übernehmen)
-  $("#confirm-text").replaceChildren(Array.isArray(text) ? el("ul", { class: "change-list" }, text.map((t) => el("li", {}, t))) : text);
+  // Text or list (e.g. the changes before applying)
+  $("#confirm-text").replaceChildren(Array.isArray(text) ? el("ul", { class: "change-list" }, text.map((item) => el("li", {}, tr(item)))) : text);
   const ok = $("#confirm-ok");
   ok.textContent = okLabel;
   ok.className = danger ? "btn danger" : "btn primary";
@@ -125,7 +128,7 @@ function confirmDialog(title, text, okLabel = "OK", danger = false) {
 
 function showError(form, message) {
   const box = $(".form-error", form);
-  box.textContent = message || "";
+  box.textContent = tr(message) || "";
   box.hidden = !message;
 }
 
@@ -140,22 +143,22 @@ async function busy(button, fn) {
   }
 }
 
-// Server liefert lokale Zeit ohne Zone ("2026-10-24T07:30"); Vergleich daher über Strings.
+// The server sends local time without a zone ("2026-10-24T07:30"), so compare strings.
 function fmtNext(iso) {
   if (!iso) return "";
   const [date, time] = iso.split("T");
   const today = (state.serverNow || "").slice(0, 10);
-  if (date === today) return `heute ${time}`;
+  if (date === today) return t("today {0}", time);
   const d = new Date(`${date}T00:00:00`);
-  const t = new Date(`${today}T00:00:00`);
-  const diff = Math.round((d - t) / 86400000);
-  if (diff === 1) return `morgen ${time}`;
-  return `${DAYS[(d.getDay() + 6) % 7]}, ${d.getDate()}.${d.getMonth() + 1}. ${time}`;
+  const now = new Date(`${today}T00:00:00`);
+  const diff = Math.round((d - now) / 86400000);
+  if (diff === 1) return t("tomorrow {0}", time);
+  return `${DAYS[(d.getDay() + 6) % 7]}, ${d.toLocaleDateString(I18N.locale, { day: "numeric", month: "numeric" })} ${time}`;
 }
 
 function fmtDateTime(ts) {
   const d = new Date(ts * 1000);
-  return d.toLocaleString("de-DE", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  return d.toLocaleString(I18N.locale, { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
 function fmtDuration(seconds) {
@@ -168,15 +171,15 @@ function fmtDuration(seconds) {
 
 function fmtDays(days) {
   const key = days.join(",");
-  if (key === "0,1,2,3,4,5,6") return "täglich";
-  if (key === "0,1,2,3,4") return "werktags";
-  if (key === "5,6") return "am Wochenende";
+  if (key === "0,1,2,3,4,5,6") return t("daily");
+  if (key === "0,1,2,3,4") return t("weekdays");
+  if (key === "5,6") return t("at the weekend");
   return days.map((d) => DAYS[d]).join(", ");
 }
 
 const deviceById = (id) => state.devices.find((d) => d.id === id);
 
-// ---------- Anmeldung ----------
+// ---------- Sign-in ----------
 
 function showLogin() {
   $("#boot").hidden = true;
@@ -245,7 +248,7 @@ async function loadSchedules() {
   state.serverNow = data.now;
 }
 
-// ---------- Geräte ----------
+// ---------- Devices ----------
 
 let statusBusy = false;
 
@@ -257,7 +260,7 @@ async function refreshStatus() {
     state.status = data.status;
     const online = Object.values(data.status).filter((s) => s === true).length;
     $("#status-line").textContent =
-      `${online} von ${state.devices.length} online · geprüft ${new Date(data.checked * 1000).toLocaleTimeString("de-DE")}`;
+      t("{0} of {1} online · checked {2}", online, state.devices.length, new Date(data.checked * 1000).toLocaleTimeString(I18N.locale));
     renderDevices();
   } catch (e) {
     if (e.status !== 401) $("#status-line").textContent = e.message;
@@ -277,9 +280,9 @@ function renderDevices() {
   if (!state.devices.length) {
     $("#status-line").textContent = " ";
     list.replaceChildren(el("div", { class: "empty" },
-      el("h3", {}, "Keine Geräte"),
-      el("p", { class: "muted" }, "Geräte werden über ihre MAC-Adresse per Wake-on-LAN aufgeweckt."),
-      el("button", { class: "btn primary", type: "button", onclick: () => openDeviceDialog() }, "Erstes Gerät anlegen")));
+      el("h3", {}, t("No devices")),
+      el("p", { class: "muted" }, t("Devices are woken via Wake-on-LAN using their MAC address.")),
+      el("button", { class: "btn primary", type: "button", onclick: () => openDeviceDialog() }, t("Add first device"))));
     return;
   }
   list.replaceChildren(...state.devices.map(deviceCard));
@@ -288,7 +291,7 @@ function renderDevices() {
 function deviceCard(d) {
   const st = state.status[d.id];
   const cls = st === true ? "online" : st === false ? "offline" : "unknown";
-  const label = st === true ? "Online" : st === false ? "Offline" : d.host ? "Prüfe …" : "Kein Host";
+  const label = st === true ? t("Online") : st === false ? t("Offline") : d.host ? t("Checking …") : t("No host");
   const next = nextActionFor(d.id);
   const canSleep = d.sleep_method !== "none";
   return el("article", { class: `card device ${cls}` },
@@ -297,25 +300,25 @@ function deviceCard(d) {
       el("div", { class: "card-title" },
         el("h3", {}, d.name),
         el("span", { class: `status-label ${cls}` }, label)),
-      el("button", { class: "icon-btn", type: "button", title: "Bearbeiten", "aria-label": `${d.name} bearbeiten`, onclick: () => openDeviceDialog(d) }, icon("edit"))),
+      el("button", { class: "icon-btn", type: "button", title: t("Edit"), "aria-label": t("Edit {0}", d.name), onclick: () => openDeviceDialog(d) }, icon("edit"))),
     el("dl", { class: "meta" },
       el("div", {}, el("dt", {}, "MAC"), el("dd", { class: "mono" }, d.mac)),
       el("div", {}, el("dt", {}, "Host"), el("dd", { class: "mono" }, d.host || "–")),
-      el("div", {}, el("dt", {}, "Schlafen"), el("dd", {}, SLEEP_METHODS[d.sleep_method]))),
+      el("div", {}, el("dt", {}, t("Sleep")), el("dd", {}, SLEEP_METHODS[d.sleep_method]))),
     el("p", { class: next ? "next" : "next muted" }, icon("clock"),
-      next ? el("span", {}, el("strong", {}, ACTIONS[next.action]), " ", fmtNext(next.next_run)) : "Kein aktiver Zeitplan"),
+      next ? el("span", {}, el("strong", {}, ACTIONS[next.action]), " ", fmtNext(next.next_run)) : t("No active schedule")),
     el("div", { class: "card-actions" },
-      el("button", { class: "btn wake", type: "button", onclick: (e) => deviceAction(d, "wake", e.currentTarget) }, icon("power"), "Aufwecken"),
+      el("button", { class: "btn wake", type: "button", onclick: (e) => deviceAction(d, "wake", e.currentTarget) }, icon("power"), t("Wake")),
       el("button", {
         class: "btn sleep", type: "button", disabled: !canSleep,
-        title: canSleep ? "" : "Keine Schlaf-Methode eingerichtet",
+        title: canSleep ? "" : t("No sleep method configured"),
         onclick: (e) => deviceAction(d, "sleep", e.currentTarget),
-      }, icon("moon"), "Schlafen")));
+      }, icon("moon"), t("Sleep"))));
 }
 
 async function deviceAction(device, action, button) {
   if (action === "sleep" &&
-      !(await confirmDialog(`${device.name} schlafen legen?`, "Nicht gespeicherte Arbeit auf dem Gerät kann verloren gehen.", "Schlafen legen"))) {
+      !(await confirmDialog(t("Put {0} to sleep?", device.name), t("Unsaved work on the device may be lost."), t("Put to sleep")))) {
     return;
   }
   await busy(button, async () => {
@@ -326,7 +329,7 @@ async function deviceAction(device, action, button) {
       toast(`${device.name}: ${e.message}`, "error");
     }
   });
-  // Nach dem Wecken braucht ein PC meist 10–60 s – Status in kurzen Abständen nachziehen.
+  // After waking, a PC usually needs 10-60 s: refresh the status at short intervals.
   for (const delay of [3000, 15000, 40000]) setTimeout(() => state.view === "devices" && refreshStatus(), delay);
 }
 
@@ -346,13 +349,13 @@ function openDeviceDialog(device = null, prefill = {}) {
   form.elements.ssh_port.value = d.ssh_port || 22;
   form.elements.ssh_command.value = d.ssh_command || "sudo systemctl suspend";
   setSleepMethod(d.sleep_method || "none");
-  $("#device-dialog-title").textContent = device ? "Gerät bearbeiten" : "Neues Gerät";
+  $("#device-dialog-title").textContent = device ? t("Edit device") : t("New device");
   $("#delete-device").hidden = !device;
   $("#device-dialog").showModal();
   updateDeviceNetHint();
 }
 
-// Feste IP im Netzwerk (DHCP-Reservierung) zum Gerät anzeigen – nur wenn die Netzwerk-Verwaltung läuft.
+// Show the device's static IP in the network (DHCP reservation), only if network management is running.
 async function updateDeviceNetHint() {
   const box = $("#device-net-hint");
   box.hidden = true;
@@ -365,11 +368,11 @@ async function updateDeviceNetHint() {
   const res = mac && net.config.config.reservations.find((r) => r.mac === mac);
   const domain = net.config.config.dns.domain;
   box.replaceChildren(res
-    ? el("span", {}, icon("check"), "Feste IP im Netzwerk: ", el("strong", { class: "mono" }, res.ip),
+    ? el("span", {}, icon("check"), t("Static IP in the network:"), " ", el("strong", { class: "mono" }, res.ip),
       res.name ? ` (${res.name}.${domain})` : "")
-    : el("span", {}, "Keine feste IP im Netzwerk. ",
+    : el("span", {}, t("No static IP in the network."), " ",
       el("button", { type: "button", class: "linkish", disabled: !mac, onclick: () => openResDialog(null, {
-        mac, name: $("#device-form").elements.name.value }) }, "Reservieren …")));
+        mac, name: $("#device-form").elements.name.value }) }, t("Reserve …"))));
   box.hidden = false;
 }
 
@@ -390,7 +393,7 @@ async function onDeviceSubmit(event) {
       if (editingDevice) await api("PUT", `/api/devices/${editingDevice.id}`, data);
       else await api("POST", "/api/devices", data);
       $("#device-dialog").close();
-      toast(editingDevice ? "Gerät gespeichert" : "Gerät angelegt", "success");
+      toast(editingDevice ? t("Device saved") : t("Device added"), "success");
       await refreshView();
     } catch (e) {
       showError(form, e.message);
@@ -401,36 +404,36 @@ async function onDeviceSubmit(event) {
 async function onDeviceDelete() {
   const device = editingDevice;
   const count = state.schedules.filter((s) => s.device_id === device.id).length;
-  const text = count ? `Das Gerät und seine Zeitpläne (${count}) werden gelöscht.` : "Das Gerät wird gelöscht.";
-  if (!(await confirmDialog(`${device.name} löschen?`, text, "Löschen", true))) return;
+  const text = count ? t("The device and its schedules ({0}) will be deleted.", count) : t("The device will be deleted.");
+  if (!(await confirmDialog(t("Delete {0}?", device.name), text, t("Delete"), true))) return;
   try {
     await api("DELETE", `/api/devices/${device.id}`);
     $("#device-dialog").close();
-    toast("Gerät gelöscht", "success");
+    toast(t("Device deleted"), "success");
     await refreshView();
   } catch (e) {
     toast(e.message, "error");
   }
 }
 
-// ---------- Zeitpläne ----------
+// ---------- Schedules ----------
 
 function renderSchedules() {
   const list = $("#schedule-list");
   $("#server-time").textContent = state.serverNow
-    ? `Serverzeit: ${fmtNext(state.serverNow.slice(0, 16)).replace("heute ", "")} Uhr`
+    ? t("Server time: {0}", state.serverNow.slice(11, 16))
     : " ";
   if (!state.devices.length) {
     list.replaceChildren(el("div", { class: "empty" },
-      el("h3", {}, "Keine Geräte"),
-      el("p", { class: "muted" }, "Jeder Zeitplan gehört zu einem Gerät. Geräte werden im Reiter „Geräte“ angelegt.")));
+      el("h3", {}, t("No devices")),
+      el("p", { class: "muted" }, t("Every schedule belongs to a device. Devices are added in the \"Devices\" tab."))));
     return;
   }
   if (!state.schedules.length) {
     list.replaceChildren(el("div", { class: "empty" },
-      el("h3", {}, "Keine Zeitpläne"),
-      el("p", { class: "muted" }, "Geräte automatisch zu festen Zeiten aufwecken oder schlafen legen."),
-      el("button", { class: "btn primary", type: "button", onclick: () => openScheduleDialog() }, "Zeitplan anlegen")));
+      el("h3", {}, t("No schedules")),
+      el("p", { class: "muted" }, t("Wake devices or put them to sleep automatically at fixed times.")),
+      el("button", { class: "btn primary", type: "button", onclick: () => openScheduleDialog() }, t("Create schedule"))));
     return;
   }
   list.replaceChildren(...state.schedules.map(scheduleRow));
@@ -439,8 +442,8 @@ function renderSchedules() {
 function scheduleRow(s) {
   const device = deviceById(s.device_id);
   return el("div", { class: `row sched ${s.enabled ? "" : "disabled"}` },
-    el("label", { class: "switch", title: s.enabled ? "Deaktivieren" : "Aktivieren" },
-      el("input", { type: "checkbox", checked: s.enabled, "aria-label": "Aktiv", onchange: (e) => toggleSchedule(s, e.currentTarget) }),
+    el("label", { class: "switch", title: s.enabled ? t("Disable") : t("Enable") },
+      el("input", { type: "checkbox", checked: s.enabled, "aria-label": t("Enabled"), onchange: (e) => toggleSchedule(s, e.currentTarget) }),
       el("span", { class: "slider" })),
     el("div", { class: "sched-time mono" }, s.time),
     el("div", { class: "sched-main" },
@@ -451,8 +454,8 @@ function scheduleRow(s) {
     el("div", { class: "days", "aria-label": fmtDays(s.days) },
       DAYS.map((name, i) => el("span", { class: s.days.includes(i) ? "day on" : "day" }, name))),
     el("div", { class: "sched-next small" },
-      s.enabled && s.next_run ? [el("span", { class: "muted" }, "Nächste: "), fmtNext(s.next_run)] : el("span", { class: "muted" }, "pausiert")),
-    el("button", { class: "icon-btn", type: "button", title: "Bearbeiten", "aria-label": "Zeitplan bearbeiten", onclick: () => openScheduleDialog(s) }, icon("edit")));
+      s.enabled && s.next_run ? [el("span", { class: "muted" }, t("Next:"), " "), fmtNext(s.next_run)] : el("span", { class: "muted" }, t("paused"))),
+    el("button", { class: "icon-btn", type: "button", title: t("Edit"), "aria-label": t("Edit schedule"), onclick: () => openScheduleDialog(s) }, icon("edit")));
 }
 
 async function toggleSchedule(schedule, input) {
@@ -492,7 +495,7 @@ function openScheduleDialog(schedule = null) {
   form.elements.enabled.checked = s.enabled;
   setDays(s.days);
   updateSleepAvailability();
-  $("#schedule-dialog-title").textContent = schedule ? "Zeitplan bearbeiten" : "Neuer Zeitplan";
+  $("#schedule-dialog-title").textContent = schedule ? t("Edit schedule") : t("New schedule");
   $("#delete-schedule").hidden = !schedule;
   $("#schedule-dialog").showModal();
 }
@@ -503,7 +506,7 @@ function updateSleepAvailability() {
   const sleepRadio = form.querySelector("input[name=action][value=sleep]");
   const canSleep = device && device.sleep_method !== "none";
   sleepRadio.disabled = !canSleep;
-  sleepRadio.closest("label").title = canSleep ? "" : "Für dieses Gerät ist keine Schlaf-Methode eingerichtet";
+  sleepRadio.closest("label").title = canSleep ? "" : t("No sleep method is configured for this device");
   if (!canSleep && sleepRadio.checked) form.querySelector("input[name=action][value=wake]").checked = true;
 }
 
@@ -523,7 +526,7 @@ async function onScheduleSubmit(event) {
       if (editingSchedule) await api("PUT", `/api/schedules/${editingSchedule.id}`, data);
       else await api("POST", "/api/schedules", data);
       $("#schedule-dialog").close();
-      toast(editingSchedule ? "Zeitplan gespeichert" : "Zeitplan angelegt", "success");
+      toast(editingSchedule ? t("Schedule saved") : t("Schedule added"), "success");
       await refreshView();
     } catch (e) {
       showError(form, e.message);
@@ -532,25 +535,25 @@ async function onScheduleSubmit(event) {
 }
 
 async function onScheduleDelete() {
-  if (!(await confirmDialog("Zeitplan löschen?", "Der Zeitplan wird dauerhaft entfernt.", "Löschen", true))) return;
+  if (!(await confirmDialog(t("Delete schedule?"), t("The schedule will be removed permanently."), t("Delete"), true))) return;
   try {
     await api("DELETE", `/api/schedules/${editingSchedule.id}`);
     $("#schedule-dialog").close();
-    toast("Zeitplan gelöscht", "success");
+    toast(t("Schedule deleted"), "success");
     await refreshView();
   } catch (e) {
     toast(e.message, "error");
   }
 }
 
-// ---------- Protokoll ----------
+// ---------- Log ----------
 
 async function renderEvents() {
   const { events } = await api("GET", "/api/events");
   const list = $("#event-list");
   if (!events.length) {
-    list.replaceChildren(el("div", { class: "empty" }, el("h3", {}, "Keine Einträge"),
-      el("p", { class: "muted" }, "Das Protokoll listet manuelle und geplante Aktionen.")));
+    list.replaceChildren(el("div", { class: "empty" }, el("h3", {}, t("No entries")),
+      el("p", { class: "muted" }, t("The log lists manual and scheduled actions."))));
     return;
   }
   list.replaceChildren(...events.map((e) =>
@@ -558,13 +561,13 @@ async function renderEvents() {
       el("span", { class: "event-icon" }, e.ok ? icon("check") : icon("x")),
       el("span", { class: "event-time mono small" }, fmtDateTime(e.ts)),
       el("div", { class: "event-main" },
-        el("div", {}, el("strong", {}, e.device), " · ", ACTIONS[e.action] || e.action,
-          el("span", { class: "tag" }, e.source)),
-        el("div", { class: "muted small" }, e.message)))));
+        el("div", {}, el("strong", {}, tr(e.device)), " · ", ACTIONS[e.action] || e.action,
+          el("span", { class: "tag" }, tr(e.source))),
+        el("div", { class: "muted small" }, tr(e.message))))));
 }
 
 async function onClearEvents() {
-  if (!(await confirmDialog("Protokoll leeren?", "Alle Einträge werden gelöscht.", "Leeren", true))) return;
+  if (!(await confirmDialog(t("Clear log?"), t("All entries will be deleted."), t("Clear"), true))) return;
   await api("DELETE", "/api/events");
   await renderEvents();
 }
@@ -575,39 +578,39 @@ async function renderSystem() {
   const [info] = await Promise.all([api("GET", "/api/info"), renderWifi(), renderVpn()]);
   state.info = info;
   const rows = [
-    ["Hostname", info.hostname],
-    ["Modell", info.model || "–"],
-    ["Version", info.version],
-    ["Serverzeit", `${info.time.replace("T", " ")} ${info.timezone}`],
-    ["System läuft seit", fmtDuration(info.system_uptime)],
-    ["Dienst läuft seit", fmtDuration(info.service_uptime)],
-    ["CPU-Temperatur", info.cpu_temp != null ? `${info.cpu_temp.toFixed(1)} °C` : "–"],
-    ["Last (1 min)", info.load.toFixed(2)],
+    [t("Hostname"), info.hostname],
+    [t("Model"), info.model || "–"],
+    [t("Version"), info.version],
+    [t("Server time"), `${info.time.replace("T", " ")} ${info.timezone}`],
+    [t("System up for"), fmtDuration(info.system_uptime)],
+    [t("Service up for"), fmtDuration(info.service_uptime)],
+    [t("CPU temperature"), info.cpu_temp != null ? `${info.cpu_temp.toFixed(1)} °C` : "–"],
+    [t("Load (1 min)"), info.load.toFixed(2)],
     ["HTTPS", httpsLabel(info.https)],
   ];
   $("#sys-info").replaceChildren(...rows.map(([k, v]) => el("div", {}, el("dt", {}, k), el("dd", {}, v))));
   renderSysNetwork(info.network);
   $("#sys-networks").replaceChildren(...info.allowed_networks.map((n) => el("span", { class: "chip mono" }, n.network,
-    n.source !== "config" && el("span", { class: "chip-src" }, n.source === "auto" ? "immer" : n.source))));
+    n.source !== "config" && el("span", { class: "chip-src" }, n.source === "auto" ? t("always") : n.source))));
   $("#sys-client").textContent = info.client;
-  $("#ssh-key").value = info.ssh_public_key || "(kein Schlüssel – ssh-keygen nicht verfügbar)";
-  $("#pw-title").textContent = info.auth_required ? "Passwort ändern" : "Passwort festlegen";
+  $("#ssh-key").value = info.ssh_public_key || t("(no key: ssh-keygen not available)");
+  $("#pw-title").textContent = info.auth_required ? t("Change password") : t("Set password");
   $("#pw-current-field").hidden = !info.auth_required;
 }
 
 function httpsLabel(https) {
-  if (!https || !https.port) return "aus";
-  if (!https.names) return "kein Zertifikat";
-  const until = new Date(https.not_after * 1000).toLocaleDateString("de-DE");
-  return https.active ? `${https.names[0]}, gültig bis ${until}` : `Zertifikat abgelaufen (${until})`;
+  if (!https || !https.port) return t("off");
+  if (!https.names) return t("no certificate");
+  const until = new Date(https.not_after * 1000).toLocaleDateString(I18N.locale);
+  return https.active ? t("{0}, valid until {1}", https.names[0], until) : t("Certificate expired ({0})", until);
 }
 
-const IFACE_KINDS = { wifi: "WLAN", lan: "LAN", vpn: "VPN" };
+const IFACE_KINDS = { wifi: t("Wi-Fi"), lan: "LAN", vpn: "VPN" };
 
 function signalLabel(dbm) {
-  if (dbm >= -60) return ["gut", "good"];
-  if (dbm >= -70) return ["mittel", "fair"];
-  return ["schwach", "poor"];
+  if (dbm >= -60) return [t("good"), "good"];
+  if (dbm >= -70) return [t("fair"), "fair"];
+  return [t("weak"), "poor"];
 }
 
 function renderSysNetwork(info) {
@@ -618,12 +621,12 @@ function renderSysNetwork(info) {
   const rows = [];
   if (wifi) {
     const [label, cls] = signalLabel(wifi.wifi.signal_dbm);
-    rows.push(["WLAN-Signal", el("span", { class: `signal ${cls}` }, `${wifi.wifi.signal_dbm} dBm · ${label}`)]);
+    rows.push([t("Wi-Fi signal"), el("span", { class: `signal ${cls}` }, `${wifi.wifi.signal_dbm} dBm · ${label}`)]);
   }
   rows.push(["VPN", vpn.length
-    ? el("span", { class: "signal good" }, `verbunden · ${vpn.map((i) => i.address).join(", ")}`)
-    : el("span", { class: "muted" }, "nicht verbunden")]);
-  rows.push(["Magic Packets über", info.wol_interface || "Default-Route"]);
+    ? el("span", { class: "signal good" }, t("connected · {0}", vpn.map((i) => i.address).join(", ")))
+    : el("span", { class: "muted" }, t("not connected"))]);
+  rows.push([t("Magic packets via"), info.wol_interface || t("default route")]);
   $("#sys-network").replaceChildren(...rows.map(([k, v]) => el("div", {}, el("dt", {}, k), el("dd", {}, v))));
   $("#sys-ifaces").replaceChildren(...ifaces.map((i) =>
     el("div", { class: "iface" },
@@ -632,7 +635,7 @@ function renderSysNetwork(info) {
       el("a", { class: "mono", href: `http://${i.address}${port}/` }, i.address))));
 }
 
-// ---------- WLAN ----------
+// ---------- Wi-Fi ----------
 
 async function renderWifi() {
   let wifi;
@@ -652,44 +655,42 @@ async function renderWifi() {
   $("#wifi-add").hidden = false;
   const hs = wifi.hotspot;
   let status;
-  if (wifi.pending) status = el("span", {}, `verbinde mit „${wifi.pending}“ …`);
-  else if (wifi.mode === "client") status = el("span", { class: "signal good" }, `verbunden mit „${wifi.ssid || "?"}“`);
-  else if (wifi.mode === "hotspot") status = el("span", { class: "signal fair" }, `Hotspot „${hs.ssid}“ aktiv`);
-  else status = el("span", { class: "signal poor" }, "nicht verbunden");
+  if (wifi.pending) status = el("span", {}, t("connecting to \"{0}\" …", wifi.pending));
+  else if (wifi.mode === "client") status = el("span", { class: "signal good" }, t("connected to \"{0}\"", wifi.ssid || "?"));
+  else if (wifi.mode === "hotspot") status = el("span", { class: "signal fair" }, t("Hotspot \"{0}\" active", hs.ssid));
+  else status = el("span", { class: "signal poor" }, t("not connected"));
   const rows = [
-    ["Status", status],
-    ["Interface", wifi.address ? `${wifi.interface} · ${wifi.address}` : wifi.interface],
-    ["Einrichtungs-Hotspot", hs.enabled ? `${hs.ssid} · ${hs.secured ? "mit Passwort" : "offen"}` : "abgeschaltet"],
+    [t("Status"), status],
+    [t("Interface"), wifi.address ? `${wifi.interface} · ${wifi.address}` : wifi.interface],
+    [t("Setup hotspot"), hs.enabled ? `${hs.ssid} · ${hs.secured ? t("with password") : t("open")}` : t("disabled")],
   ];
   $("#wifi-info").replaceChildren(...rows.map(([k, v]) => el("div", {}, el("dt", {}, k), el("dd", {}, v))));
 
   const error = $("#wifi-error");
   error.hidden = !wifi.last_error;
-  if (wifi.last_error) error.textContent = `${fmtDateTime(wifi.last_error.ts)}: ${wifi.last_error.message}`;
+  if (wifi.last_error) error.textContent = `${fmtDateTime(wifi.last_error.ts)}: ${tr(wifi.last_error.message)}`;
 
   const current = wifi.mode === "client" ? wifi.ssid : null;
   $("#wifi-saved").replaceChildren(...(wifi.saved.length ? wifi.saved.map((ssid) =>
     el("div", { class: "saved-item" },
       el("span", {}, ssid),
-      ssid === current && el("span", { class: "tag current" }, "verbunden"),
+      ssid === current && el("span", { class: "tag current" }, t("connected")),
       el("button", {
         class: "icon-btn", type: "button", disabled: ssid === current,
-        title: ssid === current ? "Das verbundene WLAN kann nicht entfernt werden" : "Entfernen",
-        "aria-label": `${ssid} entfernen`, onclick: () => forgetWifi(ssid),
-      }, icon("x")))) : [el("p", { class: "muted small" }, "Kein WLAN gespeichert.")]));
+        title: ssid === current ? t("The connected Wi-Fi cannot be removed") : t("Remove"),
+        "aria-label": t("Remove {0}", ssid), onclick: () => forgetWifi(ssid),
+      }, icon("x")))) : [el("p", { class: "muted small" }, t("No Wi-Fi saved."))]));
 
   $("#hotspot-text").textContent = hs.enabled
-    ? `Ist ${hs.delay_minutes} Minuten lang keines der gespeicherten WLANs erreichbar (ohne gespeichertes WLAN sofort), ` +
-      `öffnet der WOL-Server den Hotspot „${hs.ssid}“. Nach dem Verbinden öffnet sich die Einrichtungsseite automatisch, ` +
-      `alternativ unter http://${hs.address}/. Während der Hotspot läuft, sucht der WOL-Server alle paar Minuten nach den gespeicherten WLANs.`
-    : "Der Einrichtungs-Hotspot ist abgeschaltet (hotspot_enabled in /etc/wol-server/config.json).";
+    ? t("If none of the saved Wi-Fi networks is reachable for {0} minutes (immediately without a saved network), the WOL-Server opens the hotspot \"{1}\". After connecting, the setup page opens automatically, alternatively at http://{2}/. While the hotspot is running, the WOL-Server looks for the saved networks every few minutes.", hs.delay_minutes, hs.ssid, hs.address)
+    : t("The setup hotspot is disabled (hotspot_enabled in /etc/wol-server/config.json).");
 }
 
 async function forgetWifi(ssid) {
-  if (!(await confirmDialog(`„${ssid}“ entfernen?`, "Das WLAN-Profil samt Passwort wird gelöscht.", "Entfernen", true))) return;
+  if (!(await confirmDialog(t("Remove \"{0}\"?", ssid), t("The Wi-Fi profile including its password will be deleted."), t("Remove"), true))) return;
   try {
     await api("POST", "/api/wifi/forget", { ssid });
-    toast(`„${ssid}“ entfernt`, "success");
+    toast(t("\"{0}\" removed", ssid), "success");
   } catch (e) {
     toast(e.message, "error");
   }
@@ -698,14 +699,14 @@ async function forgetWifi(ssid) {
 
 function signalBars(strength) {
   const level = Math.max(1, Math.min(4, Math.ceil(strength / 25)));
-  return el("span", { class: `bars b${level}`, title: `Signal ${strength} %` }, el("i"), el("i"), el("i"), el("i"));
+  return el("span", { class: `bars b${level}`, title: t("Signal {0} %", strength) }, el("i"), el("i"), el("i"), el("i"));
 }
 
 function renderScan(networks, scanTime, cached) {
   const form = $("#wifi-form");
   const list = $("#wifi-scan");
   if (!networks.length) {
-    list.replaceChildren(el("p", { class: "muted small" }, "Keine Netze gefunden – Namen unten selbst eingeben."));
+    list.replaceChildren(el("p", { class: "muted small" }, t("No networks found. Enter the name below.")));
   } else {
     list.replaceChildren(...networks.map((n) =>
       el("button", {
@@ -714,13 +715,13 @@ function renderScan(networks, scanTime, cached) {
       },
       signalBars(n.signal),
       el("span", { class: "scan-ssid" }, n.ssid),
-      n.security ? icon("lock") : el("span", { class: "muted small" }, "offen"))));
+      n.security ? icon("lock") : el("span", { class: "muted small" }, t("open")))));
   }
-  const when = scanTime ? new Date(scanTime * 1000).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" }) : "";
+  const when = scanTime ? new Date(scanTime * 1000).toLocaleTimeString(I18N.locale, { hour: "2-digit", minute: "2-digit" }) : "";
   $("#wifi-scan-info").textContent = cached
-    ? `Gefunden vor Start des Hotspots${when ? ` (${when})` : ""}`
-    : when ? `Gefunden um ${when}` : "";
-  // Im Hotspot-Betrieb kann der Zero nicht scannen.
+    ? (when ? t("Found before the hotspot started ({0})", when) : t("Found before the hotspot started"))
+    : when ? t("Found at {0}", when) : "";
+  // In hotspot mode the Zero cannot scan.
   $("#wifi-rescan").hidden = cached;
 }
 
@@ -755,8 +756,8 @@ function openWifiDialog() {
   $("#wifi-step-form").hidden = false;
   $("#wifi-step-done").hidden = true;
   $("#wifi-submit").hidden = false;
-  $("#wifi-submit").textContent = wifi && wifi.mode === "client" ? "Speichern" : "Verbinden";
-  $("#wifi-cancel").textContent = "Abbrechen";
+  $("#wifi-submit").textContent = wifi && wifi.mode === "client" ? t("Save") : t("Connect");
+  $("#wifi-cancel").textContent = t("Cancel");
   renderScan(wifi ? wifi.scan : [], wifi && wifi.scan_time, wifi && wifi.mode === "hotspot");
   $("#wifi-dialog").showModal();
   if (wifi && wifi.mode !== "hotspot") scanWifi();
@@ -766,18 +767,18 @@ function showWifiSwitching(ssid, ip) {
   $("#wifi-step-form").hidden = true;
   $("#wifi-step-done").hidden = false;
   $("#wifi-submit").hidden = true;
-  $("#wifi-cancel").textContent = "Schließen";
-  $("#wifi-done-title").textContent = `Verbinde mit „${ssid}“ …`;
+  $("#wifi-cancel").textContent = t("Close");
+  $("#wifi-done-title").textContent = t("Connecting to \"{0}\" …", ssid);
   const host = state.info ? state.info.hostname : "wol-server";
   const port = state.info && state.info.network && state.info.network.port !== 80 ? `:${state.info.network.port}` : "";
   const url = `http://${host}.local${port}/`;
   const ipUrl = ip && `http://${ip}${port}/`;
   $("#wifi-done-text").replaceChildren(state.hotspot
-    ? el("span", {}, "Der Hotspot wird beendet, die Verbindung zu diesem Gerät bricht ab. ",
-      "Im Heimnetz ist die Oberfläche unter ", el("a", { href: url }, url),
-      ...(ipUrl ? [" oder ", el("a", { href: ipUrl }, ipUrl), " erreichbar."]
-        : [" erreichbar oder unter der Adresse, die der Router für den Pi anzeigt."]))
-    : el("span", {}, "Der Status aktualisiert sich automatisch."));
+    ? el("span", {}, t("The hotspot is shutting down; the connection to this device will drop."), " ",
+      t("In the home network the interface is available at"), " ", el("a", { href: url }, url),
+      ...(ipUrl ? [" ", t("or"), " ", el("a", { href: ipUrl }, ipUrl), "."]
+        : [" ", t("or at the address the router shows for the Pi.")]))
+    : el("span", {}, t("The status updates automatically.")));
 }
 
 async function onWifiSubmit(event) {
@@ -791,10 +792,10 @@ async function onWifiSubmit(event) {
   };
   if (form.elements.static_ip.checked) {
     data.ipv4 = { address: form.elements.ip_address.value, gateway: form.elements.ip_gateway.value, dns: form.elements.ip_dns.value };
-    if (!data.ipv4.address.trim()) return showError(form, "Bitte die feste Adresse eingeben, z. B. 192.168.1.8/24.");
+    if (!data.ipv4.address.trim()) return showError(form, t("Enter the static address, e.g. 192.168.1.8/24."));
   }
-  if (!data.ssid.trim()) return showError(form, "Bitte ein WLAN auswählen oder den Namen eingeben.");
-  if (data.password && data.password.length < 8) return showError(form, "Das WLAN-Passwort hat mindestens 8 Zeichen.");
+  if (!data.ssid.trim()) return showError(form, t("Select a Wi-Fi network or enter its name."));
+  if (data.password && data.password.length < 8) return showError(form, t("The Wi-Fi password has at least 8 characters."));
   await busy($("#wifi-submit"), async () => {
     try {
       const res = await api("POST", "/api/wifi/connect", data);
@@ -803,7 +804,7 @@ async function onWifiSubmit(event) {
         setTimeout(() => renderWifi().catch(() => {}), 3000);
       } else {
         $("#wifi-dialog").close();
-        toast(res.message || "WLAN gespeichert", "success");
+        toast(res.message || t("Wi-Fi saved"), "success");
         await renderWifi();
       }
     } catch (e) {
@@ -818,16 +819,16 @@ async function onHotspotSubmit(event) {
   showError(form, "");
   const password = form.elements.password.value;
   if (password && (password.length < 8 || password.length > 63)) {
-    return showError(form, "Das Passwort braucht 8 bis 63 Zeichen. Ohne Passwort ist der Hotspot offen.");
+    return showError(form, t("The password needs 8 to 63 characters. Without a password the hotspot is open."));
   }
-  if (!password && !(await confirmDialog("Hotspot ohne Passwort?",
-    "Ohne Passwort kann sich jedes Gerät in Funkreichweite mit dem Einrichtungs-Hotspot verbinden. Die Web-GUI bleibt durch ihr eigenes Passwort geschützt.",
-    "Offen lassen"))) return;
+  if (!password && !(await confirmDialog(t("Hotspot without a password?"),
+    t("Without a password, any device within radio range can connect to the setup hotspot. The web GUI stays protected by its own password."),
+    t("Leave open")))) return;
   await busy($("button[type=submit]", form), async () => {
     try {
       const res = await api("PUT", "/api/wifi/hotspot", { password });
       form.reset();
-      toast(res.message || "Gespeichert", "success");
+      toast(res.message || t("Saved"), "success");
       await renderWifi();
     } catch (e) {
       showError(form, e.message);
@@ -837,7 +838,7 @@ async function onHotspotSubmit(event) {
 
 // ---------- VPN ----------
 
-const VPN_STATES = { active: "verbunden", activating: "verbindet …", reloading: "verbindet …", deactivating: "trennt …" };
+const VPN_STATES = { active: t("connected"), activating: t("connecting …"), reloading: t("connecting …"), deactivating: t("disconnecting …") };
 
 function vpnBusy(vpn) {
   return Boolean(vpn && ((vpn.job && vpn.job.state === "running") || (vpn.enabled && !vpn.address)));
@@ -861,34 +862,34 @@ async function renderVpn() {
   $("#vpn-upload").hidden = false;
   const job = vpn.job && vpn.job.state === "running" ? vpn.job : null;
   let status;
-  if (job) status = el("span", {}, "wird eingerichtet …");
-  else if (!vpn.configured) status = el("span", { class: "muted" }, "nicht eingerichtet");
-  else if (vpn.address) status = el("span", { class: "signal good" }, `verbunden · ${vpn.address}`);
-  else if (vpn.enabled) status = el("span", { class: "signal fair" }, VPN_STATES[vpn.state] || "verbindet …");
-  else status = el("span", { class: "muted" }, "ausgeschaltet");
-  const rows = [["Status", status]];
-  if (vpn.remote) rows.push(["Server", el("span", { class: "mono" }, vpn.remote)]);
+  if (job) status = el("span", {}, t("setting up …"));
+  else if (!vpn.configured) status = el("span", { class: "muted" }, t("not set up"));
+  else if (vpn.address) status = el("span", { class: "signal good" }, t("connected · {0}", vpn.address));
+  else if (vpn.enabled) status = el("span", { class: "signal fair" }, VPN_STATES[vpn.state] || t("connecting …"));
+  else status = el("span", { class: "muted" }, t("switched off"));
+  const rows = [[t("Status"), status]];
+  if (vpn.remote) rows.push([t("Server"), el("span", { class: "mono" }, vpn.remote)]);
   if (vpn.address) {
     const port = state.info && state.info.network && state.info.network.port !== 80 ? `:${state.info.network.port}` : "";
-    rows.push(["GUI über VPN", el("a", { class: "mono", href: `http://${vpn.address}${port}/` }, `http://${vpn.address}${port}/`)]);
+    rows.push([t("GUI via VPN"), el("a", { class: "mono", href: `http://${vpn.address}${port}/` }, `http://${vpn.address}${port}/`)]);
   }
-  if (vpn.uploaded) rows.push(["Hochgeladen", fmtDateTime(vpn.uploaded)]);
+  if (vpn.uploaded) rows.push([t("Uploaded"), fmtDateTime(vpn.uploaded)]);
   $("#vpn-info").replaceChildren(...rows.map(([k, v]) => el("div", {}, el("dt", {}, k), el("dd", {}, v))));
 
   const error = $("#vpn-error");
   const failed = vpn.job && vpn.job.state === "failed" ? vpn.job : null;
   error.hidden = !failed;
-  if (failed) error.textContent = `${fmtDateTime(failed.ts)}: ${failed.message}`;
+  if (failed) error.textContent = `${fmtDateTime(failed.ts)}: ${tr(failed.message)}`;
 
   $("#vpn-actions").hidden = !vpn.configured;
   const toggle = $("#vpn-toggle");
-  toggle.textContent = vpn.enabled ? "Ausschalten" : "Einschalten";
+  toggle.textContent = vpn.enabled ? t("Switch off") : t("Switch on");
   toggle.disabled = Boolean(job);
   $("#vpn-remove").disabled = Boolean(job);
   $("#vpn-upload").disabled = Boolean(job);
 }
 
-// Nur Vorschau im Browser – geprüft wird auf dem Pi.
+// Preview in the browser only; the Pi does the real check.
 function inspectOvpn(text) {
   const lines = text.split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !/^[#;]/.test(l));
   const remote = lines.find((l) => /^remote\s/.test(l));
@@ -904,7 +905,7 @@ function openVpnDialog() {
   form.reset();
   showError(form, "");
   state.vpnFile = null;
-  $("#vpn-file-info").textContent = "OpenVPN-Client-Konfiguration (.ovpn) mit eingebetteten Zertifikaten.";
+  $("#vpn-file-info").textContent = t("OpenVPN client configuration (.ovpn) with embedded certificates.");
   for (const field of $$("[data-auth]", form)) field.hidden = true;
   $("#vpn-dialog").showModal();
 }
@@ -915,14 +916,14 @@ async function onVpnFile(event) {
   const file = event.target.files[0];
   state.vpnFile = null;
   if (!file) return;
-  if (file.size > 48 * 1024) return showError(form, "Die Datei ist zu groß (max. 48 KB).");
+  if (file.size > 48 * 1024) return showError(form, t("The file is too large (max. 48 KB)."));
   const text = await file.text();
   const info = inspectOvpn(text);
   if (!info.client || !info.remote) {
-    return showError(form, "Keine OpenVPN-Client-Konfiguration: „client“ oder „remote“ fehlt.");
+    return showError(form, t("Not an OpenVPN client configuration: \"client\" or \"remote\" is missing."));
   }
   state.vpnFile = { text, info };
-  $("#vpn-file-info").textContent = `Server: ${info.remote}${info.needsAuth ? " · braucht Benutzername und Passwort" : ""}`;
+  $("#vpn-file-info").textContent = info.needsAuth ? t("Server: {0} · needs user name and password", info.remote) : t("Server: {0}", info.remote);
   for (const field of $$("[data-auth]", form)) field.hidden = !info.needsAuth;
 }
 
@@ -931,19 +932,19 @@ async function onVpnSubmit(event) {
   const form = event.currentTarget;
   showError(form, "");
   const file = state.vpnFile;
-  if (!file) return showError(form, "Bitte die .ovpn-Datei auswählen.");
+  if (!file) return showError(form, t("Select the .ovpn file."));
   const data = { config: file.text };
   if (file.info.needsAuth) {
     data.username = form.elements.username.value;
     data.password = form.elements.password.value;
-    if (!data.username || !data.password) return showError(form, "Diese Konfiguration braucht Benutzername und Passwort.");
+    if (!data.username || !data.password) return showError(form, t("This configuration needs a user name and password."));
   }
   await busy($("#vpn-submit"), async () => {
     try {
       const res = await api("POST", "/api/vpn/config", data);
       $("#vpn-dialog").close();
       state.vpnFile = null;
-      toast(res.message || "Wird eingerichtet …", "success");
+      toast(res.message || t("Setting up …"), "success");
       await renderVpn();
     } catch (e) {
       showError(form, e.message);
@@ -951,16 +952,16 @@ async function onVpnSubmit(event) {
   });
 }
 
-// Über das VPN geöffnet: Die Seite wurde über die VPN-Adresse des Pi aufgerufen
+// Opened via the VPN: the page was loaded from the Pi's VPN address
 function viaVpn() {
   return Boolean(state.vpn && state.vpn.address && location.hostname === state.vpn.address);
 }
 
 async function onVpnToggle() {
   const enable = !state.vpn.enabled;
-  if (!enable && viaVpn() && !(await confirmDialog("VPN ausschalten?",
-    "Diese Sitzung läuft über das VPN und wird getrennt. Ohne VPN ist die Oberfläche nur aus dem Heimnetz erreichbar.",
-    "Ausschalten", true))) return;
+  if (!enable && viaVpn() && !(await confirmDialog(t("Switch off VPN?"),
+    t("This session runs over the VPN and will be disconnected. Without VPN the interface is only reachable from the home network."),
+    t("Switch off"), true))) return;
   await busy($("#vpn-toggle"), async () => {
     try {
       const res = await api("PUT", "/api/vpn", { enabled: enable });
@@ -973,9 +974,9 @@ async function onVpnToggle() {
 }
 
 async function onVpnRemove() {
-  if (!(await confirmDialog("VPN-Konfiguration entfernen?",
-    "Zertifikate und Zugangsdaten werden gelöscht. Ohne VPN ist der WOL-Server nur aus dem Heimnetz erreichbar.",
-    "Entfernen", true))) return;
+  if (!(await confirmDialog(t("Remove VPN configuration?"),
+    t("Certificates and credentials will be deleted. Without VPN the WOL-Server is only reachable from the home network."),
+    t("Remove"), true))) return;
   try {
     const res = await api("DELETE", "/api/vpn");
     toast(res.message, "success");
@@ -990,24 +991,24 @@ async function copyKey() {
   try {
     await navigator.clipboard.writeText(area.value);
   } catch (e) {
-    // Clipboard-API gibt es nur in sicheren Kontexten (HTTPS) – im Intranet per HTTP Fallback nutzen.
+    // The Clipboard API exists only in secure contexts (HTTPS); use the fallback over plain HTTP.
     area.select();
     document.execCommand("copy");
   }
-  toast("Schlüssel kopiert", "success");
+  toast(t("Key copied"), "success");
 }
 
 async function onPasswordSubmit(event) {
   event.preventDefault();
   const form = event.currentTarget;
   showError(form, "");
-  if (form.new.value.length < 8) return showError(form, "Mindestens 8 Zeichen");
-  if (form.new.value !== form.repeat.value) return showError(form, "Passwörter stimmen nicht überein");
+  if (form.new.value.length < 8) return showError(form, t("At least 8 characters"));
+  if (form.new.value !== form.repeat.value) return showError(form, t("Passwords do not match"));
   await busy($("button[type=submit]", form), async () => {
     try {
       await api("POST", "/api/password", { current: form.current.value, new: form.new.value });
       form.reset();
-      toast("Passwort gespeichert", "success");
+      toast(t("Password saved"), "success");
       await updateSession();
       await renderSystem();
     } catch (e) {
@@ -1016,11 +1017,11 @@ async function onPasswordSubmit(event) {
   });
 }
 
-// ---------- Netzwerk (DHCP und DNS) ----------
+// ---------- Network (DHCP and DNS) ----------
 
 const NET_SUBS = ["overview", "reservations", "leases", "dns", "settings", "tools"];
-const LEASE_PRESETS = [[600, "10 Minuten"], [3600, "1 Stunde"], [14400, "4 Stunden"], [43200, "12 Stunden"], [86400, "1 Tag"], [604800, "7 Tage"]];
-const REC_TYPES = { host: "Name → IP", alias: "Alias", mx: "MX", srv: "SRV", txt: "TXT" };
+const LEASE_PRESETS = [[600, t("10 minutes")], [3600, t("1 hour")], [14400, t("4 hours")], [43200, t("12 hours")], [86400, t("1 day")], [604800, t("7 days")]];
+const REC_TYPES = { host: t("Name → IP"), alias: t("Alias"), mx: "MX", srv: "SRV", txt: "TXT" };
 const net = {
   sub: "overview",
   status: null,
@@ -1044,41 +1045,49 @@ function ipKey(ip) {
 function fmtAgo(ts) {
   if (!ts) return "–";
   const s = Math.max(0, Date.now() / 1000 - ts);
-  if (s < 90) return "gerade eben";
-  if (s < 3600) return `vor ${Math.round(s / 60)} min`;
-  if (s < 86400) return `vor ${Math.round(s / 3600)} h`;
+  if (s < 90) return t("just now");
+  if (s < 3600) return t("{0} min ago", Math.round(s / 60));
+  if (s < 86400) return t("{0} h ago", Math.round(s / 3600));
   const d = Math.round(s / 86400);
-  return d === 1 ? "gestern" : `vor ${d} Tagen`;
+  return d === 1 ? t("yesterday") : t("{0} days ago", d);
 }
 
 function fmtIn(ts) {
-  if (!ts) return "unbegrenzt";
+  if (!ts) return t("unlimited");
   const s = ts - Date.now() / 1000;
-  if (s <= 0) return "abgelaufen";
-  if (s < 3600) return `noch ${Math.max(1, Math.round(s / 60))} min`;
-  if (s < 86400) return `noch ${Math.round(s / 3600)} h`;
-  return `noch ${Math.round(s / 86400)} d`;
+  if (s <= 0) return t("expired");
+  if (s < 3600) return t("{0} min left", Math.max(1, Math.round(s / 60)));
+  if (s < 86400) return t("{0} h left", Math.round(s / 3600));
+  return t("{0} d left", Math.round(s / 86400));
 }
 
 function fmtLease(seconds) {
   const preset = LEASE_PRESETS.find(([v]) => v === seconds);
   if (preset) return preset[1];
-  if (seconds % 86400 === 0) return `${seconds / 86400} Tage`;
+  if (seconds % 86400 === 0) return t("{0} days", seconds / 86400);
   if (seconds % 3600 === 0) return `${seconds / 3600} h`;
   if (seconds % 60 === 0) return `${seconds / 60} min`;
   return `${seconds} s`;
 }
 
-// Auswahl der Lease-Zeit: Vorgaben oder eigener Wert („90m“, „2h“, „3d“). allowDefault: „Standard“ für Reservierungen.
+// Compact form for the input field, independent of the language: "3d", "2h", "90m", "45"
+function compactLease(seconds) {
+  if (seconds % 86400 === 0) return `${seconds / 86400}d`;
+  if (seconds % 3600 === 0) return `${seconds / 3600}h`;
+  if (seconds % 60 === 0) return `${seconds / 60}m`;
+  return String(seconds);
+}
+
+// Lease time picker: presets or a custom value ("90m", "2h", "3d"). allowDefault: "server default" for reservations.
 function leasePicker(container, value, allowDefault = false) {
-  const select = el("select", { "aria-label": "Lease-Zeit" },
-    allowDefault && el("option", { value: "" }, "Standard des Servers"),
+  const select = el("select", { "aria-label": t("Lease time") },
+    allowDefault && el("option", { value: "" }, t("Server default")),
     LEASE_PRESETS.map(([v, label]) => el("option", { value: String(v) }, label)),
-    el("option", { value: "custom" }, "Eigener Wert …"));
-  const custom = el("input", { class: "mono", placeholder: "z. B. 90m, 2h, 3d", "aria-label": "Eigene Lease-Zeit" });
+    el("option", { value: "custom" }, t("Custom value …")));
+  const custom = el("input", { class: "mono", placeholder: t("e.g. 90m, 2h, 3d"), "aria-label": t("Custom lease time") });
   const known = value == null ? "" : LEASE_PRESETS.some(([v]) => v === value) ? String(value) : "custom";
   select.value = allowDefault || value != null ? known : "43200";
-  if (known === "custom") custom.value = fmtLease(value).replace(" Tage", "d").replace(" h", "h").replace(" min", "m").replace(" s", "");
+  if (known === "custom") custom.value = compactLease(value);
   custom.hidden = select.value !== "custom";
   select.addEventListener("change", () => {
     custom.hidden = select.value !== "custom";
@@ -1088,7 +1097,7 @@ function leasePicker(container, value, allowDefault = false) {
   return () => (select.value === "custom" ? custom.value.trim() : select.value === "" ? null : Number(select.value));
 }
 
-// Tabelle mit sortierbaren Spalten. columns: [{key, label, sort?, render, cls?}]
+// Table with sortable columns. columns: [{key, label, sort?, render, cls?}]
 function dataTable(name, columns, rows, emptyText) {
   if (!rows.length) return el("div", { class: "table-empty muted" }, emptyText);
   const [key, dir] = net.sort[name] || [columns[0].key, 1];
@@ -1126,9 +1135,9 @@ async function refreshNetBadge() {
     const badge = $("#net-tab-badge");
     badge.hidden = !status.counts.unknown;
     badge.textContent = status.counts.unknown || "";
-    badge.title = `${status.counts.unknown} unbekannte Geräte`;
+    badge.title = t("{0} unknown devices", status.counts.unknown);
   } catch (e) {
-    // Netzwerk-Verwaltung nicht installiert: Reiter bleibt ohne Zähler
+    // Network management not installed: the tab stays without a counter
   }
 }
 
@@ -1171,28 +1180,28 @@ function renderNetHeader() {
   const on = st.service.state === "active";
   pill.hidden = false;
   pill.className = `service-pill ${on ? "on" : st.dns_enabled || st.dhcp_enabled ? "warn" : "off"}`;
-  pill.replaceChildren(el("span", { class: "dot" }), on ? "dnsmasq läuft" : st.dns_enabled || st.dhcp_enabled ? "dnsmasq gestoppt" : "aus");
+  pill.replaceChildren(el("span", { class: "dot" }), on ? t("dnsmasq running") : st.dns_enabled || st.dhcp_enabled ? t("dnsmasq stopped") : t("off"));
   $("#net-subtitle").textContent = [
-    st.dhcp_enabled ? `DHCP an (${st.mode === "known-only" ? "nur bekannte Geräte" : "mit Bereich"})` : "DHCP aus",
-    st.dns_enabled ? `DNS an · ${st.domain}` : "DNS aus",
+    st.dhcp_enabled ? (st.mode === "known-only" ? t("DHCP on (known devices only)") : t("DHCP on (with range)")) : t("DHCP off"),
+    st.dns_enabled ? t("DNS on · {0}", st.domain) : t("DNS off"),
   ].join(" · ");
   const pending = (net.config && net.config.pending) || st.pending;
   const bar = $("#net-pending");
   bar.hidden = !pending.length;
-  $("#net-pending-title").textContent = pending.length === 1 ? "Eine offene Änderung" : `${pending.length} offene Änderungen`;
-  $("#net-pending-list").replaceChildren(...pending.map((c) => el("li", {}, c)));
+  $("#net-pending-title").textContent = pending.length === 1 ? t("One pending change") : t("{0} pending changes", pending.length);
+  $("#net-pending-list").replaceChildren(...pending.map((c) => el("li", {}, tr(c))));
   $("#net-apply").disabled = st.running;
   $("#net-discard").disabled = st.running;
   const job = $("#net-job");
   if (st.running) {
     job.hidden = false;
     job.className = "job-bar running";
-    job.replaceChildren(el("span", { class: "spinner" }), el("span", {}, st.queued > 1 ? `${st.queued} Aufträge laufen …` : "Wird ausgeführt …"));
+    job.replaceChildren(el("span", { class: "spinner" }), el("span", {}, st.queued > 1 ? t("{0} jobs running …", st.queued) : t("Running …")));
   } else if (st.job && st.job.state === "failed" && Date.now() / 1000 - st.job.ts < 3600) {
     job.hidden = false;
     job.className = "job-bar failed";
-    job.replaceChildren(icon("alert"), el("span", {}, el("strong", {}, "Fehlgeschlagen: "), st.job.message),
-      el("button", { type: "button", class: "icon-btn", title: "Ausblenden", "aria-label": "Ausblenden", onclick: () => { job.hidden = true; } }, icon("x")));
+    job.replaceChildren(icon("alert"), el("span", {}, el("strong", {}, t("Failed:")), " ", tr(st.job.message)),
+      el("button", { type: "button", class: "icon-btn", title: t("Hide"), "aria-label": t("Hide"), onclick: () => { job.hidden = true; } }, icon("x")));
   } else {
     job.hidden = true;
   }
@@ -1204,7 +1213,7 @@ function renderNetHeader() {
   badge.textContent = st.counts.unknown || "";
 }
 
-// Aufträge laufen asynchron (wol-dns-apply.service) – solange beobachten, bis sie fertig sind.
+// Jobs run asynchronously (wol-dns-apply.service): watch them until they finish.
 async function watchNetJob(success) {
   net.watchSuccess = success;
   if (net.watching) return;
@@ -1233,7 +1242,7 @@ async function netApply() {
       toast(res.message);
       await loadNetStatus();
       renderNetHeader();
-      watchNetJob("Änderungen übernommen");
+      watchNetJob(t("Changes applied"));
     } catch (e) {
       toast(e.message, "error");
     }
@@ -1241,9 +1250,9 @@ async function netApply() {
 }
 
 async function netDiscard() {
-  if (!(await confirmDialog("Änderungen verwerfen?", "Alle Änderungen im Entwurf werden verworfen. Der aktive Stand bleibt unverändert.", "Verwerfen", true))) return;
+  if (!(await confirmDialog(t("Discard changes?"), t("All changes in the draft will be discarded. The active configuration stays unchanged."), t("Discard"), true))) return;
   await api("POST", "/api/net/discard");
-  toast("Entwurf verworfen", "success");
+  toast(t("Draft discarded"), "success");
   await renderNetwork();
 }
 
@@ -1252,14 +1261,14 @@ function afterDraftChange(message) {
   return renderNetwork();
 }
 
-// Ohne offenen Entwurf wirken Änderungen sofort: Auftrag beobachten. Mit Entwurf landen sie dort.
+// Without an open draft, changes take effect immediately: watch the job. With a draft they go there.
 async function afterNetChange(res, success) {
   toast(res.message, res.request ? "" : "success");
   await renderNetwork();
   if (res.request) watchNetJob(success);
 }
 
-// Änderungen laufen nacheinander: einen noch laufenden Auftrag abwarten.
+// Changes run one after another: wait for a job that is still running.
 async function netIdle() {
   for (let i = 0; i < 60; i++) {
     if (!(await loadNetStatus()).running) return;
@@ -1268,9 +1277,9 @@ async function netIdle() {
 }
 
 const netHasDraft = () => Boolean(net.config && net.config.pending.length);
-const netSubmitLabel = () => (netHasDraft() ? "In den Entwurf" : "Übernehmen");
+const netSubmitLabel = () => (netHasDraft() ? t("Add to draft") : t("Apply"));
 
-// ---- Übersicht ----
+// ---- Overview ----
 
 function statCard(title, value, lines, cls = "") {
   return el("div", { class: `stat ${cls}` }, el("div", { class: "stat-title" }, title), el("div", { class: "stat-value" }, value),
@@ -1284,57 +1293,57 @@ function renderNetOverview() {
   const reservedLeased = cfg.reservations.filter((r) => leased[r.mac]).length;
   const disabled = cfg.reservations.filter((r) => !r.enabled).length;
   $("#net-stats").replaceChildren(
-    statCard("DHCP", st.dhcp_enabled ? "an" : "aus", [
-      st.dhcp_enabled && (st.mode === "known-only" ? "Nur bekannte Geräte" : `Bereich ${cfg.dhcp.range_start} – ${cfg.dhcp.range_end}`),
-      `Lease-Zeit ${fmtLease(st.lease_time)}`,
-      `${st.counts.leases} aktive Leases`,
+    statCard("DHCP", st.dhcp_enabled ? t("on") : t("off"), [
+      st.dhcp_enabled && (st.mode === "known-only" ? t("Known devices only") : t("Range {0} – {1}", cfg.dhcp.range_start, cfg.dhcp.range_end)),
+      t("Lease time {0}", fmtLease(st.lease_time)),
+      t("{0} active leases", st.counts.leases),
     ], st.dhcp_enabled ? "on" : "off"),
-    statCard("DNS", st.dns_enabled ? "an" : "aus", [
+    statCard("DNS", st.dns_enabled ? t("on") : t("off"), [
       el("span", { class: "mono" }, st.domain),
-      `Upstream ${cfg.dns.upstream.join(", ") || "–"}`,
-      `${st.counts.records} eigene Einträge`,
+      t("Upstream {0}", cfg.dns.upstream.join(", ") || "–"),
+      t("{0} custom records", st.counts.records),
     ], st.dns_enabled ? "on" : "off"),
-    statCard("Reservierungen", String(st.counts.reservations), [
-      st.dhcp_enabled && `${reservedLeased} mit Lease vom WOL-Server`,
-      disabled && `${disabled} abgeschaltet`,
-      `Nächste freie IP: ${net.config.meta.next_ip || "–"}`,
+    statCard(t("Reservations"), String(st.counts.reservations), [
+      st.dhcp_enabled && t("{0} with a lease from the WOL-Server", reservedLeased),
+      disabled && t("{0} disabled", disabled),
+      t("Next free IP: {0}", net.config.meta.next_ip || "–"),
     ]),
     statCard("Server", el("span", { class: "mono" }, st.server.address || "–"), [
-      st.server.method === "manual" ? "Feste Adresse" : st.server.method === "auto" ? "Adresse per DHCP" : null,
+      st.server.method === "manual" ? t("Static address") : st.server.method === "auto" ? t("Address via DHCP") : null,
       `${st.server.interface}${st.server.connection ? ` · ${st.server.connection}` : ""}`,
       st.server.mac && el("span", { class: "mono" }, st.server.mac),
     ]));
 
-  $("#net-warnings").replaceChildren(...st.warnings.map((w) => el("div", { class: "notice warn" }, icon("alert"), el("span", {}, w))));
+  $("#net-warnings").replaceChildren(...st.warnings.map((w) => el("div", { class: "notice warn" }, icon("alert"), el("span", {}, tr(w)))));
 
   const list = $("#net-unknown-list");
   const unknown = st.unknown || [];
   $("#net-unknown-info").textContent = st.dhcp_enabled && st.mode === "known-only"
-    ? "Abgewiesene Anfragen der letzten 24 Stunden" : "Nur im Modus „nur bekannte Geräte“";
+    ? t("Rejected requests of the last 24 hours") : t("Only in \"known devices only\" mode");
   if (!unknown.length) {
-    list.replaceChildren(el("p", { class: "muted small" }, st.dhcp_enabled ? "Keine abgewiesenen Anfragen." : "DHCP ist aus."));
+    list.replaceChildren(el("p", { class: "muted small" }, st.dhcp_enabled ? t("No rejected requests.") : t("DHCP is off.")));
   } else {
     list.replaceChildren(...unknown.map((u) => el("div", { class: "request" },
       el("span", { class: "request-icon" }, icon("device")),
       el("div", { class: "request-main" },
-        el("div", {}, el("strong", {}, u.name || "ohne Namen"), u.vendor ? el("span", { class: "tag" }, u.vendor) : null),
-        el("div", { class: "muted small" }, el("span", { class: "mono" }, u.mac), ` · ${u.count}× angefragt · ${fmtAgo(u.last)}`)),
+        el("div", {}, el("strong", {}, u.name || t("no name")), u.vendor ? el("span", { class: "tag" }, tr(u.vendor)) : null),
+        el("div", { class: "muted small" }, el("span", { class: "mono" }, u.mac), " · ", t("{0}× requested", u.count), " · ", fmtAgo(u.last))),
       el("div", { class: "request-actions" },
-        el("button", { type: "button", class: "btn small ghost", onclick: () => ignoreDevice(u) }, "Ignorieren"),
-        el("button", { type: "button", class: "btn small primary", onclick: () => openApprove(u) }, "Freigeben")))));
+        el("button", { type: "button", class: "btn small ghost", onclick: () => ignoreDevice(u) }, t("Ignore")),
+        el("button", { type: "button", class: "btn small primary", onclick: () => openApprove(u) }, t("Approve"))))));
   }
 
   const last = st.last_change;
   $("#net-last-panel").hidden = !last;
   if (last) {
-    $("#net-last-meta").textContent = `${fmtDateTime(last.ts)}${last.client ? ` · von ${last.client}` : ""}`;
+    $("#net-last-meta").textContent = last.client ? t("{0} · by {1}", fmtDateTime(last.ts), last.client) : fmtDateTime(last.ts);
     const items = last.changes || [];
-    $("#net-last-list").replaceChildren(...items.slice(0, 6).map((c) => el("li", {}, c)),
-      ...(items.length > 6 ? [el("li", { class: "muted" }, `… und ${items.length - 6} weitere`)] : []));
+    $("#net-last-list").replaceChildren(...items.slice(0, 6).map((c) => el("li", {}, tr(c))),
+      ...(items.length > 6 ? [el("li", { class: "muted" }, t("… and {0} more", items.length - 6))] : []));
   }
 }
 
-// ---- Unbekannte Geräte ----
+// ---- Unknown devices ----
 
 let approving = null;
 
@@ -1345,13 +1354,13 @@ function openApprove(u) {
   showError(form, "");
   $("#approve-info").replaceChildren(...[
     ["MAC", el("span", { class: "mono" }, u.mac)],
-    ["Hersteller", u.vendor || "unbekannt"],
-    ["Meldet sich als", u.name || "–"],
-    ["Angefragt", `${u.count}× · zuletzt ${fmtAgo(u.last)}`],
+    [t("Vendor"), tr(u.vendor) || t("unknown")],
+    [t("Reports itself as"), u.name || "–"],
+    [t("Requested"), t("{0}× · last {1}", u.count, fmtAgo(u.last))],
   ].map(([k, v]) => el("div", {}, el("dt", {}, k), el("dd", {}, v))));
   form.elements.name.value = u.suggested_name || "";
   form.elements.ip.value = u.suggested_ip || "";
-  $("#approve-name-hint").textContent = u.name && u.name !== u.suggested_name ? `vom Gerät gemeldet: „${u.name}“` : "";
+  $("#approve-name-hint").textContent = u.name && u.name !== u.suggested_name ? t("reported by the device: \"{0}\"", u.name) : "";
   $("#approve-private").hidden = !u.private;
   $("#approve-dialog").showModal();
 }
@@ -1368,7 +1377,7 @@ async function onApproveSubmit(event) {
       toast(res.message);
       await loadNetStatus();
       renderNetHeader();
-      watchNetJob(`${data.name} freigegeben`);
+      watchNetJob(t("{0} approved", data.name));
     } catch (e) {
       showError(form, e.message);
     }
@@ -1376,18 +1385,18 @@ async function onApproveSubmit(event) {
 }
 
 async function ignoreDevice(u) {
-  if (!(await confirmDialog(`${u.name || u.mac} ignorieren?`,
-    "Das Gerät erhält keine Adresse und wird in der Übersicht nicht mehr angezeigt. Aufheben unter Werkzeuge → Ignorierte Geräte.", "Ignorieren"))) return;
+  if (!(await confirmDialog(t("Ignore {0}?", u.name || u.mac),
+    t("The device gets no address and is no longer shown in the overview. Undo under Tools → Ignored devices."), t("Ignore")))) return;
   try {
     await api("POST", `/api/net/unknown/${u.mac}/ignore`, { comment: u.name || "" });
-    toast("Wird ignoriert", "success");
+    toast(t("Ignored"), "success");
     await renderNetwork();
   } catch (e) {
     toast(e.message, "error");
   }
 }
 
-// ---- Reservierungen ----
+// ---- Reservations ----
 
 function renderReservations() {
   const cfg = net.config.config;
@@ -1408,21 +1417,31 @@ function renderReservations() {
   });
   const domain = cfg.dns.domain;
   $("#res-table").replaceChildren(dataTable("res", [
-    { key: "name", label: "Name", sort: (r) => r.name || "~", render: (r) => el("div", { class: "cell-name" },
-      el("span", { class: `dot small ${r.online ? "online" : ""}`, title: r.online ? "im Netz" : "nicht gesehen" }),
-      el("div", {}, el("strong", {}, r.name || el("span", { class: "muted" }, "ohne Namen")),
+    { key: "name", label: t("Name"), sort: (r) => r.name || "~", render: (r) => el("div", { class: "cell-name" },
+      el("span", { class: `dot small ${r.online ? "online" : ""}`, title: r.online ? t("in the network") : t("not seen") }),
+      el("div", {}, el("strong", {}, r.name || el("span", { class: "muted" }, t("no name"))),
         r.comment ? el("div", { class: "muted small" }, r.comment) : null,
-        !r.enabled ? el("span", { class: "tag" }, "inaktiv") : null)) },
+        !r.enabled ? el("span", { class: "tag" }, t("inactive")) : null)) },
     { key: "ip", label: "IP", sort: (r) => ipKey(r.ip), render: (r) => el("span", { class: "mono" }, r.ip) },
     { key: "mac", label: "MAC", cls: "hide-sm", sort: (r) => r.mac, render: (r) => el("span", { class: "mono small" }, r.mac) },
-    { key: "vendor", label: "Hersteller", cls: "hide-md", sort: (r) => r.vendor || "~", render: (r) => el("span", { class: "small" }, r.vendor || "–") },
-    { key: "seen", label: "Zuletzt", cls: "hide-sm", sort: (r) => -(r.online ? Infinity : r.seen || 0), render: (r) => el("span", { class: "small" }, r.online ? "jetzt" : fmtAgo(r.seen)) },
+    { key: "vendor", label: t("Vendor"), cls: "hide-md", sort: (r) => r.vendor || "~", render: (r) => el("span", { class: "small" }, tr(r.vendor) || "–") },
+    { key: "seen", label: t("Last seen"), cls: "hide-sm", sort: (r) => -(r.online ? Infinity : r.seen || 0), render: (r) => el("span", { class: "small" }, r.online ? t("now") : fmtAgo(r.seen)) },
     { key: "actions", label: "", cls: "actions", render: (r) => el("div", { class: "row-actions" },
-      r.device ? el("button", { type: "button", class: "icon-btn wake-btn", title: `${r.device.name} aufwecken`, "aria-label": `${r.device.name} aufwecken`,
-        onclick: (e) => deviceAction(r.device, "wake", e.currentTarget) }, icon("power")) : null,
-      el("button", { type: "button", class: "icon-btn", title: "Bearbeiten", "aria-label": `${r.name || r.mac} bearbeiten`, onclick: () => openResDialog(r) }, icon("edit"))) },
-  ], rows, search || filter !== "all" ? "Keine passenden Reservierungen." : "Keine Reservierungen. Anlegen über „Reservierung“ oder per Import unter Werkzeuge."));
-  $("#res-foot").textContent = `${rows.length} von ${cfg.reservations.length} · erreichbar als name.${domain}`;
+      r.device ? el("button", { type: "button", class: "icon-btn wake-btn", title: t("Wake {0}", r.device.name), "aria-label": t("Wake {0}", r.device.name),
+        onclick: (e) => deviceAction(r.device, "wake", e.currentTarget) }, icon("power")) : wolDeviceButton(r.name, r.mac, r.ip),
+      el("button", { type: "button", class: "icon-btn", title: t("Edit"), "aria-label": t("Edit {0}", r.name || r.mac), onclick: () => openResDialog(r) }, icon("edit"))) },
+  ], rows, search || filter !== "all" ? t("No matching reservations.") : t("No reservations. Add one with \"Reservation\" or import under Tools.")));
+  $("#res-foot").textContent = t("{0} of {1} · reachable as name.{2}", rows.length, cfg.reservations.length, domain);
+}
+
+// "Add as WOL device": prefills the device dialog from a reservation or lease (host: name.domain or IP)
+function wolDeviceButton(name, mac, ip, named = Boolean(name)) {
+  const label = t("Add as WOL device");
+  const host = named && name && net.config ? `${name}.${net.config.config.dns.domain}` : ip;
+  return el("button", {
+    type: "button", class: "btn small wol-add", title: label, "aria-label": `${label}: ${name || mac}`,
+    onclick: () => openDeviceDialog(null, { name: name || "", mac: mac.toUpperCase(), host }),
+  }, icon("plus"), el("span", { class: "wol-add-text" }, label));
 }
 
 let editingRes = null;
@@ -1437,7 +1456,7 @@ function openResDialog(r = null, prefill = {}) {
   for (const key of ["name", "mac", "ip", "comment"]) form.elements[key].value = data[key] || "";
   form.elements.enabled.checked = data.enabled !== false;
   getResLease = leasePicker($("#res-lease"), data.lease_time ?? null, true);
-  $("#res-dialog-title").textContent = r ? "Reservierung bearbeiten" : "Neue Reservierung";
+  $("#res-dialog-title").textContent = r ? t("Edit reservation") : t("New reservation");
   $("#res-delete").hidden = !r;
   $("#res-submit").textContent = netSubmitLabel();
   updateResVendor();
@@ -1448,7 +1467,7 @@ function updateResVendor() {
   const mac = normMac($("#res-form").elements.mac.value);
   const vendor = mac && net.config ? net.config.meta.vendors[mac] : "";
   const leased = mac && net.config ? net.config.meta.leases[mac] : "";
-  $("#res-vendor").textContent = [vendor, leased && `aktuelle Lease: ${leased}`].filter(Boolean).join(" · ");
+  $("#res-vendor").textContent = [tr(vendor), leased && t("current lease: {0}", leased)].filter(Boolean).join(" · ");
 }
 
 async function onResSubmit(event) {
@@ -1465,7 +1484,7 @@ async function onResSubmit(event) {
       const res = editingRes ? await api("PUT", `/api/net/reservations/${editingRes.id}`, data)
         : await api("POST", "/api/net/reservations", data);
       $("#res-dialog").close();
-      await afterNetChange(res, `Reservierung ${data.name || data.mac} übernommen`);
+      await afterNetChange(res, t("Reservation {0} applied", data.name || data.mac));
       if ($("#device-dialog").open) updateDeviceNetHint();
     } catch (e) {
       showError(form, e.message);
@@ -1475,12 +1494,12 @@ async function onResSubmit(event) {
 
 async function onResDelete() {
   const r = editingRes;
-  if (!(await confirmDialog(`${r.name || r.mac} löschen?`, `Die Reservierung für ${r.ip} wird entfernt. Im Modus „nur bekannte Geräte“ erhält das Gerät ohne Reservierung keine Adresse.`, "Löschen", true))) return;
+  if (!(await confirmDialog(t("Delete {0}?", r.name || r.mac), t("The reservation for {0} will be removed. In \"known devices only\" mode the device gets no address without a reservation.", r.ip), t("Delete"), true))) return;
   try {
     await netIdle();
     const res = await api("DELETE", `/api/net/reservations/${r.id}`);
     $("#res-dialog").close();
-    await afterNetChange(res, `Reservierung ${r.name || r.mac} gelöscht`);
+    await afterNetChange(res, t("Reservation {0} deleted", r.name || r.mac));
   } catch (e) {
     toast(e.message, "error");
   }
@@ -1499,24 +1518,24 @@ async function renderLeases(load) {
   const rows = net.leases.leases.filter((l) => !search ||
     [l.name, l.hostname, l.ip, l.mac, l.vendor].some((v) => String(v || "").toLowerCase().includes(search)));
   $("#lease-table").replaceChildren(dataTable("lease", [
-    { key: "name", label: "Name", sort: (l) => l.name || "~", render: (l) => el("div", {},
-      el("strong", {}, l.name || el("span", { class: "muted" }, "ohne Namen")),
-      l.hostname && l.hostname !== l.name ? el("div", { class: "muted small" }, `meldet sich als ${l.hostname}`) : null) },
+    { key: "name", label: t("Name"), sort: (l) => l.name || "~", render: (l) => el("div", {},
+      el("strong", {}, l.name || el("span", { class: "muted" }, t("no name"))),
+      l.hostname && l.hostname !== l.name ? el("div", { class: "muted small" }, t("reports itself as {0}", l.hostname)) : null) },
     { key: "ip", label: "IP", sort: (l) => ipKey(l.ip), render: (l) => el("span", { class: "mono" }, l.ip) },
     { key: "mac", label: "MAC", cls: "hide-sm", sort: (l) => l.mac, render: (l) => el("span", { class: "mono small" }, l.mac) },
-    { key: "vendor", label: "Hersteller", cls: "hide-md", sort: (l) => l.vendor || "~", render: (l) => el("span", { class: "small" }, l.vendor || "–") },
-    { key: "expires", label: "Gültig", sort: (l) => l.expires || Infinity, render: (l) => el("span", { class: "small nowrap" }, fmtIn(l.expires)) },
-    { key: "kind", label: "Art", cls: "hide-sm", sort: (l) => (l.reservation ? 0 : 1), render: (l) => el("span", { class: `tag ${l.reservation ? "current" : ""}` }, l.reservation ? "reserviert" : "dynamisch") },
+    { key: "vendor", label: t("Vendor"), cls: "hide-md", sort: (l) => l.vendor || "~", render: (l) => el("span", { class: "small" }, tr(l.vendor) || "–") },
+    { key: "expires", label: t("Valid"), sort: (l) => l.expires || Infinity, render: (l) => el("span", { class: "small nowrap" }, fmtIn(l.expires)) },
+    { key: "kind", label: t("Type"), cls: "hide-sm", sort: (l) => (l.reservation ? 0 : 1), render: (l) => el("span", { class: `tag ${l.reservation ? "current" : ""}` }, l.reservation ? t("reserved") : t("dynamic")) },
     { key: "actions", label: "", cls: "actions", render: (l) => el("div", { class: "row-actions" },
-      !l.reservation ? el("button", { type: "button", class: "btn small ghost", onclick: () => openResDialog(null, { mac: l.mac, ip: l.ip, name: l.hostname }) }, "Reservieren") : null,
-      !l.device ? el("button", { type: "button", class: "btn small ghost hide-sm", onclick: () => openDeviceDialog(null, { name: l.name || l.hostname || "", mac: l.mac.toUpperCase(), host: l.name && net.config ? `${l.name}.${net.config.config.dns.domain}` : l.ip }) }, "Als WOL-Gerät") : null,
-      el("button", { type: "button", class: "icon-btn", title: "Lease freigeben", "aria-label": `Lease von ${l.ip} freigeben`, onclick: () => releaseLease(l) }, icon("x"))) },
-  ], rows, search ? "Keine passenden Leases." : "Keine aktiven Leases."));
+      !l.reservation ? el("button", { type: "button", class: "btn small ghost", onclick: () => openResDialog(null, { mac: l.mac, ip: l.ip, name: l.hostname }) }, t("Reserve")) : null,
+      !l.device ? wolDeviceButton(l.name || l.hostname, l.mac, l.ip, Boolean(l.name)) : null,
+      el("button", { type: "button", class: "icon-btn", title: t("Release lease"), "aria-label": t("Release lease of {0}", l.ip), onclick: () => releaseLease(l) }, icon("x"))) },
+  ], rows, search ? t("No matching leases.") : t("No active leases.")));
   $("#net-count-leases").textContent = net.leases.leases.length;
 }
 
 async function releaseLease(l) {
-  if (!(await confirmDialog(`Lease von ${l.ip} freigeben?`, "Die Lease wird gelöscht. Bei der nächsten Erneuerung erhält das Gerät eine neue Adresse, mit Reservierung die reservierte.", "Freigeben", true))) return;
+  if (!(await confirmDialog(t("Release lease of {0}?", l.ip), t("The lease will be deleted. At the next renewal the device gets a new address, or the reserved one if it has a reservation."), t("Release"), true))) return;
   try {
     const res = await api("POST", `/api/net/leases/${l.mac}/release`);
     toast(res.message);
@@ -1533,21 +1552,21 @@ async function releaseLease(l) {
 async function renderDnsView(load) {
   const cfg = net.config.config;
   const domain = cfg.dns.domain;
-  $("#rec-hint").textContent = `Reservierungen sind automatisch als name.${domain} erreichbar und brauchen hier keinen Eintrag.`;
-  const recValue = (r) => r.type === "mx" ? `${r.value} (Priorität ${r.priority})`
-    : r.type === "srv" ? `${r.value}:${r.port} (Prio ${r.priority}, Gewicht ${r.weight})` : r.value;
+  $("#rec-hint").textContent = t("Reservations are reachable as name.{0} automatically and need no record here.", domain);
+  const recValue = (r) => r.type === "mx" ? t("{0} (priority {1})", r.value, r.priority)
+    : r.type === "srv" ? t("{0}:{1} (prio {2}, weight {3})", r.value, r.port, r.priority, r.weight) : r.value;
   $("#rec-table").replaceChildren(dataTable("rec", [
-    { key: "type", label: "Art", sort: (r) => r.type, render: (r) => el("span", { class: "tag" }, REC_TYPES[r.type]) },
-    { key: "name", label: "Name", sort: (r) => r.name, render: (r) => el("div", {},
+    { key: "type", label: t("Type"), sort: (r) => r.type, render: (r) => el("span", { class: "tag" }, REC_TYPES[r.type]) },
+    { key: "name", label: t("Name"), sort: (r) => r.name, render: (r) => el("div", {},
       el("span", { class: "mono" }, r.name ? `${r.name}.${domain}` : domain),
       r.comment ? el("div", { class: "muted small" }, r.comment) : null) },
-    { key: "value", label: "Ziel / Wert", sort: (r) => r.value, render: (r) => el("span", { class: "mono small" }, recValue(r)) },
-    { key: "actions", label: "", cls: "actions", render: (r) => el("button", { type: "button", class: "icon-btn", title: "Bearbeiten", "aria-label": "Eintrag bearbeiten", onclick: () => openRecDialog(r) }, icon("edit")) },
-  ], cfg.records, "Keine eigenen Einträge."));
+    { key: "value", label: t("Target / value"), sort: (r) => r.value, render: (r) => el("span", { class: "mono small" }, recValue(r)) },
+    { key: "actions", label: "", cls: "actions", render: (r) => el("button", { type: "button", class: "icon-btn", title: t("Edit"), "aria-label": t("Edit record"), onclick: () => openRecDialog(r) }, icon("edit")) },
+  ], cfg.records, t("No custom records.")));
 
   const querylogOn = net.status.dns_enabled && cfg.dns.log_queries;
-  $("#dns-querylog-hint").textContent = querylogOn ? "Die letzten Anfragen an den DNS-Server."
-    : "Abfrageprotokoll ausgeschaltet (Einstellungen → DNS).";
+  $("#dns-querylog-hint").textContent = querylogOn ? t("The latest queries to the DNS server.")
+    : t("Query log switched off (Settings → DNS).");
   $("#dns-querylog-refresh").hidden = !querylogOn;
   if (!querylogOn) $("#dns-querylog").replaceChildren();
   if (load) {
@@ -1561,15 +1580,15 @@ async function loadDnsStats() {
   try {
     const s = await api("GET", "/api/net/stats");
     if (!s.available) {
-      box.replaceChildren(el("p", { class: "muted small" }, s.error || "DNS ist aus."));
+      box.replaceChildren(el("p", { class: "muted small" }, tr(s.error) || t("DNS is off.")));
       return;
     }
     const total = (s.hits || 0) + (s.misses || 0);
     const rows = [
-      ["Trefferquote", total ? `${Math.round((s.hits / total) * 100)} % (${s.hits} von ${total})` : "–"],
-      ["Cache-Größe", s.cachesize],
-      ["Eingefügt / verdrängt", `${s.insertions} / ${s.evictions}`],
-      ...s.servers.map((sv) => [`Upstream ${sv.server}`, `${sv.queries} Anfragen${sv.failed ? `, ${sv.failed} fehlgeschlagen` : ""}`]),
+      [t("Hit rate"), total ? t("{0} % ({1} of {2})", Math.round((s.hits / total) * 100), s.hits, total) : "–"],
+      [t("Cache size"), s.cachesize],
+      [t("Inserted / evicted"), `${s.insertions} / ${s.evictions}`],
+      ...s.servers.map((sv) => [t("Upstream {0}", sv.server), sv.failed ? t("{0} queries, {1} failed", sv.queries, sv.failed) : t("{0} queries", sv.queries)]),
     ];
     box.replaceChildren(...rows.map(([k, v]) => el("div", {}, el("dt", {}, k), el("dd", {}, String(v)))));
   } catch (e) {
@@ -1582,11 +1601,11 @@ async function loadQueryLog() {
   try {
     const { entries } = await api("GET", "/api/net/logs/queries");
     box.replaceChildren(dataTable("querylog", [
-      { key: "ts", label: "Zeit", render: (q) => el("span", { class: "mono small" }, fmtDateTime(q.ts)) },
-      { key: "client", label: "Von", render: (q) => el("span", { class: "mono small" }, q.client) },
-      { key: "type", label: "Typ", cls: "hide-sm", render: (q) => el("span", { class: "tag" }, q.type) },
-      { key: "name", label: "Name", render: (q) => el("span", { class: "mono small break" }, q.name) },
-    ], [...entries].reverse().slice(0, 100), "Keine Anfragen protokolliert."));
+      { key: "ts", label: t("Date & time"), render: (q) => el("span", { class: "mono small" }, fmtDateTime(q.ts)) },
+      { key: "client", label: t("From"), render: (q) => el("span", { class: "mono small" }, q.client) },
+      { key: "type", label: t("Type"), cls: "hide-sm", render: (q) => el("span", { class: "tag" }, q.type) },
+      { key: "name", label: t("Name"), render: (q) => el("span", { class: "mono small break" }, q.name) },
+    ], [...entries].reverse().slice(0, 100), t("No queries logged.")));
   } catch (e) {
     box.replaceChildren(el("p", { class: "muted small" }, e.message));
   }
@@ -1602,10 +1621,10 @@ async function onDnsTest(event) {
       const res = await api("POST", "/api/net/test", { query: form.elements.query.value });
       box.hidden = false;
       box.replaceChildren(
-        el("div", { class: "dns-result-head" }, el("span", { class: `tag ${res.rcode === 0 ? "current" : ""}` }, res.status),
-          el("span", { class: "muted small" }, `${res.query} · ${res.qtype} · ${res.ms} ms${res.authoritative ? " · lokal" : ""}`)),
+        el("div", { class: "dns-result-head" }, el("span", { class: `tag ${res.rcode === 0 ? "current" : ""}` }, tr(res.status)),
+          el("span", { class: "muted small" }, `${res.query} · ${res.qtype} · ${res.ms} ms${res.authoritative ? ` · ${t("local")}` : ""}`)),
         res.answers.length ? el("ul", {}, res.answers.map((a) => el("li", {}, el("span", { class: "tag" }, a.type), el("span", { class: "mono" }, a.data))))
-          : el("p", { class: "muted small" }, "Keine Antwort-Einträge."));
+          : el("p", { class: "muted small" }, t("No answer records.")));
     } catch (e) {
       box.hidden = true;
       showError(form, e.message);
@@ -1625,22 +1644,22 @@ function openRecDialog(r = null) {
   for (const key of ["name", "value", "priority", "port", "weight", "comment"]) form.elements[key].value = data[key] ?? "";
   if (data.type !== "mx" && data.type !== "srv") form.elements.priority.value = data.type === "srv" ? 0 : 10;
   setRecType(data.type, false);
-  $("#rec-dialog-title").textContent = r ? "Eintrag bearbeiten" : "Neuer Eintrag";
+  $("#rec-dialog-title").textContent = r ? t("Edit record") : t("New record");
   $("#rec-delete").hidden = !r;
   $("#rec-submit").textContent = netSubmitLabel();
   $("#rec-dialog").showModal();
 }
 
 function setRecType(type, adjust = true) {
-  const domain = net.config ? net.config.config.dns.domain : "domäne";
-  // Übliche Vorgaben beim Wechsel der Art eines neuen Eintrags: MX 10, SRV 0
+  const domain = net.config ? net.config.config.dns.domain : t("domain");
+  // Usual defaults when changing the type of a new record: MX 10, SRV 0
   if (adjust && !editingRec) $("#rec-form").elements.priority.value = type === "mx" ? 10 : 0;
   const labels = {
-    host: ["Name", "IP-Adresse", `z. B. nas → nas.${domain}`, "IPv4 oder IPv6"],
-    alias: ["Alias", "zeigt auf", `z. B. drucker → drucker.${domain}`, "ein vorhandener lokaler Name"],
-    mx: ["Für (leer = Domäne)", "Mailserver", `leer = ${domain}`, "Name des Mailservers"],
-    srv: ["Dienst", "Ziel-Host", "z. B. _ipp._tcp", "Name des Hosts, der den Dienst anbietet"],
-    txt: ["Name", "Text", `z. B. info → info.${domain}`, "ohne Anführungszeichen"],
+    host: [t("Name"), t("IP address"), t("e.g. nas → nas.{0}", domain), t("IPv4 or IPv6")],
+    alias: [t("Alias"), t("points to"), t("e.g. printer → printer.{0}", domain), t("an existing local name")],
+    mx: [t("For (empty = domain)"), t("Mail server"), t("empty = {0}", domain), t("Name of the mail server")],
+    srv: [t("Service"), t("Target host"), t("e.g. _ipp._tcp"), t("Name of the host that offers the service")],
+    txt: [t("Name"), t("Text"), t("e.g. info → info.{0}", domain), t("without quotation marks")],
   }[type];
   $("#rec-name-label").textContent = labels[0];
   $("#rec-value-label").textContent = labels[1];
@@ -1666,7 +1685,7 @@ async function onRecSubmit(event) {
       const res = editingRec ? await api("PUT", `/api/net/records/${editingRec.id}`, data)
         : await api("POST", "/api/net/records", data);
       $("#rec-dialog").close();
-      await afterNetChange(res, "DNS-Eintrag übernommen");
+      await afterNetChange(res, t("DNS record applied"));
     } catch (e) {
       showError(form, e.message);
     }
@@ -1674,27 +1693,27 @@ async function onRecSubmit(event) {
 }
 
 async function onRecDelete() {
-  if (!(await confirmDialog("Eintrag löschen?", "Der DNS-Eintrag wird entfernt.", "Löschen", true))) return;
+  if (!(await confirmDialog(t("Delete record?"), t("The DNS record will be removed."), t("Delete"), true))) return;
   try {
     await netIdle();
     const res = await api("DELETE", `/api/net/records/${editingRec.id}`);
     $("#rec-dialog").close();
-    await afterNetChange(res, "DNS-Eintrag gelöscht");
+    await afterNetChange(res, t("DNS record deleted"));
   } catch (e) {
     toast(e.message, "error");
   }
 }
 
-// ---- Einstellungen ----
+// ---- Settings ----
 
 let getSettingsLease = null;
 
 function conditionalRow(item = { domain: "", server: "" }) {
   const row = el("div", { class: "editor-row" },
-    el("input", { class: "mono", placeholder: "vpn.example.org", value: item.domain, "data-k": "domain", "aria-label": "Domäne" }),
+    el("input", { class: "mono", placeholder: "vpn.example.org", value: item.domain, "data-k": "domain", "aria-label": t("Domain") }),
     el("span", { class: "muted" }, "→"),
-    el("input", { class: "mono", placeholder: "10.8.0.1", value: item.server, "data-k": "server", "aria-label": "DNS-Server" }),
-    el("button", { type: "button", class: "icon-btn", title: "Entfernen", "aria-label": "Weiterleitung entfernen", onclick: () => row.remove() }, icon("x")));
+    el("input", { class: "mono", placeholder: "10.8.0.1", value: item.server, "data-k": "server", "aria-label": t("DNS server") }),
+    el("button", { type: "button", class: "icon-btn", title: t("Remove"), "aria-label": t("Remove forwarding"), onclick: () => row.remove() }, icon("x")));
   return row;
 }
 
@@ -1716,10 +1735,10 @@ function renderNetSettings() {
   $("#conditional-list").replaceChildren(...cfg.dns.conditional.map(conditionalRow));
   updateModeHint();
   const prefix = Number(cfg.server.prefix);
-  $("#prefix-hint").textContent = net.config.meta.network ? `Netz ${net.config.meta.network}` : prefix === 24 ? "/24 = 255.255.255.0" : "";
-  $("#settings-submit").textContent = netHasDraft() ? "In den Entwurf" : "Prüfen";
-  $("#settings-foot").textContent = netHasDraft() ? "Ein Entwurf ist offen. Änderungen landen im Entwurf."
-    : "„Prüfen“ zeigt alle Änderungen, bevor sie wirksam werden.";
+  $("#prefix-hint").textContent = net.config.meta.network ? t("Network {0}", net.config.meta.network) : prefix === 24 ? "/24 = 255.255.255.0" : "";
+  $("#settings-submit").textContent = netHasDraft() ? t("Add to draft") : t("Review");
+  $("#settings-foot").textContent = netHasDraft() ? t("A draft is open. Changes go into the draft.")
+    : t("\"Review\" shows all changes before they take effect.");
   renderStaticIp();
 }
 
@@ -1728,8 +1747,8 @@ function updateModeHint() {
   const mode = (form.querySelector("input[name='dhcp.mode']:checked") || {}).value;
   for (const block of $$("[data-mode]", form)) block.hidden = block.dataset.mode !== mode;
   $("#mode-hint").textContent = mode === "known-only"
-    ? "Nur Geräte mit Reservierung erhalten eine Adresse. Unbekannte Geräte erscheinen zur Freigabe in der Übersicht."
-    : "Unbekannte Geräte erhalten eine Adresse aus dem Bereich. Reservierte Adressen liegen außerhalb des Bereichs.";
+    ? t("Only devices with a reservation get an address. Unknown devices appear in the overview for approval.")
+    : t("Unknown devices get an address from the range. Reserved addresses lie outside the range.");
 }
 
 function renderStaticIp() {
@@ -1738,19 +1757,19 @@ function renderStaticIp() {
   const fixed = st.method === "manual";
   box.replaceChildren(
     el("div", { class: "static-ip-text" },
-      el("strong", {}, fixed ? "Feste Adresse" : st.method === "auto" ? "Adresse per DHCP" : "Adresse unbekannt"),
-      el("span", { class: "muted small" }, ` · ${st.address || "–"} auf ${st.interface}${st.connection ? ` (${st.connection})` : ""}`),
-      el("div", { class: "muted small" }, "Ein DHCP-Server benötigt eine feste eigene Adresse.")),
+      el("strong", {}, fixed ? t("Static address") : st.method === "auto" ? t("Address via DHCP") : t("Address unknown")),
+      el("span", { class: "muted small" }, " · ", t("{0} on {1}", st.address || "–", st.interface), st.connection ? ` (${st.connection})` : ""),
+      el("div", { class: "muted small" }, t("A DHCP server needs a static address of its own."))),
     st.connection ? el("button", { type: "button", class: "btn small", onclick: () => toggleStaticIp(!fixed) },
-      fixed ? "Wieder per DHCP" : "Feste Adresse setzen") : null);
+      fixed ? t("Back to DHCP") : t("Set static address")) : null);
 }
 
 async function toggleStaticIp(enable) {
   const ip = net.config.config.server.ip || net.status.server.address;
   const text = enable
-    ? `Das WLAN-Profil erhält die feste Adresse ${ip} mit Gateway ${net.config.config.dhcp.gateway || "?"}. Die Verbindung bleibt bestehen.`
-    : "Der WOL-Server bezieht seine Adresse per DHCP. Bei eingeschaltetem DHCP auf dem WOL-Server selbst erhält er so keine Adresse.";
-  if (!(await confirmDialog(enable ? "Feste Adresse setzen?" : "Wieder per DHCP?", text, enable ? "Setzen" : "Umstellen", !enable))) return;
+    ? t("The Wi-Fi profile gets the static address {0} with gateway {1}. The connection stays up.", ip, net.config.config.dhcp.gateway || "?")
+    : t("The WOL-Server gets its address via DHCP. With DHCP enabled on the WOL-Server itself, it then gets no address.");
+  if (!(await confirmDialog(enable ? t("Set static address?") : t("Back to DHCP?"), text, enable ? t("Set") : t("Switch"), !enable))) return;
   try {
     const res = await api("PUT", "/api/net/static-ip", { enabled: enable });
     toast(res.message, "success");
@@ -1784,15 +1803,15 @@ async function onSettingsSubmit(event) {
     },
   };
   if (data.dhcp.enabled && net.status.server.method === "auto" &&
-      !(await confirmDialog("Ohne feste Adresse?", "Der WOL-Server bezieht seine eigene Adresse per DHCP. Ein DHCP-Server benötigt eine feste Adresse (Einstellungen → Server → „Feste Adresse setzen“).", "Trotzdem speichern"))) return;
+      !(await confirmDialog(t("Without a static address?"), t("The WOL-Server gets its own address via DHCP. A DHCP server needs a static address (Settings → Server → \"Set static address\")."), t("Save anyway")))) return;
   await busy($("#settings-submit"), async () => {
     try {
       const preview = await api("POST", "/api/net/settings/preview", data);
-      if (!preview.changes.length) return toast("Keine Änderungen", "success");
-      if (!preview.draft && !(await confirmDialog("Änderungen übernehmen?", preview.changes, "Übernehmen"))) return;
+      if (!preview.changes.length) return toast(t("No changes"), "success");
+      if (!preview.draft && !(await confirmDialog(t("Apply changes?"), preview.changes, t("Apply")))) return;
       await netIdle();
       const res = await api("PUT", "/api/net/settings", data);
-      await afterNetChange(res, "Einstellungen übernommen");
+      await afterNetChange(res, t("Settings applied"));
     } catch (e) {
       showError(form, e.message);
       form.querySelector(".form-error").scrollIntoView({ block: "center", behavior: "smooth" });
@@ -1800,22 +1819,22 @@ async function onSettingsSubmit(event) {
   });
 }
 
-// ---- Werkzeuge ----
+// ---- Tools ----
 
 async function renderNetTools(load) {
   const st = net.status;
   $("#service-info").replaceChildren(...[
-    ["dnsmasq", st.service.state === "active" ? "läuft" : st.service.state],
-    ["Beim Start", st.service.enabled ? "aktiviert" : "deaktiviert"],
-    ["Letzter Auftrag", st.job ? `${st.job.message} (${fmtAgo(st.job.ts)})` : "–"],
+    ["dnsmasq", st.service.state === "active" ? t("running") : st.service.state],
+    [t("At boot"), st.service.enabled ? t("enabled") : t("disabled")],
+    [t("Last job"), st.job ? `${tr(st.job.message)} (${fmtAgo(st.job.ts)})` : "–"],
   ].map(([k, v]) => el("div", {}, el("dt", {}, k), el("dd", {}, v))));
   renderProbe(st.probe);
   const cfg = net.config.config;
   $("#ignored-list").replaceChildren(...(cfg.ignored.length ? cfg.ignored.map((i) => el("div", { class: "saved-item" },
     el("span", {}, el("span", { class: "mono" }, i.mac), i.comment ? el("span", { class: "muted" }, ` · ${i.comment}`) : null),
     el("span", { class: "muted small" }, fmtAgo(i.ts)),
-    el("button", { type: "button", class: "btn small ghost", onclick: () => unignore(i.mac) }, "Nicht mehr ignorieren")))
-    : [el("p", { class: "muted small" }, "Keine.")]));
+    el("button", { type: "button", class: "btn small ghost", onclick: () => unignore(i.mac) }, t("Stop ignoring"))))
+    : [el("p", { class: "muted small" }, t("None."))]));
   if (load) {
     loadHistory();
     loadNetLog();
@@ -1830,12 +1849,12 @@ function renderProbe(probe) {
   }
   const own = net.config.config.server.ip;
   const items = probe.servers || [];
-  box.replaceChildren(el("p", { class: "muted" }, `Zuletzt gesucht ${fmtAgo(probe.ts)}:`),
+  box.replaceChildren(el("p", { class: "muted" }, t("Last searched {0}:", fmtAgo(probe.ts))),
     items.length ? el("ul", { class: "change-list" }, items.map((s) => {
       const ip = s.server_id || s.source;
-      return el("li", {}, el("span", { class: "mono" }, ip), ip === own ? " (dieser Server)" : el("strong", { class: "warn-text" }, " – anderer DHCP-Server"),
-        s.offered ? el("span", { class: "muted" }, ` bot ${s.offered} an`) : null);
-    })) : el("p", {}, probe.ok ? "Kein DHCP-Server hat geantwortet." : `Fehler: ${probe.error}`));
+      return el("li", {}, el("span", { class: "mono" }, ip), " ", ip === own ? t("(this server)") : el("strong", { class: "warn-text" }, t("– other DHCP server")),
+        s.offered ? el("span", { class: "muted" }, " ", t("offered {0}", s.offered)) : null);
+    })) : el("p", {}, probe.ok ? t("No DHCP server answered.") : t("Error: {0}", tr(probe.error))));
 }
 
 async function loadHistory() {
@@ -1845,18 +1864,18 @@ async function loadHistory() {
     box.replaceChildren(...(history.length ? history.map((h, i) => el("details", { class: "history-item", open: i === 0 },
       el("summary", {},
         el("span", { class: "mono small" }, fmtDateTime(h.ts)),
-        el("span", {}, h.changes.length ? h.changes[0] + (h.changes.length > 1 ? ` (+${h.changes.length - 1})` : "") : "ohne Änderung"),
-        i === 0 ? el("span", { class: "tag current" }, "aktiv") : el("button", { type: "button", class: "btn small ghost", onclick: (e) => { e.preventDefault(); restoreHistory(h); } }, icon("undo"), "Zurückholen")),
-      el("p", { class: "muted small" }, h.client ? `von ${h.client}` : ""),
-      el("ul", { class: "change-list" }, h.changes.map((c) => el("li", {}, c)))))
-      : [el("p", { class: "muted small" }, "Kein Verlauf vorhanden.")]));
+        el("span", {}, h.changes.length ? tr(h.changes[0]) + (h.changes.length > 1 ? ` (+${h.changes.length - 1})` : "") : t("no change")),
+        i === 0 ? el("span", { class: "tag current" }, t("active")) : el("button", { type: "button", class: "btn small ghost", onclick: (e) => { e.preventDefault(); restoreHistory(h); } }, icon("undo"), t("Restore"))),
+      el("p", { class: "muted small" }, h.client ? t("by {0}", h.client) : ""),
+      el("ul", { class: "change-list" }, h.changes.map((c) => el("li", {}, tr(c))))))
+      : [el("p", { class: "muted small" }, t("No history yet."))]));
   } catch (e) {
     box.replaceChildren(el("p", { class: "muted small" }, e.message));
   }
 }
 
 async function restoreHistory(h) {
-  if (!(await confirmDialog("Diesen Stand zurückholen?", `Der Stand vom ${fmtDateTime(h.ts)} wird als Entwurf geladen und mit „Übernehmen“ wirksam.`, "Als Entwurf laden"))) return;
+  if (!(await confirmDialog(t("Restore this configuration?"), t("The configuration from {0} is loaded as a draft and takes effect with \"Apply\".", fmtDateTime(h.ts)), t("Load as draft")))) return;
   try {
     const res = await api("POST", `/api/net/history/${h.id}/restore`);
     await afterDraftChange(res.message);
@@ -1873,14 +1892,14 @@ async function loadNetLog() {
     const rows = [...entries].reverse().slice(0, 100);
     box.replaceChildren(kind === "dhcp"
       ? dataTable("log", [
-        { key: "ts", label: "Zeit", render: (e) => el("span", { class: "mono small" }, fmtDateTime(e.ts)) },
-        { key: "type", label: "Meldung", render: (e) => el("span", { class: "tag" }, e.type) },
-        { key: "detail", label: "Details", render: (e) => el("span", { class: "mono small break" }, e.detail) },
-      ], rows, "Keine DHCP-Meldungen.")
+        { key: "ts", label: t("Date & time"), render: (e) => el("span", { class: "mono small" }, fmtDateTime(e.ts)) },
+        { key: "type", label: t("Message"), render: (e) => el("span", { class: "tag" }, e.type) },
+        { key: "detail", label: t("Details"), render: (e) => el("span", { class: "mono small break" }, e.detail) },
+      ], rows, t("No DHCP messages."))
       : dataTable("log", [
-        { key: "ts", label: "Zeit", render: (e) => el("span", { class: "mono small" }, fmtDateTime(e.ts)) },
-        { key: "text", label: "Meldung", render: (e) => el("span", { class: "mono small break" }, e.text) },
-      ], rows, "Keine Meldungen."));
+        { key: "ts", label: t("Date & time"), render: (e) => el("span", { class: "mono small" }, fmtDateTime(e.ts)) },
+        { key: "text", label: t("Message"), render: (e) => el("span", { class: "mono small break" }, e.text) },
+      ], rows, t("No messages.")));
   } catch (e) {
     box.replaceChildren(el("p", { class: "muted small" }, e.message));
   }
@@ -1889,7 +1908,7 @@ async function loadNetLog() {
 async function unignore(mac) {
   try {
     await api("DELETE", `/api/net/ignored/${mac}`);
-    toast("Wird wieder angezeigt", "success");
+    toast(t("Shown again"), "success");
     await renderNetwork();
   } catch (e) {
     toast(e.message, "error");
@@ -1914,7 +1933,7 @@ async function exportNet() {
   try {
     const data = await api("GET", "/api/net/export");
     const blob = new Blob([JSON.stringify(data, null, 1)], { type: "application/json" });
-    const a = el("a", { href: URL.createObjectURL(blob), download: `wol-netzwerk-${new Date().toISOString().slice(0, 10)}.json` });
+    const a = el("a", { href: URL.createObjectURL(blob), download: `wol-network-${new Date().toISOString().slice(0, 10)}.json` });
     document.body.append(a);
     a.click();
     a.remove();
@@ -1932,7 +1951,7 @@ async function onRestoreFile(event) {
   try {
     data = JSON.parse(await file.text());
   } catch (e) {
-    toast("Keine gültige Sicherung (JSON erwartet)", "error");
+    toast(t("Not a valid backup (JSON expected)"), "error");
     return;
   }
   try {
@@ -1958,7 +1977,7 @@ async function onImportFile(event) {
   showError(form, "");
   const file = event.target.files[0];
   if (!file) return;
-  if (file.size > 200 * 1024) return showError(form, "Die Datei ist zu groß.");
+  if (file.size > 200 * 1024) return showError(form, t("The file is too large."));
   try {
     const { preview } = await api("POST", "/api/net/import", { text: await file.text() });
     net.importPreview = preview;
@@ -1971,26 +1990,26 @@ async function onImportFile(event) {
 function renderImportPreview() {
   const p = net.importPreview;
   const st = p.settings;
-  const labels = { network: "Netz", gateway: "Gateway", lease_time: "Lease-Zeit", mode: "Modus", domain: "Domäne (alt)", ntp: "NTP", dns: "DNS (alt)" };
+  const labels = { network: t("Subnet"), gateway: t("Gateway"), lease_time: t("Lease time"), mode: t("Mode"), domain: t("Domain (old)"), ntp: "NTP", dns: t("DNS (old)") };
   $("#import-settings").replaceChildren(...Object.entries(labels).filter(([k]) => st[k] != null).map(([k, label]) => {
     let value = st[k];
     if (k === "lease_time") value = fmtLease(value);
-    if (k === "mode") value = value === "known-only" ? "nur bekannte Geräte" : "mit Adressbereich";
+    if (k === "mode") value = value === "known-only" ? t("known devices only") : t("with address range");
     if (Array.isArray(value)) value = value.join(", ");
     return el("div", {}, el("dt", {}, label), el("dd", {}, value));
   }));
-  $("#import-warnings").replaceChildren(...p.warnings.map((w) => el("li", { class: "notice warn" }, icon("alert"), el("span", {}, w))));
+  $("#import-warnings").replaceChildren(...p.warnings.map((w) => el("li", { class: "notice warn" }, icon("alert"), el("span", {}, tr(w)))));
   const ok = p.reservations.filter((r) => !r.problems.length).length;
-  $("#import-summary").textContent = `${p.reservations.length} feste Zuordnungen gefunden: ${ok} werden übernommen, ${p.reservations.length - ok} übersprungen.`;
+  $("#import-summary").textContent = t("{0} fixed assignments found: {1} will be imported, {2} skipped.", p.reservations.length, ok, p.reservations.length - ok);
   $("#import-table").replaceChildren(dataTable("import", [
-    { key: "name", label: "Name", render: (r) => el("div", {}, el("strong", {}, r.name || "–"),
-      r.original_name !== r.name ? el("div", { class: "muted small" }, `war „${r.original_name}“`) : null) },
+    { key: "name", label: t("Name"), render: (r) => el("div", {}, el("strong", {}, r.name || "–"),
+      r.original_name !== r.name ? el("div", { class: "muted small" }, t("was \"{0}\"", r.original_name)) : null) },
     { key: "ip", label: "IP", render: (r) => el("span", { class: "mono" }, r.ip || "–") },
     { key: "mac", label: "MAC", cls: "hide-sm", render: (r) => el("span", { class: "mono small" }, r.mac || "–") },
     { key: "state", label: "", render: (r) => r.problems.length
-      ? el("span", { class: "import-skip" }, icon("x"), r.problems.join("; "))
-      : el("span", { class: "import-ok" }, icon("check"), r.exists || "neu") },
-  ], p.reservations.map((r) => ({ ...r, _cls: r.problems.length ? "is-disabled" : "" })), "Keine festen Zuordnungen gefunden."));
+      ? el("span", { class: "import-skip" }, icon("x"), r.problems.map(tr).join("; "))
+      : el("span", { class: "import-ok" }, icon("check"), tr(r.exists) || t("new")) },
+  ], p.reservations.map((r) => ({ ...r, _cls: r.problems.length ? "is-disabled" : "" })), t("No fixed assignments found.")));
   $("#import-preview").hidden = false;
   $("#import-submit").disabled = !ok && !Object.keys(st).length;
 }
@@ -1999,8 +2018,8 @@ async function onImportSubmit(event) {
   event.preventDefault();
   const form = event.currentTarget;
   showError(form, "");
-  if (form.elements.replace.checked && !(await confirmDialog("Vorhandene Reservierungen entfernen?",
-    "Die importierten Reservierungen ersetzen alle vorhandenen (im Entwurf).", "Ersetzen", true))) return;
+  if (form.elements.replace.checked && !(await confirmDialog(t("Remove existing reservations?"),
+    t("The imported reservations replace all existing ones (in the draft)."), t("Replace"), true))) return;
   await busy($("#import-submit"), async () => {
     try {
       const res = await api("POST", "/api/net/import/commit", {
@@ -2047,12 +2066,12 @@ function bindNetwork() {
   $("#export-btn").addEventListener("click", exportNet);
   $("#restore-file").addEventListener("change", onRestoreFile);
   $("#probe-btn").addEventListener("click", (e) => runNetTask(e.currentTarget, "/api/net/probe"));
-  $("#restart-btn").addEventListener("click", (e) => runNetTask(e.currentTarget, "/api/net/restart", "dnsmasq neu gestartet"));
+  $("#restart-btn").addEventListener("click", (e) => runNetTask(e.currentTarget, "/api/net/restart", t("dnsmasq restarted")));
   for (const r of $$("#log-kind input")) r.addEventListener("change", loadNetLog);
   $("#device-form").elements.mac.addEventListener("change", updateDeviceNetHint);
 }
 
-// ---------- Start ----------
+// ---------- Start-up ----------
 
 async function updateSession() {
   const session = await api("GET", "/api/session");
@@ -2063,14 +2082,14 @@ async function updateSession() {
   if (session.hotspot) {
     banner.hidden = false;
     banner.replaceChildren(
-      el("span", {}, el("strong", {}, "Einrichtungsmodus: "), "Der WOL-Server ist mit keinem WLAN verbunden."),
-      el("button", { class: "btn small", type: "button", onclick: () => { setView("system"); openWifiDialog(); } }, "WLAN einrichten"));
+      el("span", {}, el("strong", {}, t("Setup mode:")), " ", t("The WOL-Server is not connected to any Wi-Fi.")),
+      el("button", { class: "btn small", type: "button", onclick: () => { setView("system"); openWifiDialog(); } }, t("Set up Wi-Fi")));
     return session;
   }
   banner.hidden = session.auth_required;
   banner.replaceChildren(
-    el("span", {}, el("strong", {}, "Kein Passwort gesetzt. "), "Jeder im lokalen Netz kann Geräte steuern."),
-    el("button", { class: "btn small", type: "button", onclick: () => setView("system") }, "Passwort festlegen"));
+    el("span", {}, el("strong", {}, t("No password set.")), " ", t("Anyone in the local network can control devices.")),
+    el("button", { class: "btn small", type: "button", onclick: () => setView("system") }, t("Set password")));
   return session;
 }
 
@@ -2085,7 +2104,7 @@ async function startApp() {
   $("#login").hidden = true;
   $("#app").hidden = false;
   if (session.hotspot) {
-    // Aufruf über den Einrichtungs-Hotspot (Captive Portal): direkt zur WLAN-Auswahl
+    // Opened via the setup hotspot (captive portal): go straight to the Wi-Fi selection
     setView("system");
     await renderWifi().catch(() => {});
     if (state.wifi) openWifiDialog();
@@ -2097,7 +2116,20 @@ async function startApp() {
   refreshNetBadge();
 }
 
+// Small language switcher (EN | DE) in the header and on the login page; the choice is remembered.
+function renderLangSwitch() {
+  for (const box of $$("[data-lang-switch]")) {
+    box.replaceChildren(...Object.entries(I18N.langs).map(([code, name]) => el("button", {
+      type: "button", class: code === I18N.lang ? "active" : "", lang: code, title: name,
+      "aria-pressed": String(code === I18N.lang), onclick: () => code !== I18N.lang && I18N.setLang(code),
+    }, code.toUpperCase())));
+    box.setAttribute("role", "group");
+    box.setAttribute("aria-label", t("Language"));
+  }
+}
+
 function bind() {
+  renderLangSwitch();
   $("#login-form").addEventListener("submit", onLogin);
   $("#logout").addEventListener("click", onLogout);
   for (const tab of $$(".tab")) tab.addEventListener("click", () => setView(tab.dataset.view));
@@ -2141,24 +2173,24 @@ function bind() {
   $("#vpn-remove").addEventListener("click", onVpnRemove);
   buildDayPicker();
 
-  // Status nur abfragen, solange die Seite sichtbar ist – spart Last auf dem Pi.
+  // Poll the status only while the page is visible; this saves load on the Pi.
   setInterval(() => {
     if (document.visibilityState !== "visible" || $("#app").hidden) return;
     if (state.view === "devices") refreshStatus();
-    // Neue Einträge (z. B. von Zeitplänen) auch bei offenem Protokoll anzeigen
+    // Show new entries (e.g. from schedules) while the log is open
     if (state.view === "events") renderEvents().catch(() => {});
-    // Netzwerk: Übersicht (unbekannte Geräte) nachziehen; laufende Aufträge beobachtet watchNetJob()
+    // Network: refresh the overview (unknown devices); watchNetJob() watches running jobs
     if (state.view === "network" && net.sub === "overview" && !net.watching) {
       loadNetStatus().then(() => { renderNetHeader(); renderNetOverview(); }).catch(() => {});
     }
-    // WLAN-Status nur nachziehen, solange sich etwas tut (Hotspot, Verbindungsaufbau)
+    // Refresh the Wi-Fi status only while something is happening (hotspot, connecting)
     if (state.view === "system" && state.wifi && (state.wifi.mode !== "client" || state.wifi.pending)) {
       renderWifi().catch(() => {});
     }
-    // VPN-Status nur während Einrichtung oder Verbindungsaufbau nachziehen
+    // Refresh the VPN status only while setting up or connecting
     if (state.view === "system" && vpnBusy(state.vpn)) renderVpn().catch(() => {});
   }, STATUS_INTERVAL);
-  // Lesezeichen und Zurück/Vor im Browser: #network/leases usw.
+  // Bookmarks and back/forward in the browser: #network/leases etc.
   window.addEventListener("hashchange", () => {
     if ($("#app").hidden) return;
     const [view, sub] = location.hash.slice(1).split("/");
@@ -2177,6 +2209,6 @@ function bind() {
 document.addEventListener("DOMContentLoaded", () => {
   bind();
   startApp().catch((e) => {
-    $("#boot").textContent = `Fehler: ${e.message}`;
+    $("#boot").textContent = t("Error: {0}", e.message);
   });
 });

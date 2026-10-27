@@ -65,7 +65,7 @@ class NetinfoTest(unittest.TestCase):
         self.assertEqual(lo[0]["address"], "127.0.0.1")
 
     def test_default_route_with_vpn_redirect(self):
-        # redirect-gateway def1 legt 0/1 und 128/1 auf tun0, die Default-Route bleibt auf wlan0
+        # redirect-gateway def1 puts 0/1 and 128/1 on tun0, the default route stays on wlan0
         table = (
             "Iface\tDestination\tGateway\tFlags\tRefCnt\tUse\tMetric\tMask\tMTU\tWindow\tIRTT\n"
             "tun0\t00000000\t0100080A\t0003\t0\t0\t0\t00000080\t0\t0\t0\n"
@@ -144,7 +144,7 @@ class AuthTest(unittest.TestCase):
             self.assertTrue(a.verify_token(token))
             self.assertFalse(a.verify_token(token + "x"))
             self.assertFalse(a.verify_token("1.abc"))
-            # zweite Instanz (z. B. CLI) ändert das Passwort -> alte Sessions ungültig
+            # a second instance (e.g. CLI) changes the password -> old sessions invalid
             time.sleep(0.01)
             auth.Auth(d).set_password("anderes123")
             self.assertFalse(a.verify_token(token))
@@ -210,12 +210,12 @@ class SchedulerTest(unittest.TestCase):
             time.sleep(0.01)
 
     def test_fires_on_matching_minute_and_day(self):
-        s = self._add("07:30", [0])  # Montag
-        t = self._ts(2026, 10, 26, 7, 30)  # Montag
+        s = self._add("07:30", [0])  # Monday
+        t = self._ts(2026, 10, 26, 7, 30)  # Monday
         self.assertEqual(self.sched.tick(t - 60, t), [s["id"]])
         self._wait_calls(1)
-        self.assertEqual(self.calls, [("PC", "wake", "Zeitplan")])
-        self.assertEqual(self.sched.tick(t - 60, t), [])  # nicht doppelt
+        self.assertEqual(self.calls, [("PC", "wake", "schedule")])
+        self.assertEqual(self.sched.tick(t - 60, t), [])  # not twice
         tue = self._ts(2026, 10, 27, 7, 30)
         self.assertEqual(self.sched.tick(tue - 60, tue), [])
 
@@ -229,16 +229,16 @@ class SchedulerTest(unittest.TestCase):
         early = self._add("07:00", [0, 1, 2, 3, 4, 5, 6])
         late = self._add("07:55", [0, 1, 2, 3, 4, 5, 6])
         start = self._ts(2026, 10, 26, 6, 0)
-        now = self._ts(2026, 10, 26, 8, 0)  # Uhr springt 2 h nach vorn (NTP nach Boot)
+        now = self._ts(2026, 10, 26, 8, 0)  # clock jumps 2 h forward (NTP after boot)
         fired = self.sched.tick(start, now)
         self.assertIn(late["id"], fired)
         self.assertNotIn(early["id"], fired)
 
     def test_next_run(self):
         sched = {"enabled": True, "time": "07:30", "days": [0]}
-        now = datetime.datetime(2026, 10, 26, 7, 30)  # Montag, genau zur Zeit
+        now = datetime.datetime(2026, 10, 26, 7, 30)  # Monday, exactly at the time
         self.assertEqual(next_run(sched, now), datetime.datetime(2026, 11, 2, 7, 30))
-        now = datetime.datetime(2026, 10, 25, 23, 0)  # Sonntag
+        now = datetime.datetime(2026, 10, 25, 23, 0)  # Sunday
         self.assertEqual(next_run(sched, now), datetime.datetime(2026, 10, 26, 7, 30))
         self.assertIsNone(next_run(dict(sched, enabled=False), now))
 

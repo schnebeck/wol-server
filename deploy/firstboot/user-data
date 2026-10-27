@@ -1,19 +1,19 @@
 #cloud-config
-# WOL-Server: richtet den Pi beim ersten Start automatisch ein.
-# Die Einstellungen stehen in wol-setup.txt, nicht hier.
+# WOL-Server: sets up the Pi automatically on the first boot.
+# The settings are in wol-setup.txt, not here.
 #
-# Wichtig: Beim Schreiben mit dem Raspberry Pi Imager die "OS-Anpassungen" NICHT
-# verwenden – der Imager würde diese Datei sonst durch seine eigene ersetzen.
+# Important: when writing with Raspberry Pi Imager do NOT use "OS customisation" -
+# otherwise the Imager would replace this file with its own.
 
-# Den Hostnamen setzt firstboot.sh; cloud-init soll ihn nicht wieder ändern.
+# firstboot.sh sets the hostname; cloud-init must not change it again.
 preserve_hostname: true
 
-# Fehlersuche per Kartenleser: Zustand alle 15 s in wol-trace.log auf der Boot-Partition
-# (bootcmd läuft früh bei jedem Start, solange cloud-init aktiv ist; firstboot.sh beendet es)
+# Troubleshooting with a card reader: state every 15 s in wol-trace.log on the boot partition
+# (bootcmd runs early on every boot while cloud-init is active; firstboot.sh stops it)
 bootcmd:
   - [systemd-run, --unit=wol-boottrace, --no-block, /bin/bash, /boot/firmware/wol-server/deploy/boottrace.sh]
 
-# Ausgaben von cloud-init zusätzlich auf die Boot-Partition
+# Also write cloud-init output to the boot partition
 output:
   all: "| tee -a /var/log/cloud-init-output.log /boot/firmware/wol-cloud-init.log"
 

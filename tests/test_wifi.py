@@ -14,7 +14,7 @@ CLIENT_IP = "192.168.178.50"
 
 
 class FakeNM:
-    """Simuliert nmcli/iw so weit, wie WifiManager sie benutzt."""
+    """Simulates nmcli/iw as far as WifiManager uses them."""
 
     def __init__(self, profiles=(), connect_ok=True):
         self.profiles = {}  # uuid -> {"name", "ssid"}
@@ -130,9 +130,9 @@ class ParseTest(unittest.TestCase):
         args = wifi.validate_ipv4({"address": "10.0.0.5/16", "gateway": "10.0.255.254", "dns": "1.1.1.1, 9.9.9.9"})
         self.assertEqual((args[3], args[7]), ("10.0.0.5/16", "1.1.1.1 9.9.9.9"))
         for bad in ({"address": "192.168.1.300", "gateway": "192.168.1.1"},
-                    {"address": "192.168.1.0/24", "gateway": "192.168.1.1"},     # Netzadresse
-                    {"address": "192.168.1.8/24"},                               # Gateway fehlt
-                    {"address": "192.168.1.8/24", "gateway": "192.168.2.1"},     # anderes Netz
+                    {"address": "192.168.1.0/24", "gateway": "192.168.1.1"},     # network address
+                    {"address": "192.168.1.8/24"},                               # gateway missing
+                    {"address": "192.168.1.8/24", "gateway": "192.168.2.1"},     # other network
                     {"address": "192.168.1.8/24", "gateway": "192.168.1.8"},
                     {"address": "192.168.1.8/24", "gateway": "192.168.1.1", "dns": "router"}):
             with self.assertRaises(wifi.WifiError):
@@ -203,12 +203,12 @@ class ManagerTest(unittest.TestCase):
         clock.now += 301
         mgr.tick()
         self.assertEqual(fake.address, wifi.HOTSPOT_ADDRESS)
-        # Handy ist mit dem Hotspot verbunden: nicht abschalten
+        # phone is connected to the hotspot: do not switch off
         fake.stations = 1
         clock.now += 301
         mgr.tick()
         self.assertEqual(fake.address, wifi.HOTSPOT_ADDRESS)
-        # Niemand verbunden: Hotspot aus, NetworkManager darf bekannte WLANs suchen
+        # nobody connected: hotspot off, NetworkManager may look for known Wi-Fi networks
         fake.stations = 0
         mgr.tick()
         self.assertIsNone(fake.address)
@@ -236,7 +236,7 @@ class ManagerTest(unittest.TestCase):
         clock.now += wifi.BOOT_GRACE
         mgr.tick()
         res = self.job(mgr, "connect", ssid="Heim", password="geheim123")
-        self.assertEqual(res, {"ok": True, "switching": True, "message": "Verbinde mit „Heim“ …"})
+        self.assertEqual(res, {"ok": True, "switching": True, "message": "Connecting to \"Heim\" ..."})
         self.assertTrue(fake.ran("connection", "down", wifi.HOTSPOT_PROFILE))
         self.assertTrue(fake.ran("connection", "add", "802-11-wireless.cloned-mac-address", "permanent"))
         self.assertEqual(fake.address, CLIENT_IP)
@@ -254,14 +254,14 @@ class ManagerTest(unittest.TestCase):
                        ipv4={"address": "192.168.1.8/24", "gateway": "192.168.1.1"})
         self.assertTrue(res["switching"])
         self.assertTrue(fake.ran("connection", "add", "ipv4.method", "manual", "192.168.1.8/24", "192.168.1.1"))
-        # Ungültige Angaben: nichts anlegen, Hotspot bleibt
+        # invalid input: create nothing, hotspot stays
         fake2 = FakeNM()
         mgr2, clock2 = make_manager(fake2, tempfile.mkdtemp(dir=self.tmp))
         clock2.now += wifi.BOOT_GRACE
         mgr2.tick()
         res = self.job(mgr2, "connect", ssid="Heim", password="geheim123", ipv4={"address": "192.168.1.8/24"})
         self.assertFalse(res["ok"])
-        self.assertIn("Gateway", res["error"])
+        self.assertIn("gateway", res["error"])
         self.assertFalse(fake2.ran("connection", "add", "Heim"))
         self.assertEqual(fake2.address, wifi.HOTSPOT_ADDRESS)
 
@@ -275,7 +275,7 @@ class ManagerTest(unittest.TestCase):
         self.assertEqual(fake.profiles, {})
         mgr.tick()
         snap = mgr.snapshot()
-        self.assertIn("fehlgeschlagen", snap["last_error"]["message"])
+        self.assertIn("failed", snap["last_error"]["message"])
         self.assertEqual(snap["saved"], [])
 
     def test_connect_while_online_only_saves(self):
@@ -287,7 +287,7 @@ class ManagerTest(unittest.TestCase):
         self.assertFalse(res["switching"])
         self.assertFalse(fake.ran("up"))
         self.assertEqual(mgr.snapshot()["saved"], ["Büro", "Heim"])
-        # Passwort eines bestehenden Profils wird geändert, nicht neu angelegt
+        # the password of an existing profile is changed, not created anew
         self.job(mgr, "connect", ssid="Heim", password="neuespasswort")
         self.assertTrue(fake.ran("connection", "modify", "wifi-sec.psk", "neuespasswort"))
         self.assertTrue(fake.ran("connection", "modify", "802-11-wireless.cloned-mac-address", "permanent"))
@@ -378,7 +378,7 @@ class ControlSocketTest(unittest.TestCase):
             self.assertEqual((status, data["mode"], data["ssid"]), (200, "client", "Heim"))
             status, data = api.call("POST", "/api/wifi/forget", {"ssid": "Heim"})
             self.assertEqual(status, 400)
-            self.assertIn("verbundene", data["error"])
+            self.assertIn("connected", data["error"])
             api.app.config["wifi_socket"] = os.path.join(self.tmp, "nope.sock")
             status, data = api.call("GET", "/api/wifi")
             self.assertEqual(status, 503)

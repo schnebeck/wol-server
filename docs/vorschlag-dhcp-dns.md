@@ -1,5 +1,7 @@
 # Vorschlag: DHCP und DNS im WOL-Server
 
+**Deutsch** · [English](proposal-dhcp-dns.md)
+
 Stand: 26.10.2026 · Status: **umgesetzt (Phasen 1–5), lokal getestet, noch nicht auf dem Pi in Betrieb**
 
 > Bedienung und Umzug: README, Abschnitt 5. Abweichungen der Umsetzung von diesem Vorschlag:

@@ -1,8 +1,8 @@
-"""Netzwerk-Infos ohne externe Tools: IPv4-Interfaces, Default-Route, WLAN-Signal.
+"""Network info without external tools: IPv4 interfaces, default route, Wi-Fi signal.
 
-Wichtig für den Betrieb mit OpenVPN: Pusht der VPN-Server "redirect-gateway def1", würde
-ein Broadcast an 255.255.255.255 über tun0 statt ins Heimnetz gehen. Deshalb werden Magic
-Packets an die Adresse des LAN/WLAN-Interfaces gebunden (siehe lan_source()).
+Important when running with OpenVPN: if the VPN server pushes "redirect-gateway def1", a
+broadcast to 255.255.255.255 would go through tun0 instead of into the home network. That is
+why magic packets are bound to the address of the LAN/Wi-Fi interface (see lan_source()).
 """
 
 import fcntl
@@ -44,7 +44,7 @@ def classify(name, flags):
 
 
 def interfaces():
-    """Alle Interfaces mit (primärer) IPv4-Adresse, Typ und Status."""
+    """All interfaces with (primary) IPv4 address, type and state."""
     result = []
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
         for _, name in socket.if_nameindex():
@@ -63,19 +63,19 @@ def interfaces():
                 if flags & IFF_BROADCAST:
                     info["broadcast"] = _ioctl_addr(sock, name, SIOCGIFBRDADDR)
             except OSError:
-                pass  # Interface ohne IPv4-Adresse
+                pass  # interface without IPv4 address
             result.append(info)
     return result
 
 
 def ipv6_prefixes(path="/proc/net/if_inet6"):
-    """Globale IPv6-Präfixe (inkl. ULA) je Interface: [(name, "fd00:1::/64")]."""
+    """Global IPv6 prefixes (incl. ULA) per interface: [(name, "fd00:1::/64")]."""
     result = []
     try:
         with open(path, encoding="ascii") as f:
             for line in f:
                 fields = line.split()
-                if len(fields) != 6 or fields[3] != "00":  # Scope 00 = global; link-local fe80::/10 extra
+                if len(fields) != 6 or fields[3] != "00":  # scope 00 = global; link-local fe80::/10 separately
                     continue
                 addr = ipaddress.IPv6Address(int(fields[0], 16))
                 net = ipaddress.IPv6Network("%s/%d" % (addr, int(fields[2], 16)), strict=False)
@@ -86,9 +86,9 @@ def ipv6_prefixes(path="/proc/net/if_inet6"):
 
 
 def connected_networks():
-    """Netze, an denen der Rechner direkt hängt (LAN, WLAN, VPN), ohne virtuelle Brücken.
+    """Networks the machine is directly attached to (LAN, Wi-Fi, VPN), without virtual bridges.
 
-    Ergebnis: [{"network": "192.168.1.0/24", "interface": "wlan0", "kind": "wifi"}, …]
+    Result: [{"network": "192.168.1.0/24", "interface": "wlan0", "kind": "wifi"}, ...]
     """
     seen, result = set(), []
     kinds = {}
@@ -109,7 +109,7 @@ def connected_networks():
 
 
 def default_route_interfaces(path="/proc/net/route"):
-    """Interfaces mit IPv4-Default-Route (0.0.0.0/0), sortiert nach Metrik."""
+    """Interfaces with an IPv4 default route (0.0.0.0/0), sorted by metric."""
     routes = []
     try:
         with open(path, encoding="ascii") as f:
@@ -124,10 +124,10 @@ def default_route_interfaces(path="/proc/net/route"):
 
 
 def lan_source(preferred=""):
-    """Interface, über das Magic Packets ins lokale Netz gehen (dict aus interfaces() oder None).
+    """Interface through which magic packets reach the local network (dict from interfaces() or None).
 
-    preferred: fest konfiguriertes Interface (z. B. "wlan0"); leer = automatisch über die
-    Default-Route, VPN-Interfaces werden dabei übersprungen.
+    preferred: fixed configured interface (e.g. "wlan0"); empty = automatically via the
+    default route, skipping VPN interfaces.
     """
     ifaces = [i for i in interfaces() if i["up"] and i["address"]]
     if preferred:
@@ -141,7 +141,7 @@ def lan_source(preferred=""):
 
 
 def parse_wireless(text):
-    """Parst /proc/net/wireless → {interface: {"link": 0..70, "signal_dbm": int}}."""
+    """Parses /proc/net/wireless -> {interface: {"link": 0..70, "signal_dbm": int}}."""
     result = {}
     for line in text.splitlines()[2:]:
         if ":" not in line:

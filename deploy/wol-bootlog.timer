@@ -1,5 +1,5 @@
 [Unit]
-Description=WOL-Server: Startbericht drei Minuten nach dem Start
+Description=WOL-Server: boot report three minutes after boot
 
 [Timer]
 OnBootSec=3min

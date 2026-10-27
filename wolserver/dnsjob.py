@@ -1,11 +1,11 @@
-"""Aufträge aus der Web-GUI für dnsmasq ausführen – läuft als root in wol-dns-apply.service.
+"""Run dnsmasq jobs from the web GUI - runs as root in wol-dns-apply.service.
 
-Der Root-Dienst wol-wifi legt Aufträge als JSON-Dateien in requests/ ab; wol-dns-apply.path
-startet diesen Dienst, sobald dort etwas liegt. Ergebnisse landen in jobs/<id>.json.
+The root service wol-wifi drops jobs as JSON files into requests/; wol-dns-apply.path
+starts this service as soon as something is there. Results go to jobs/<id>.json.
 
-Übernehmen: alten Stand sichern → neue Dateien einspielen → dnsmasq --test → neu laden bzw.
-neu starten → Selbsttest per DNS-Abfrage. Schlägt etwas fehl, wird der alte Stand
-wiederhergestellt; das Netz läuft dann unverändert weiter.
+Apply: back up the old state → install the new files → dnsmasq --test → reload or
+restart → self-test via DNS query. If anything fails, the old state is restored and
+the network keeps running unchanged.
 """
 import json
 import logging
@@ -61,7 +61,7 @@ class Job:
         self.runner, self.sleep, self.query, self.prober, self.clock = runner, sleep, query, prober, clock
         self.addresses = addresses or self._addresses
 
-    # -- Hilfen --
+    # -- Helpers --
 
     def systemctl(self, *args):
         return self.runner(["systemctl"] + list(args))
@@ -88,10 +88,10 @@ class Job:
             result["detail"] = detail[:2000]
         _write_json(os.path.join(self.state, "jobs", request["id"] + ".json"), result)
 
-    # -- Ablauf --
+    # -- Processing --
 
     def run(self):
-        """Alle Aufträge der Reihe nach abarbeiten, auch solche, die währenddessen eintreffen."""
+        """Process all jobs in order, including those that arrive meanwhile."""
         requests_dir = os.path.join(self.state, "requests")
         while True:
             names = sorted(n for n in os.listdir(requests_dir) if n.endswith(".json"))
@@ -106,25 +106,25 @@ class Job:
                     request = {"id": name[:-5], "action": "?"}
                 request.setdefault("id", name[:-5])
                 try:
-                    self.finish(request, "running", "Läuft …")
+                    self.finish(request, "running", "Running …")
                     handler = getattr(self, "do_" + str(request.get("action")), None)
                     if handler is None:
-                        raise JobError("Unbekannter Auftrag: %s" % request.get("action"))
+                        raise JobError("Unknown job: %s" % request.get("action"))
                     message = handler(request)
                     self.finish(request, "ok", message)
                 except JobError as e:
-                    log.warning("Auftrag %s fehlgeschlagen: %s", request["id"], e)
+                    log.warning("Job %s failed: %s", request["id"], e)
                     self.finish(request, "failed", str(e))
-                except Exception as e:  # noqa: BLE001 – Auftrag nie liegen lassen (Endlosschleife des .path)
-                    log.exception("Auftrag %s abgebrochen", request["id"])
-                    self.finish(request, "failed", "Interner Fehler: %s" % e)
+                except Exception as e:  # noqa: BLE001 - never leave a job behind (endless loop of the .path unit)
+                    log.exception("Job %s aborted", request["id"])
+                    self.finish(request, "failed", "Internal error: %s" % e)
                 finally:
                     try:
                         os.remove(path)
                     except FileNotFoundError:
                         pass
 
-    # -- Übernehmen --
+    # -- Apply --
 
     def _backup(self):
         backup = os.path.join(self.conf, ".vorher")
@@ -150,11 +150,11 @@ class Job:
 
     def _fail(self, backup, reason, detail=""):
         self._restore(backup)
-        raise JobError("%s. Der vorherige Stand ist wiederhergestellt.%s" % (reason, (" " + detail) if detail else ""))
+        raise JobError("%s. The previous state has been restored.%s" % (reason, (" " + detail) if detail else ""))
 
     def _self_test(self, request):
         name, expect, port = request.get("test_name"), request.get("expect"), int(request.get("port") or 53)
-        last = "keine Antwort"
+        last = "no response"
         for _ in range(6):
             try:
                 res = self.query(name, "A", "127.0.0.1", port, 2.0)
@@ -170,56 +170,56 @@ class Job:
     def do_apply(self, request):
         staging = os.path.realpath(request.get("staging") or "")
         if not staging.startswith(os.path.realpath(os.path.join(self.state, "staging")) + os.sep):
-            raise JobError("Zwischenstand liegt außerhalb des erlaubten Verzeichnisses")
+            raise JobError("Staging area is outside the permitted directory")
         if not all(os.path.isfile(os.path.join(staging, n)) for n in FILES):
-            raise JobError("Zwischenstand unvollständig")
+            raise JobError("Staging area incomplete")
         os.makedirs(self.conf, mode=0o755, exist_ok=True)
         os.makedirs(self.data, mode=0o755, exist_ok=True)
         conf_changed = _read(os.path.join(self.conf, "dnsmasq.conf")) != _read(os.path.join(staging, "dnsmasq.conf"))
         backup = self._backup()
         for name in FILES:
-            tmp = os.path.join(self.conf, name + ".neu")
+            tmp = os.path.join(self.conf, name + ".new")
             shutil.copyfile(os.path.join(staging, name), tmp)
             os.chmod(tmp, 0o644)
             os.replace(tmp, os.path.join(self.conf, name))
 
         rc, out = self.runner(["dnsmasq", "--test", "--conf-file=%s/dnsmasq.conf" % self.conf])
         if rc != 0:
-            self._fail(backup, "dnsmasq lehnt die Konfiguration ab", out.splitlines()[-1] if out else "")
+            self._fail(backup, "dnsmasq rejects the configuration", out.splitlines()[-1] if out else "")
 
         if not request.get("enabled"):
             self.systemctl("disable", "--no-reload", "--now", UNIT)
-            return "DHCP und DNS ausgeschaltet"
+            return "DHCP and DNS switched off"
 
         self.systemctl("enable", "--no-reload", UNIT)
         if self.hotspot_active(request.get("iface") or "wlan0"):
             self.systemctl("stop", UNIT)
-            return "Gespeichert, aktiv nach Ende des Einrichtungs-Hotspots"
+            return "Saved, active after the setup hotspot ends"
 
         was_active = self.is_active()
         if was_active and not conf_changed:
             self.systemctl("reload", UNIT)
-            how = "neu geladen"
+            how = "reloaded"
         else:
             self.systemctl("restart", UNIT)
-            how = "neu gestartet"
+            how = "restarted"
         self.sleep(1.5)
         if not self.is_active():
-            self._fail(backup, "dnsmasq startet mit der neuen Konfiguration nicht", self.journal_tail())
+            self._fail(backup, "dnsmasq does not start with the new configuration", self.journal_tail())
         if request.get("dns"):
             ok, why = self._self_test(request)
             if not ok:
-                self._fail(backup, "DNS-Selbsttest fehlgeschlagen (%s)" % why)
-        return "Übernommen, dnsmasq %s" % how
+                self._fail(backup, "DNS self-test failed (%s)" % why)
+        return "Applied, dnsmasq %s" % how
 
-    # -- weitere Aufträge --
+    # -- other jobs --
 
     def do_release(self, request):
         mac, ip, iface = request.get("mac"), request.get("ip"), request.get("iface") or "wlan0"
         if shutil.which("dhcp_release"):
             rc, out = self.runner(["dhcp_release", iface, ip, mac])
             if rc == 0:
-                return "Lease von %s freigegeben" % ip
+                return "Lease of %s released" % ip
         leasefile = os.path.join(self.data, "dnsmasq.leases")
         self.systemctl("stop", UNIT)
         try:
@@ -229,23 +229,23 @@ class Job:
                 f.write("\n".join(kept) + ("\n" if kept else ""))
         finally:
             self.systemctl("start", UNIT)
-        return "Lease von %s gelöscht (dnsmasq neu gestartet)" % ip
+        return "Lease of %s deleted (dnsmasq restarted)" % ip
 
     def do_restart(self, request):
         self.systemctl("restart", UNIT)
         self.sleep(1.5)
         if not self.is_active():
-            raise JobError("dnsmasq läuft nicht: %s" % self.journal_tail())
-        return "dnsmasq neu gestartet"
+            raise JobError("dnsmasq is not running: %s" % self.journal_tail())
+        return "dnsmasq restarted"
 
     def do_hotspot(self, request):
         if request.get("hotspot"):
             self.systemctl("stop", UNIT)
-            return "Pausiert (Einrichtungs-Hotspot aktiv)"
+            return "Paused (setup hotspot active)"
         if self.systemctl("is-enabled", UNIT)[0] == 0:
             self.systemctl("start", UNIT)
-            return "Nach dem Hotspot-Betrieb wieder gestartet"
-        return "Nichts zu tun"
+            return "Restarted after hotspot mode"
+        return "Nothing to do"
 
     def do_probe(self, request):
         iface = request.get("iface") or "wlan0"
@@ -256,9 +256,11 @@ class Job:
             result = {"ts": self.clock(), "ok": False, "error": str(e), "servers": [], "iface": iface}
         _write_json(os.path.join(self.state, "probe.json"), result)
         if not result["ok"]:
-            raise JobError("Suche fehlgeschlagen: %s" % result["error"])
+            raise JobError("Search failed: %s" % result["error"])
         count = len(result["servers"])
-        return "%s DHCP-Server gefunden" % ("Kein" if not count else count)
+        if not count:
+            return "No DHCP server found"
+        return "%d DHCP server%s found" % (count, "" if count == 1 else "s")
 
 
 def main():

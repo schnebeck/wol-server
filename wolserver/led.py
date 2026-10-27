@@ -1,8 +1,8 @@
-"""Grüne Aktivitäts-LED (ACT) des Pi als Statusanzeige.
+"""The Pi's green activity LED (ACT) as a status indicator.
 
-Genutzt werden nur Blinkmuster des Kernels (timer, heartbeat). Sie kosten keine CPU und
-sind unabhängig davon, ob die LED invertiert angeschlossen ist (Pi Zero): Dort tauschen
-höchstens Hell- und Dunkelphase. Deshalb sind die Timer-Muster symmetrisch.
+Only kernel blink patterns are used (timer, heartbeat). They cost no CPU and do not
+depend on whether the LED is wired inverted (Pi Zero): there, at most the on and off
+phases swap. That is why the timer patterns are symmetric.
 """
 import logging
 import os
@@ -10,13 +10,13 @@ import os
 log = logging.getLogger("wolserver.led")
 
 LED_DIRS = ("/sys/class/leds/ACT", "/sys/class/leds/led0")
-FIRSTBOOT_MARKER = "/run/wol-firstboot"  # legt firstboot.sh für die Dauer der Einrichtung an
+FIRSTBOOT_MARKER = "/run/wol-firstboot"  # created by firstboot.sh for the duration of the setup
 
 PATTERNS = {
-    "setup": ("timer", 100, 100),      # schnell: Einrichtung oder Verbindungsaufbau läuft
-    "hotspot": ("heartbeat",),         # Herzschlag: Einrichtungs-Hotspot aktiv
-    "offline": ("timer", 1000, 1000),  # langsam: kein Netz
-    "normal": None,                    # Standardanzeige des Systems (SD-Zugriffe oder aus)
+    "setup": ("timer", 100, 100),      # fast: setup or connection in progress
+    "hotspot": ("heartbeat",),         # heartbeat: setup hotspot active
+    "offline": ("timer", 1000, 1000),  # slow: no network
+    "normal": None,                    # system default indicator (SD access or off)
 }
 OWN_TRIGGERS = {"timer", "heartbeat"}
 FALLBACK_TRIGGERS = ("actpwr", "mmc0", "default-on")
@@ -35,16 +35,16 @@ class StatusLed:
         self.current = None
         self.normal = None
         if self.path is None:
-            log.info("Keine Status-LED gefunden")
+            log.info("No status LED found")
             return
         try:
             available, active = self._triggers()
         except OSError as e:
-            log.warning("Status-LED nicht lesbar: %s", e)
+            log.warning("Status LED not readable: %s", e)
             self.path = None
             return
-        # Den Zustand vor uns als "normal" merken – außer er stammt von uns (z. B. nach Absturz
-        # des Dienstes oder von firstboot.sh), dann die übliche Standardanzeige.
+        # Remember the state before us as "normal" - unless it comes from us (e.g. after a crash
+        # of the service or from firstboot.sh); then use the usual default indicator.
         if active is None or active in OWN_TRIGGERS:
             active = next((t for t in FALLBACK_TRIGGERS if t in available), "none")
         self.normal = active
@@ -69,7 +69,7 @@ class StatusLed:
                 self._write("delay_on", spec[1])
                 self._write("delay_off", spec[2])
         except OSError as e:
-            log.warning("Status-LED nicht ansteuerbar (%s) – Anzeige abgeschaltet", e)
+            log.warning("Status LED not controllable (%s) - indicator disabled", e)
             self.path = None
             return
         self.current = pattern

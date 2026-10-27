@@ -1,12 +1,12 @@
-"""WLAN-Verwaltung mit Einrichtungs-Hotspot (Dienst wol-wifi, läuft als root).
+"""Wi-Fi management with setup hotspot (service wol-wifi, runs as root).
 
-Im Normalbetrieb ist der Pi WLAN-Client im Heimnetz – nur so erreichen Magic Packets die
-Zielgeräte. Findet er kein bekanntes WLAN, öffnet er über NetworkManager einen eigenen
-Hotspot. Dort lässt sich das WLAN in der Web-GUI einrichten; ein DNS-Eintrag leitet alle
-Namen auf den Pi um, sodass Handys die Oberfläche als Captive Portal von selbst öffnen.
+In normal operation the Pi is a Wi-Fi client in the home network - only then do magic packets
+reach the target devices. If it finds no known Wi-Fi, it opens its own hotspot via
+NetworkManager. There the Wi-Fi can be set up in the web GUI; a DNS entry redirects all
+names to the Pi, so phones open the interface as a captive portal by themselves.
 
-Der Web-Server (Benutzer wol) spricht über einen Unix-Socket mit diesem Dienst und braucht
-dadurch selbst keine Rechte für NetworkManager.
+The web server (user wol) talks to this service over a Unix socket and therefore needs
+no NetworkManager rights itself.
 """
 
 import ipaddress
@@ -30,22 +30,22 @@ log = logging.getLogger("wolserver.wifi")
 HOTSPOT_ADDRESS = "10.42.0.1"
 HOTSPOT_PROFILE = "wol-hotspot"
 HOTSPOT_CHANNEL = 6
-TICK = 15  # s zwischen zwei Prüfungen
-BOOT_GRACE = 30  # s bis zum Hotspot, wenn gar kein WLAN gespeichert ist
-ATTEMPT_SECONDS = 90  # so lange darf ein Verbindungsversuch aus dem Hotspot heraus dauern
-BUSY_SECONDS = 300  # nach einem GUI-Zugriff den Hotspot nicht automatisch beenden
-MAX_REQUEST = 512 * 1024  # VPN-Konfiguration mit Zertifikaten, Netzwerk-Sicherungen
+TICK = 15  # s between two checks
+BOOT_GRACE = 30  # s until the hotspot when no Wi-Fi is saved at all
+ATTEMPT_SECONDS = 90  # how long a connection attempt from the hotspot may take
+BUSY_SECONDS = 300  # do not stop the hotspot automatically after a GUI access
+MAX_REQUEST = 512 * 1024  # VPN configuration with certificates, network backups
 
 
 class WifiError(Exception):
     pass
 
 
-# ---------------------------------------------------------------- nmcli-Ausgaben
+# ---------------------------------------------------------------- nmcli output
 
 
 def split_terse(line):
-    """Zerlegt eine Zeile von `nmcli -t` (":" als Trenner, "\\:" und "\\\\" maskiert)."""
+    """Splits a line of `nmcli -t` (":" as separator, "\\:" and "\\\\" escaped)."""
     fields, current, escaped = [], [], False
     for ch in line:
         if escaped:
@@ -63,7 +63,7 @@ def split_terse(line):
 
 
 def parse_details(text):
-    """`nmcli -t -f a,b connection show X` → {"a": ..., "b": ...}"""
+    """`nmcli -t -f a,b connection show X` -> {"a": ..., "b": ...}"""
     result = {}
     for line in text.splitlines():
         key, sep, value = line.partition(":")
@@ -73,7 +73,7 @@ def parse_details(text):
 
 
 def parse_scan(text, limit=30):
-    """`nmcli -t -f SSID,SIGNAL,SECURITY device wifi list` → je SSID der stärkste Eintrag."""
+    """`nmcli -t -f SSID,SIGNAL,SECURITY device wifi list` -> the strongest entry per SSID."""
     best = {}
     for line in text.splitlines():
         fields = split_terse(line)
@@ -92,31 +92,31 @@ def parse_scan(text, limit=30):
 
 def validate_ssid(ssid):
     if not isinstance(ssid, str) or not ssid.strip():
-        raise WifiError("Bitte den WLAN-Namen (SSID) angeben.")
+        raise WifiError("Enter the Wi-Fi name (SSID).")
     if len(ssid.encode("utf-8")) > 32:
-        raise WifiError("Der WLAN-Name darf höchstens 32 Bytes lang sein.")
+        raise WifiError("The Wi-Fi name may be at most 32 bytes long.")
     if any(ord(c) < 32 for c in ssid):
-        raise WifiError("Der WLAN-Name enthält ungültige Zeichen.")
+        raise WifiError("The Wi-Fi name contains invalid characters.")
     return ssid
 
 
-def validate_psk(psk, what="Das WLAN-Passwort"):
-    """Leer = offenes Netz; sonst WPA-Passphrase (8–63 Zeichen ASCII) oder 64 Hex-Zeichen."""
+def validate_psk(psk, what="The Wi-Fi password"):
+    """Empty = open network; otherwise WPA passphrase (8-63 ASCII characters) or 64 hex characters."""
     if psk in (None, ""):
         return ""
     if not isinstance(psk, str):
-        raise WifiError("%s ist ungültig." % what)
+        raise WifiError("%s is invalid." % what)
     if re.fullmatch(r"[0-9a-fA-F]{64}", psk):
         return psk
     if not 8 <= len(psk) <= 63:
-        raise WifiError("%s muss 8 bis 63 Zeichen lang sein." % what)
+        raise WifiError("%s must be 8 to 63 characters long." % what)
     if any(not 32 <= ord(c) <= 126 for c in psk):
-        raise WifiError("%s darf nur ASCII-Zeichen enthalten (keine Umlaute)." % what)
+        raise WifiError("%s may only contain ASCII characters (no umlauts)." % what)
     return psk
 
 
 def validate_ipv4(data):
-    """Feste Adresse für das WLAN-Profil → nmcli-Argumente; ohne Adresse [] (DHCP).
+    """Static address for the Wi-Fi profile -> nmcli arguments; without address [] (DHCP).
 
     data: {"address": "192.168.1.8/24", "gateway": "192.168.1.1", "dns": "192.168.1.1 1.1.1.1"}
     """
@@ -127,20 +127,20 @@ def validate_ipv4(data):
     try:
         iface = ipaddress.IPv4Interface(address if "/" in address else address + "/24")
     except ValueError:
-        raise WifiError("Ungültige Adresse, Beispiel: 192.168.1.8/24") from None
+        raise WifiError("Invalid address, example: 192.168.1.8/24") from None
     net = iface.network
     if not 8 <= net.prefixlen <= 30 or iface.ip in (net.network_address, net.broadcast_address):
-        raise WifiError("Die Adresse %s ist im Netz %s nicht nutzbar." % (iface.ip, net))
+        raise WifiError("The address %s is not usable in the network %s." % (iface.ip, net))
     try:
         gateway = ipaddress.IPv4Address(str(data.get("gateway") or "").strip())
     except ValueError:
-        raise WifiError("Bei fester Adresse ist ein gültiges Gateway nötig, z. B. der Router.") from None
+        raise WifiError("A static address requires a valid gateway, e.g. the router.") from None
     if gateway not in net or gateway == iface.ip:
-        raise WifiError("Das Gateway %s liegt nicht im Netz %s." % (gateway, net))
+        raise WifiError("The gateway %s is not in the network %s." % (gateway, net))
     try:
         dns = [ipaddress.IPv4Address(d) for d in re.split(r"[\s,;]+", str(data.get("dns") or "").strip()) if d]
     except ValueError:
-        raise WifiError("Ungültiger DNS-Server, Beispiel: 192.168.1.1") from None
+        raise WifiError("Invalid DNS server, example: 192.168.1.1") from None
     return ["ipv4.method", "manual", "ipv4.addresses", str(iface), "ipv4.gateway", str(gateway),
             "ipv4.dns", " ".join(str(d) for d in dns or [gateway]), "ipv4.ignore-auto-dns", "yes"]
 
@@ -159,13 +159,13 @@ def _run(argv, timeout):
     try:
         proc = subprocess.run(argv, capture_output=True, text=True, timeout=timeout, env=env)
     except FileNotFoundError:
-        return 127, "", "%s nicht gefunden" % argv[0]
+        return 127, "", "%s not found" % argv[0]
     except subprocess.TimeoutExpired:
-        return 124, "", "Zeitüberschreitung bei %s" % " ".join(argv[:3])
+        return 124, "", "Timeout in %s" % " ".join(argv[:3])
     return proc.returncode, proc.stdout, proc.stderr
 
 
-# ---------------------------------------------------------------- Zustandsautomat
+# ---------------------------------------------------------------- state machine
 
 
 class Job:
@@ -182,9 +182,9 @@ class Job:
 
 
 class WifiManager:
-    """Alle NetworkManager-Aufrufe laufen nacheinander im Worker-Thread (run()).
+    """All NetworkManager calls run one after another in the worker thread (run()).
 
-    Modi: client (mit WLAN verbunden), hotspot (eigener Hotspot aktiv), offline.
+    Modes: client (connected to Wi-Fi), hotspot (own hotspot active), offline.
     """
 
     def __init__(self, cfg, state_dir, runner=None, probe=None, clock=time.monotonic, led=None, on_mode=None):
@@ -197,17 +197,17 @@ class WifiManager:
         self.probe = probe or self._probe_address
         self.clock = clock
         self.led = led
-        self.on_mode = on_mode  # z. B. NetManager: dnsmasq im Hotspot pausieren
+        self.on_mode = on_mode  # e.g. NetManager: pause dnsmasq in the hotspot
         self.state_file = os.path.join(state_dir, "hotspot.json")
         self.jobs = queue.Queue()
-        self.last_request = None  # gesetzt vom Control-Thread bei GUI-Zugriffen
+        self.last_request = None  # set by the control thread on GUI accesses
 
         now = clock()
         self.started = now
         self.last_online = now
         self.hotspot_since = None
-        self.hotspot_started_at = None  # Wanduhr, für die Anzeige
-        self.wait_until = None  # bis dahin keinen Hotspot starten (Verbindungsversuch/Backoff)
+        self.hotspot_started_at = None  # wall clock, for display
+        self.wait_until = None  # do not start a hotspot before this (connection attempt/backoff)
         self.mode = None
         self.address = None
         self.profiles = []  # [{"name", "uuid", "ssid"}]
@@ -220,13 +220,13 @@ class WifiManager:
         self._lock = threading.Lock()
         self._snapshot = {}
 
-    # -- Hilfen --
+    # -- helpers --
 
     def nm(self, *args, timeout=20):
         rc, out, err = self.runner(["nmcli", *args], timeout)
         if rc != 0:
             message = (err or out).strip().splitlines()
-            raise WifiError(message[-1] if message else "nmcli %s fehlgeschlagen (%d)" % (args[0], rc))
+            raise WifiError(message[-1] if message else "nmcli %s failed (%d)" % (args[0], rc))
         return out
 
     def _probe_address(self):
@@ -315,7 +315,7 @@ class WifiManager:
         self.scan_time = time.time()
 
     def _write_hotspot_profile(self):
-        # Bei jedem Start neu anlegen: So greifen geänderte SSID und Passwort sofort.
+        # Create anew on every start: this way a changed SSID and password take effect immediately.
         try:
             self.nm("connection", "delete", HOTSPOT_PROFILE)
         except WifiError:
@@ -338,20 +338,20 @@ class WifiManager:
         try:
             self.nm("radio", "wifi", "on")
         except WifiError as e:
-            log.warning("WLAN-Funk nicht einschaltbar: %s", e)
-        # Im Hotspot-Betrieb kann der Zero nicht scannen – Liste vorher merken.
+            log.warning("Cannot switch on Wi-Fi radio: %s", e)
+        # In hotspot mode the Zero cannot scan - remember the list beforehand.
         try:
             self.scan(rescan=True)
         except WifiError as e:
-            log.warning("WLAN-Suche fehlgeschlagen: %s", e)
+            log.warning("Wi-Fi scan failed: %s", e)
         try:
             self._write_hotspot_profile()
             self.nm("--wait", "30", "connection", "up", HOTSPOT_PROFILE, timeout=45)
         except WifiError as e:
-            self._error("Hotspot konnte nicht gestartet werden: %s" % e)
+            self._error("Hotspot could not be started: %s" % e)
             self.wait_until = now + 120
             return False
-        log.info("Einrichtungs-Hotspot „%s“ gestartet (http://%s/)", self.hotspot_ssid, HOTSPOT_ADDRESS)
+        log.info("Setup hotspot \"%s\" started (http://%s/)", self.hotspot_ssid, HOTSPOT_ADDRESS)
         self.mode, self.address = "hotspot", HOTSPOT_ADDRESS
         self.hotspot_since, self.hotspot_started_at = now, time.time()
         self.wait_until = None
@@ -361,7 +361,7 @@ class WifiManager:
         try:
             self.nm("connection", "down", HOTSPOT_PROFILE)
         except WifiError as e:
-            log.warning("Hotspot ließ sich nicht beenden: %s", e)
+            log.warning("Hotspot could not be stopped: %s", e)
         self.hotspot_since = self.hotspot_started_at = None
         self.mode, self.address = "offline", None
 
@@ -370,7 +370,7 @@ class WifiManager:
             return True
         return bool(self._stations())
 
-    # -- periodische Prüfung --
+    # -- periodic check --
 
     def tick(self):
         now = self.clock()
@@ -379,43 +379,43 @@ class WifiManager:
         if mode != self.mode or address != self.address or self.profiles_time is None \
                 or now - self.profiles_time > 300:
             if mode != self.mode and self.mode is not None:
-                log.info("WLAN: %s → %s%s", self.mode, mode, " (%s)" % address if address else "")
+                log.info("Wi-Fi: %s -> %s%s", self.mode, mode, " (%s)" % address if address else "")
             self.mode, self.address = mode, address
             try:
                 self.refresh_profiles()
             except WifiError as e:
-                log.warning("WLAN-Profile nicht lesbar: %s", e)
+                log.warning("Wi-Fi profiles not readable: %s", e)
 
         if self.on_mode is not None:
             try:
                 self.on_mode(mode)
-            except Exception:  # noqa: BLE001 – WLAN-Logik darf daran nie scheitern
-                log.exception("Fehler beim Melden des WLAN-Zustands")
+            except Exception:  # noqa: BLE001 - the Wi-Fi logic must never fail because of this
+                log.exception("Error reporting the Wi-Fi state")
         if mode == "client":
             self.last_online = now
             self.hotspot_since = self.wait_until = None
         elif mode == "hotspot":
-            if self.hotspot_since is None:  # z. B. nach Neustart des Dienstes übernommen
+            if self.hotspot_since is None:  # e.g. taken over after a service restart
                 self.hotspot_since, self.hotspot_started_at = now, time.time()
             if self.profiles and now - self.hotspot_since >= self.retry and not self._hotspot_in_use(now):
-                log.info("Beende den Hotspot kurz und suche bekannte WLANs")
+                log.info("Stopping the hotspot briefly to look for known Wi-Fi networks")
                 self.stop_hotspot()
                 self.wait_until = now + ATTEMPT_SECONDS
                 try:
                     self.nm("--wait", "0", "device", "connect", self.iface)
                 except WifiError:
-                    pass  # kein passendes WLAN sichtbar – Hotspot kommt nach ATTEMPT_SECONDS zurück
+                    pass  # no matching Wi-Fi visible - the hotspot returns after ATTEMPT_SECONDS
         elif self.enabled and not (self.wait_until and now < self.wait_until):
             due = self.last_online + self.delay if self.profiles else self.started + BOOT_GRACE
             if now >= due:
                 if self.profiles:
-                    log.info("Seit %d min kein WLAN – starte Einrichtungs-Hotspot", (now - self.last_online) // 60)
+                    log.info("No Wi-Fi for %d min - starting setup hotspot", (now - self.last_online) // 60)
                 else:
-                    log.info("Kein WLAN eingerichtet – starte Einrichtungs-Hotspot")
+                    log.info("No Wi-Fi configured - starting setup hotspot")
                 self.start_hotspot()
         self._publish()
 
-    # -- Befehle aus der GUI --
+    # -- commands from the GUI --
 
     def do_scan(self, job):
         cached = self.mode == "hotspot"
@@ -431,8 +431,8 @@ class WifiManager:
         existing = [p for p in self.profiles if p["ssid"] == ssid]
         active = self.mode == "client" and ssid == self.current_ssid
         created = False
-        # Hinweis: Das Passwort steht kurz in der Prozessliste von nmcli. Auf dem Pi gibt es außer
-        # root, pi und wol (dem Web-Server, der es ohnehin kennt) niemanden, der es lesen könnte.
+        # Note: the password briefly appears in the process list of nmcli. On the Pi there is nobody
+        # besides root, pi and wol (the web server, which knows it anyway) who could read it.
         if existing and psk:
             uuid = existing[0]["uuid"]
             self.nm("connection", "modify", "uuid", uuid, "802-11-wireless.hidden", hidden,
@@ -440,14 +440,14 @@ class WifiManager:
                     "wifi-sec.key-mgmt", "wpa-psk", "wifi-sec.psk", psk, *ipv4)
         else:
             if existing and active:
-                raise WifiError("„%s“ ist verbunden. Für die Umstellung auf ein offenes Netz "
-                                "zuerst ein anderes WLAN verbinden." % ssid)
+                raise WifiError("\"%s\" is connected. To switch it to an open network, "
+                                "connect to another Wi-Fi first." % ssid)
             for profile in existing:
                 self.nm("connection", "delete", "uuid", profile["uuid"])
             args = ["connection", "add", "type", "wifi", "ifname", self.iface, "con-name", ssid, "ssid", ssid,
                     "connection.autoconnect", "yes", "802-11-wireless.hidden", hidden,
                     "802-11-wireless.powersave", "2",
-                    # Immer die Hardware-MAC – sonst passen DHCP-Reservierung und Freigaben nicht
+                    # Always the hardware MAC - otherwise DHCP reservation and approvals do not match
                     "802-11-wireless.cloned-mac-address", "permanent"]
             if psk:
                 args += ["wifi-sec.key-mgmt", "wpa-psk", "wifi-sec.psk", psk]
@@ -458,26 +458,26 @@ class WifiManager:
         self.refresh_profiles()
         if uuid is None:
             uuid = next((p["uuid"] for p in self.profiles if p["ssid"] == ssid), None)
-        log.info("WLAN „%s“ gespeichert%s", ssid, " (feste Adresse %s)" % ipv4[3] if ipv4 else "")
+        log.info("Wi-Fi \"%s\" saved%s", ssid, " (static address %s)" % ipv4[3] if ipv4 else "")
 
         if self.mode == "client":
             job.reply({"ok": True, "switching": False,
-                       "message": "„%s“ gespeichert. Es wird genutzt, sobald das aktuelle WLAN nicht "
-                                  "erreichbar ist." % ssid})
+                       "message": "\"%s\" saved. It will be used as soon as the current Wi-Fi is not "
+                                  "reachable." % ssid})
             self._publish()
             return
 
-        # Antwort vor dem Umschalten senden – danach ist die Verbindung zum Handy weg.
-        job.reply({"ok": True, "switching": True, "message": "Verbinde mit „%s“ …" % ssid})
+        # Send the response before switching - afterwards the connection to the phone is gone.
+        job.reply({"ok": True, "switching": True, "message": "Connecting to \"%s\" ..." % ssid})
         self.pending, self.last_error = ssid, None
         self._publish()
         was_hotspot = self.mode == "hotspot"
         if was_hotspot:
-            time.sleep(2)  # dem Web-Server Zeit geben, die Antwort auszuliefern
+            time.sleep(2)  # give the web server time to deliver the response
             self.stop_hotspot()
         try:
             self.nm("--wait", "45", "connection", "up", "uuid", uuid, timeout=60)
-            log.info("Mit WLAN „%s“ verbunden", ssid)
+            log.info("Connected to Wi-Fi \"%s\"", ssid)
             self.last_online = self.clock()
         except WifiError as e:
             if created:
@@ -486,7 +486,7 @@ class WifiManager:
                 except WifiError:
                     pass
                 self.refresh_profiles()
-            self._error("Verbindung mit „%s“ fehlgeschlagen (%s). Bitte Netzname und Passwort prüfen."
+            self._error("Connection to \"%s\" failed (%s). Check network name and password."
                         % (ssid, e))
             if was_hotspot and self.enabled:
                 self.start_hotspot()
@@ -497,28 +497,28 @@ class WifiManager:
         ssid = job.args.get("ssid")
         matches = [p for p in self.profiles if p["ssid"] == ssid]
         if not matches:
-            raise WifiError("Dieses WLAN ist nicht gespeichert.")
+            raise WifiError("This Wi-Fi is not saved.")
         if self.mode == "client" and ssid == self.current_ssid:
-            raise WifiError("Das aktuell verbundene WLAN kann nicht entfernt werden.")
+            raise WifiError("The currently connected Wi-Fi cannot be removed.")
         for profile in matches:
             self.nm("connection", "delete", "uuid", profile["uuid"])
         self.refresh_profiles()
-        log.info("WLAN „%s“ entfernt", ssid)
+        log.info("Wi-Fi \"%s\" removed", ssid)
         job.reply({"ok": True})
 
     def do_hotspot_password(self, job):
-        password = validate_psk(job.args.get("password"), "Das Hotspot-Passwort")
+        password = validate_psk(job.args.get("password"), "The hotspot password")
         if len(password) == 64:
-            raise WifiError("Das Hotspot-Passwort muss 8 bis 63 Zeichen lang sein.")
+            raise WifiError("The hotspot password must be 8 to 63 characters long.")
         tmp = self.state_file + ".tmp"
         fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump({"password": password}, f)
         os.replace(tmp, self.state_file)
-        log.info("Hotspot-Passwort %s", "gesetzt" if password else "entfernt (offener Hotspot)")
-        later = " Gilt ab dem nächsten Start des Hotspots." if self.mode == "hotspot" else ""
-        job.reply({"ok": True, "message": ("Hotspot-Passwort gespeichert." if password
-                                           else "Hotspot ohne Passwort gespeichert.") + later})
+        log.info("Hotspot password %s", "set" if password else "removed (open hotspot)")
+        later = " Takes effect from the next start of the hotspot." if self.mode == "hotspot" else ""
+        job.reply({"ok": True, "message": ("Hotspot password saved." if password
+                                           else "Hotspot saved without password.") + later})
 
     # -- Worker --
 
@@ -527,18 +527,18 @@ class WifiManager:
         self.jobs.put(job)
         if job.done.wait(wait):
             return job.result
-        return {"ok": True, "pending": True, "message": "Wird ausgeführt …"}
+        return {"ok": True, "pending": True, "message": "In progress ..."}
 
     def run_job(self, job):
         handler = getattr(self, "do_" + job.name, None)
         try:
             if handler is None:
-                raise WifiError("Unbekannter Befehl")
+                raise WifiError("Unknown command")
             handler(job)
         except WifiError as e:
             job.reply({"ok": False, "error": str(e)})
         except Exception:
-            job.reply({"ok": False, "error": "Interner Fehler im WLAN-Dienst"})
+            job.reply({"ok": False, "error": "Internal error in the Wi-Fi service"})
             raise
         finally:
             job.reply({"ok": True})
@@ -549,7 +549,7 @@ class WifiManager:
             try:
                 self.tick()
             except Exception:  # noqa: BLE001
-                log.exception("Fehler in der WLAN-Prüfung")
+                log.exception("Error in the Wi-Fi check")
             try:
                 job = self.jobs.get(timeout=TICK)
             except queue.Empty:
@@ -557,19 +557,19 @@ class WifiManager:
             try:
                 self.run_job(job)
             except Exception:  # noqa: BLE001
-                log.exception("Fehler bei WLAN-Befehl %s", job.name)
+                log.exception("Error in Wi-Fi command %s", job.name)
 
 
 # ---------------------------------------------------------------- Unix-Socket
 
 
 class ControlServer:
-    """Eine JSON-Zeile pro Verbindung: {"cmd": "status"|"scan"|"connect"|...} → JSON-Antwort."""
+    """One JSON line per connection: {"cmd": "status"|"scan"|"connect"|...} -> JSON response."""
 
     WAIT = {"scan": 30, "connect": 25, "forget": 20, "hotspot_password": 10}
-    # VPN-Befehle laufen direkt (nicht in der WLAN-Warteschlange): Sie schreiben nur Dateien.
+    # VPN commands run directly (not in the Wi-Fi queue): they only write files.
     VPN = {"vpn_status": "status", "vpn_upload": "upload", "vpn_enable": "set_enabled", "vpn_remove": "remove"}
-    # DHCP/DNS: ebenfalls direkt, Methoden von netsvc.NetManager
+    # DHCP/DNS: also directly, methods of netsvc.NetManager
     NET = {
         "net_status": "status", "net_config": "config", "net_leases": "leases", "net_unknown": "unknown",
         "net_settings": "settings", "net_reservation_save": "reservation_save",
@@ -599,7 +599,7 @@ class ControlServer:
             pass
         self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         self.sock.bind(self.path)
-        os.chmod(self.path, 0o660)  # Gruppe wol (Group= in der systemd-Unit)
+        os.chmod(self.path, 0o660)  # group wol (Group= in the systemd unit)
         self.sock.listen(8)
         self.sock.settimeout(1)
 
@@ -627,7 +627,7 @@ class ControlServer:
                 creds = conn.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i"))
                 uid = struct.unpack("3i", creds)[1]
                 if uid not in self.allowed_uids:
-                    log.warning("WLAN-Socket: Zugriff von uid %d abgelehnt", uid)
+                    log.warning("Wi-Fi socket: access from uid %d denied", uid)
                     return
                 data = b""
                 while not data.endswith(b"\n") and len(data) <= MAX_REQUEST:
@@ -639,7 +639,7 @@ class ControlServer:
                     req = json.loads(data.decode("utf-8"))
                 except (UnicodeDecodeError, ValueError):
                     req = None
-                response = self.dispatch(req) if isinstance(req, dict) else {"ok": False, "error": "Ungültige Anfrage"}
+                response = self.dispatch(req) if isinstance(req, dict) else {"ok": False, "error": "Invalid request"}
                 conn.sendall(json.dumps(response, ensure_ascii=False).encode("utf-8") + b"\n")
             except OSError:
                 pass
@@ -665,11 +665,11 @@ class ControlServer:
                 return result if "ok" in result else dict(result, ok=True)
             except (netsvc.NetError, OSError, ValueError, TypeError) as e:
                 return {"ok": False, "error": str(e)}
-        return {"ok": False, "error": "Unbekannter Befehl"}
+        return {"ok": False, "error": "Unknown command"}
 
 
 def request(path, payload, timeout=35):
-    """Client-Seite für den Web-Server. Wirft OSError, wenn der Dienst nicht läuft."""
+    """Client side for the web server. Raises OSError if the service is not running."""
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
         sock.settimeout(timeout)
         sock.connect(path)
@@ -685,7 +685,7 @@ def request(path, payload, timeout=35):
 
 def run_daemon(cfg):
     if os.geteuid() != 0:
-        log.warning("Läuft nicht als root – NetworkManager wird Änderungen ablehnen")
+        log.warning("Not running as root - NetworkManager will reject changes")
     state_dir = os.environ.get("STATE_DIRECTORY", "/var/lib/wol-wifi").split(":")[0]
     os.makedirs(state_dir, mode=0o700, exist_ok=True)
     status_led = led.StatusLed() if cfg["status_led"] else None
@@ -701,8 +701,8 @@ def run_daemon(cfg):
     stop = threading.Event()
     for sig in (signal.SIGTERM, signal.SIGINT):
         signal.signal(sig, lambda *_: stop.set())
-    log.info("WLAN-Verwaltung für %s gestartet (Hotspot %s: „%s“)", manager.iface,
-             "aktiv" if manager.enabled else "aus", manager.hotspot_ssid)
+    log.info("Wi-Fi management for %s started (hotspot %s: \"%s\")", manager.iface,
+             "active" if manager.enabled else "off", manager.hotspot_ssid)
     threading.Thread(target=manager.run, args=(stop,), daemon=True).start()
     server.serve(stop)
     if status_led is not None:

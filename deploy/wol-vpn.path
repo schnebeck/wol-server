@@ -1,9 +1,9 @@
 [Unit]
-Description=WOL-Server: VPN-Aufträge aus der Web-GUI erkennen
+Description=WOL-Server: detect VPN jobs from the web GUI
 Documentation=file:///opt/wol-server/README.md
 
 [Path]
-# Schreibt der Dienst wol-wifi (nach Prüfung der hochgeladenen Konfiguration)
+# Written by the wol-wifi service (after validating the uploaded configuration)
 PathChanged=/var/lib/wol-wifi/vpn/request
 Unit=wol-vpn.service
 

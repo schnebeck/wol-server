@@ -1,8 +1,8 @@
-"""DHCP und DNS mit dnsmasq: Datenmodell, Prüfung, Konfiguration, Import und Auswertung.
+"""DHCP and DNS with dnsmasq: data model, validation, configuration, import and evaluation.
 
-Reine Logik ohne Seiteneffekte – genutzt vom Root-Dienst (netsvc) und in den Tests. Die GUI
-liefert nur strukturierte Daten; die dnsmasq-Konfiguration entsteht ausschließlich hier aus
-geprüften Feldern, damit sich keine Optionen (z. B. dhcp-script) einschleusen lassen.
+Pure logic without side effects - used by the root service (netsvc) and in the tests. The GUI
+only supplies structured data; the dnsmasq configuration is built exclusively here from
+validated fields, so no options (e.g. dhcp-script) can be injected.
 """
 import copy
 import ipaddress
@@ -51,11 +51,11 @@ def new_id():
     return uuid.uuid4().hex[:12]
 
 
-# ---------------------------------------------------------------- Namen und Adressen
+# ---------------------------------------------------------------- Names and addresses
 
 
 def normalize_name(raw):
-    """Gerätenamen zu einem gültigen DNS-Namen (RFC 1123) machen: „Anna's iPhone“ → annas-iphone."""
+    """Turn a device name into a valid DNS name (RFC 1123): "Anna's iPhone" → annas-iphone."""
     if not isinstance(raw, str):
         return ""
     text = unicodedata.normalize("NFKD", raw.translate(_UMLAUTS))
@@ -75,20 +75,20 @@ def valid_domain(name):
 
 
 def is_private_mac(mac):
-    """Lokal verwaltete MAC (zweitniedrigstes Bit im ersten Byte): typisch für „private WLAN-Adressen“."""
+    """Locally administered MAC (second-lowest bit of the first byte): typical for "private Wi-Fi addresses"."""
     try:
         return bool(int(mac.split(":")[0], 16) & 0x02)
     except (ValueError, AttributeError, IndexError):
         return False
 
 
-def _mac(value, what="MAC-Adresse"):
+def _mac(value, what="MAC address"):
     try:
         mac = normalize_mac(value).lower()
     except (ValueError, AttributeError, TypeError):
-        raise NetError("%s ungültig: %s" % (what, value)) from None
+        raise NetError("Invalid %s: %s" % (what, value)) from None
     if int(mac[:2], 16) & 0x01:
-        raise NetError("%s %s ist eine Multicast-Adresse" % (what, mac))
+        raise NetError("%s %s is a multicast address" % (what, mac))
     return mac
 
 
@@ -96,7 +96,7 @@ def _ipv4(value, what):
     try:
         ip = ipaddress.IPv4Address(str(value).strip())
     except (ipaddress.AddressValueError, ValueError):
-        raise NetError("%s: keine gültige IPv4-Adresse (%s)" % (what, value)) from None
+        raise NetError("%s: not a valid IPv4 address (%s)" % (what, value)) from None
     return ip
 
 
@@ -104,21 +104,21 @@ def _ip_any(value, what):
     try:
         return ipaddress.ip_address(str(value).strip())
     except ValueError:
-        raise NetError("%s: keine gültige IP-Adresse (%s)" % (what, value)) from None
+        raise NetError("%s: not a valid IP address (%s)" % (what, value)) from None
 
 
 def _text(value, what, maxlen, required=False):
     if value is None:
         value = ""
     if not isinstance(value, str):
-        raise NetError("%s: Text erwartet" % what)
+        raise NetError("%s: text expected" % what)
     value = value.strip()
     if required and not value:
-        raise NetError("%s darf nicht leer sein" % what)
+        raise NetError("%s must not be empty" % what)
     if len(value) > maxlen:
-        raise NetError("%s ist zu lang (max. %d Zeichen)" % (what, maxlen))
+        raise NetError("%s is too long (max. %d characters)" % (what, maxlen))
     if any(ord(c) < 32 for c in value):
-        raise NetError("%s enthält Steuerzeichen" % what)
+        raise NetError("%s contains control characters" % what)
     return value
 
 
@@ -126,9 +126,9 @@ def _int(value, what, lo, hi):
     try:
         number = int(value)
     except (TypeError, ValueError):
-        raise NetError("%s: Zahl erwartet" % what) from None
+        raise NetError("%s: number expected" % what) from None
     if not lo <= number <= hi:
-        raise NetError("%s muss zwischen %d und %d liegen" % (what, lo, hi))
+        raise NetError("%s must be between %d and %d" % (what, lo, hi))
     return number
 
 
@@ -138,32 +138,32 @@ def _ip_list(values, what, limit=4):
     if isinstance(values, str):
         values = [v for v in re.split(r"[\s,;]+", values) if v]
     if not isinstance(values, list) or len(values) > limit:
-        raise NetError("%s: höchstens %d Adressen" % (what, limit))
+        raise NetError("%s: at most %d addresses" % (what, limit))
     return [str(_ipv4(v, what)) for v in values]
 
 
 def parse_lease_time(value):
-    """Sekunden aus 600, "600", "10m", "12h", "1d" oder "7 Tage" – geprüft auf 2 min bis 7 Tage."""
+    """Seconds from 600, "600", "10m", "12h", "1d" or "7 Tage" (German units accepted) - checked for 2 min to 7 days."""
     if isinstance(value, bool):
-        raise NetError("Lease-Zeit ungültig")
+        raise NetError("Invalid lease time")
     if isinstance(value, (int, float)):
         seconds = int(value)
     else:
         match = re.match(r"^\s*(\d+)\s*(s|sek|m|min|h|std|d|t|tag|tage)?\s*$", str(value or "").lower())
         if not match:
-            raise NetError("Lease-Zeit ungültig: %s (z. B. 600, 30m, 12h, 1d)" % value)
+            raise NetError("Invalid lease time: %s (e.g. 600, 30m, 12h, 1d)" % value)
         factor = {"s": 1, "sek": 1, "m": 60, "min": 60, "h": 3600, "std": 3600, "d": 86400, "t": 86400,
                   "tag": 86400, "tage": 86400}.get(match.group(2) or "s")
         seconds = int(match.group(1)) * factor
     if not LEASE_MIN <= seconds <= LEASE_MAX:
-        raise NetError("Lease-Zeit muss zwischen 2 Minuten und 7 Tagen liegen")
+        raise NetError("Lease time must be between 2 minutes and 7 days")
     return seconds
 
 
 def fmt_lease_time(seconds):
     if seconds % 86400 == 0:
         days = seconds // 86400
-        return "%d Tag%s" % (days, "" if days == 1 else "e")
+        return "%d day%s" % (days, "" if days == 1 else "s")
     if seconds % 3600 == 0:
         return "%d h" % (seconds // 3600)
     if seconds % 60 == 0:
@@ -178,30 +178,30 @@ def network_of(cfg):
     return ipaddress.IPv4Network("%s/%d" % (server["ip"], server["prefix"]), strict=False)
 
 
-# ---------------------------------------------------------------- Prüfung
+# ---------------------------------------------------------------- Validation
 
 
 def validate_reservation(data, net=None):
     if not isinstance(data, dict):
-        raise NetError("Reservierung: Objekt erwartet")
+        raise NetError("Reservation: object expected")
     mac = _mac(data.get("mac"))
-    ip = _ipv4(data.get("ip"), "IP-Adresse")
+    ip = _ipv4(data.get("ip"), "IP address")
     if net is not None:
         if ip not in net:
-            raise NetError("%s liegt nicht im Netz %s" % (ip, net))
+            raise NetError("%s is outside the network %s" % (ip, net))
         if ip in (net.network_address, net.broadcast_address):
-            raise NetError("%s ist Netz- oder Broadcast-Adresse" % ip)
+            raise NetError("%s is the network or broadcast address" % ip)
     raw_name = _text(data.get("name"), "Name", 63)
     name = normalize_name(raw_name)
     if raw_name and not name:
-        raise NetError("Name „%s“ enthält kein gültiges Zeichen" % raw_name)
+        raise NetError('Name "%s" contains no valid character' % raw_name)
     lease = data.get("lease_time")
     return {
         "id": data.get("id") if isinstance(data.get("id"), str) and re.match(r"^\w{1,32}$", data["id"]) else new_id(),
         "mac": mac,
         "ip": str(ip),
         "name": name,
-        "comment": _text(data.get("comment"), "Kommentar", 120),
+        "comment": _text(data.get("comment"), "Comment", 120),
         "enabled": bool(data.get("enabled", True)),
         "lease_time": None if lease in (None, "", 0) else parse_lease_time(lease),
     }
@@ -209,44 +209,44 @@ def validate_reservation(data, net=None):
 
 def validate_record(data):
     if not isinstance(data, dict):
-        raise NetError("DNS-Eintrag: Objekt erwartet")
+        raise NetError("DNS record: object expected")
     rtype = data.get("type")
     if rtype not in RECORD_TYPES:
-        raise NetError("Unbekannter Eintragstyp: %s" % rtype)
+        raise NetError("Unknown record type: %s" % rtype)
     raw_name = _text(data.get("name"), "Name", 63, required=rtype != "mx").lower()
     record = {
         "id": data.get("id") if isinstance(data.get("id"), str) and re.match(r"^\w{1,32}$", data["id"]) else new_id(),
-        "type": rtype, "name": raw_name, "comment": _text(data.get("comment"), "Kommentar", 120),
+        "type": rtype, "name": raw_name, "comment": _text(data.get("comment"), "Comment", 120),
     }
     if rtype == "srv":
         if not _SRV_NAME.match(raw_name):
-            raise NetError("SRV-Name im Format _dienst._tcp, z. B. _ldap._tcp")
+            raise NetError("SRV name in the format _service._tcp, e.g. _ldap._tcp")
     elif raw_name and not valid_label(raw_name):
-        raise NetError("Name „%s“ ungültig: nur a–z, 0–9 und -, ohne Punkte (die Domäne wird angehängt)" % raw_name)
-    value = _text(data.get("value"), "Wert", 255, required=True)
+        raise NetError('Invalid name "%s": only a-z, 0-9 and -, no dots (the domain is appended)' % raw_name)
+    value = _text(data.get("value"), "Value", 255, required=True)
     if rtype == "host":
-        value = str(_ip_any(value, "IP-Adresse"))
+        value = str(_ip_any(value, "IP address"))
     elif rtype in ("alias", "mx", "srv"):
         value = value.lower().rstrip(".")
         if not valid_domain(value):
-            raise NetError("Ziel „%s“ ist kein gültiger Name" % value)
+            raise NetError('Target "%s" is not a valid name' % value)
     elif rtype == "txt":
         if '"' in value or "\\" in value:
-            raise NetError("TXT-Text darf keine Anführungszeichen oder \\ enthalten")
+            raise NetError("TXT text must not contain quotes or \\")
     record["value"] = value
     if rtype == "mx":
-        record["priority"] = _int(data.get("priority", 10), "Priorität", 0, 65535)
+        record["priority"] = _int(data.get("priority", 10), "Priority", 0, 65535)
     if rtype == "srv":
         record["port"] = _int(data.get("port"), "Port", 1, 65535)
-        record["priority"] = _int(data.get("priority", 0), "Priorität", 0, 65535)
-        record["weight"] = _int(data.get("weight", 0), "Gewicht", 0, 65535)
+        record["priority"] = _int(data.get("priority", 0), "Priority", 0, 65535)
+        record["weight"] = _int(data.get("weight", 0), "Weight", 0, 65535)
     return record
 
 
 def validate_settings(cfg, data):
-    """Grundeinstellungen aus der GUI übernehmen. Liefert eine neue Konfiguration."""
+    """Take over basic settings from the GUI. Returns a new configuration."""
     if not isinstance(data, dict):
-        raise NetError("Einstellungen: Objekt erwartet")
+        raise NetError("Settings: object expected")
     new = copy.deepcopy(cfg)
     server, dhcp, dns = data.get("server") or {}, data.get("dhcp") or {}, data.get("dns") or {}
     for key in ("ip", "prefix", "name", "interface", "port"):
@@ -262,9 +262,9 @@ def validate_settings(cfg, data):
 
 
 def validate_config(data):
-    """Gesamte Konfiguration prüfen und normalisieren (auch beim Import und vor dem Übernehmen)."""
+    """Validate and normalize the whole configuration (also on import and before applying)."""
     if not isinstance(data, dict):
-        raise NetError("Konfiguration: Objekt erwartet")
+        raise NetError("Configuration: object expected")
     cfg = copy.deepcopy(DEFAULT_NETWORK)
     for section in ("server", "dhcp", "dns"):
         if isinstance(data.get(section), dict):
@@ -273,80 +273,80 @@ def validate_config(data):
 
     s["interface"] = _text(s["interface"], "Interface", 15, required=True)
     if not _IFACE.match(s["interface"]):
-        raise NetError("Interface ungültig: %s" % s["interface"])
-    s["prefix"] = _int(s["prefix"], "Netzmaske (Präfix)", 8, 30)
+        raise NetError("Invalid interface: %s" % s["interface"])
+    s["prefix"] = _int(s["prefix"], "Netmask (prefix)", 8, 30)
     s["port"] = _int(s["port"], "DNS-Port", 1, 65535)
-    s["name"] = normalize_name(_text(s["name"], "Name des Servers", 63)) or "wol"
-    s["ip"] = str(_ipv4(s["ip"], "Adresse des Servers")) if s["ip"] else ""
+    s["name"] = normalize_name(_text(s["name"], "Server name", 63)) or "wol"
+    s["ip"] = str(_ipv4(s["ip"], "Server address")) if s["ip"] else ""
     net = network_of(cfg)
 
     n["enabled"] = bool(n["enabled"])
-    n["domain"] = _text(n["domain"], "Domäne", 253, required=True).lower().rstrip(".")
+    n["domain"] = _text(n["domain"], "Domain", 253, required=True).lower().rstrip(".")
     if not valid_domain(n["domain"]) or "." not in n["domain"]:
-        raise NetError("Domäne ungültig: %s (z. B. home.arpa)" % n["domain"])
+        raise NetError("Invalid domain: %s (e.g. home.arpa)" % n["domain"])
     if n["domain"].endswith(".local") or n["domain"] == "local":
-        raise NetError("Domänen unter .local sind für mDNS reserviert (Alternative z. B. home.arpa)")
-    n["upstream"] = _ip_list(n["upstream"], "Upstream-DNS")
+        raise NetError("Domains under .local are reserved for mDNS (alternative e.g. home.arpa)")
+    n["upstream"] = _ip_list(n["upstream"], "Upstream DNS")
     n["ttl"] = _int(n["ttl"], "TTL", 0, 86400)
-    n["cache_size"] = _int(n["cache_size"], "Cache-Größe", 0, 10000)
+    n["cache_size"] = _int(n["cache_size"], "Cache size", 0, 10000)
     n["log_queries"] = bool(n["log_queries"])
     conditional = []
     for item in n["conditional"] or []:
         if not isinstance(item, dict):
-            raise NetError("Bedingte Weiterleitung: Objekt erwartet")
-        domain = _text(item.get("domain"), "Weiterleitungs-Domäne", 253, required=True).lower().rstrip(".")
+            raise NetError("Conditional forwarding: object expected")
+        domain = _text(item.get("domain"), "Forwarding domain", 253, required=True).lower().rstrip(".")
         if not valid_domain(domain):
-            raise NetError("Weiterleitungs-Domäne ungültig: %s" % domain)
+            raise NetError("Invalid forwarding domain: %s" % domain)
         if domain == n["domain"] or domain.endswith("." + n["domain"]):
-            raise NetError("%s gehört zur eigenen Domäne und kann nicht weitergeleitet werden" % domain)
-        conditional.append({"domain": domain, "server": str(_ipv4(item.get("server"), "Server für %s" % domain))})
+            raise NetError("%s is part of the local domain and cannot be forwarded" % domain)
+        conditional.append({"domain": domain, "server": str(_ipv4(item.get("server"), "Server for %s" % domain))})
     if len(conditional) > 20:
-        raise NetError("Höchstens 20 bedingte Weiterleitungen")
+        raise NetError("At most 20 conditional forwardings")
     n["conditional"] = conditional
 
     d["enabled"] = bool(d["enabled"])
     if d["mode"] not in MODES:
-        raise NetError("DHCP-Modus ungültig: %s" % d["mode"])
+        raise NetError("Invalid DHCP mode: %s" % d["mode"])
     d["lease_time"] = parse_lease_time(d["lease_time"])
     d["gateway"] = str(_ipv4(d["gateway"], "Gateway")) if d["gateway"] else ""
-    d["dns"] = _ip_list(d["dns"], "DNS-Server für Clients")
-    d["ntp"] = _ip_list(d["ntp"], "NTP-Server")
+    d["dns"] = _ip_list(d["dns"], "DNS servers for clients")
+    d["ntp"] = _ip_list(d["ntp"], "NTP servers")
     search = d["search"] or []
     if isinstance(search, str):
         search = [v for v in re.split(r"[\s,;]+", search) if v]
     if not isinstance(search, list) or len(search) > 6:
-        raise NetError("Höchstens 6 zusätzliche Suchdomänen")
+        raise NetError("At most 6 additional search domains")
     d["search"] = []
     for item in search:
-        item = _text(item, "Suchdomäne", 253).lower().rstrip(".")
+        item = _text(item, "Search domain", 253).lower().rstrip(".")
         if not valid_domain(item):
-            raise NetError("Suchdomäne ungültig: %s" % item)
+            raise NetError("Invalid search domain: %s" % item)
         if item != n["domain"] and item not in d["search"]:
             d["search"].append(item)
-    d["boot_file"] = _text(d["boot_file"], "Boot-Datei", 128)
+    d["boot_file"] = _text(d["boot_file"], "Boot file", 128)
     if d["boot_file"] and (not _BOOT_FILE.match(d["boot_file"]) or ".." in d["boot_file"]):
-        raise NetError("Boot-Datei ungültig (nur Buchstaben, Ziffern, . _ - /)")
-    d["boot_server"] = str(_ipv4(d["boot_server"], "TFTP-Server")) if d["boot_server"] else ""
+        raise NetError("Invalid boot file (only letters, digits, . _ - /)")
+    d["boot_server"] = str(_ipv4(d["boot_server"], "TFTP server")) if d["boot_server"] else ""
     d["tftp"] = bool(d["tftp"])
     for key in ("range_start", "range_end"):
-        d[key] = str(_ipv4(d[key], "Adressbereich")) if d[key] else ""
+        d[key] = str(_ipv4(d[key], "Address range")) if d[key] else ""
 
     if net is not None:
-        for what, ip in (("Gateway", d["gateway"]), ("Bereichsanfang", d["range_start"]), ("Bereichsende", d["range_end"])):
+        for what, ip in (("Gateway", d["gateway"]), ("Range start", d["range_start"]), ("Range end", d["range_end"])):
             if ip and ipaddress.IPv4Address(ip) not in net:
-                raise NetError("%s %s liegt nicht im Netz %s" % (what, ip, net))
+                raise NetError("%s %s is outside the network %s" % (what, ip, net))
     if d["mode"] == "range":
         if not (d["range_start"] and d["range_end"]):
-            raise NetError("Für den Modus „Adressbereich“ bitte Anfang und Ende angeben")
+            raise NetError('Mode "address range" needs a start and an end')
         if ipaddress.IPv4Address(d["range_start"]) > ipaddress.IPv4Address(d["range_end"]):
-            raise NetError("Der Adressbereich beginnt nach seinem Ende")
+            raise NetError("The address range starts after its end")
     if d["enabled"]:
         if net is None:
-            raise NetError("Für DHCP braucht der Server eine feste Adresse (Einstellungen → Server)")
+            raise NetError("DHCP requires a static IP address for the server (Settings → Server)")
         if not d["gateway"]:
-            raise NetError("Für DHCP bitte ein Gateway (Router) angeben")
+            raise NetError("DHCP requires a gateway (router)")
     if n["enabled"] and not n["upstream"]:
-        raise NetError("Für DNS bitte mindestens einen Upstream-Server angeben (z. B. den Router)")
+        raise NetError("DNS requires at least one upstream server (e.g. the router)")
 
     reservations, records, ignored = [], [], []
     for item in data.get("reservations") or []:
@@ -355,53 +355,53 @@ def validate_config(data):
         records.append(validate_record(item))
     for item in data.get("ignored") or []:
         if isinstance(item, dict):
-            ignored.append({"mac": _mac(item.get("mac")), "comment": _text(item.get("comment"), "Kommentar", 120),
+            ignored.append({"mac": _mac(item.get("mac")), "comment": _text(item.get("comment"), "Comment", 120),
                             "ts": float(item.get("ts") or 0)})
     if len(reservations) > MAX_RESERVATIONS or len(records) > MAX_RECORDS or len(ignored) > MAX_IGNORED:
-        raise NetError("Zu viele Einträge")
+        raise NetError("Too many entries")
     cfg["reservations"], cfg["records"], cfg["ignored"] = reservations, records, ignored
     check_conflicts(cfg)
     return cfg
 
 
 def check_conflicts(cfg):
-    """Eindeutigkeit von MAC, IP und Namen; Aliasse müssen auf bekannte Namen zeigen."""
+    """Uniqueness of MAC, IP and names; aliases must point to known names."""
     net = network_of(cfg)
     d = cfg["dhcp"]
     server_ip = cfg["server"]["ip"]
-    macs, ips, names = {}, {}, {cfg["server"]["name"]: "dem WOL-Server"}
+    macs, ips, names = {}, {}, {cfg["server"]["name"]: "the WOL-Server"}
     rng = None
     if d["mode"] == "range" and d["range_start"] and d["range_end"]:
         rng = (ipaddress.IPv4Address(d["range_start"]), ipaddress.IPv4Address(d["range_end"]))
     for r in cfg["reservations"]:
         label = r["name"] or r["mac"]
         if r["mac"] in macs:
-            raise NetError("MAC %s ist doppelt (%s und %s)" % (r["mac"], macs[r["mac"]], label))
+            raise NetError("MAC %s is duplicated (%s and %s)" % (r["mac"], macs[r["mac"]], label))
         macs[r["mac"]] = label
         if r["ip"] in ips:
-            raise NetError("IP %s ist doppelt vergeben (%s und %s)" % (r["ip"], ips[r["ip"]], label))
+            raise NetError("IP %s is assigned twice (%s and %s)" % (r["ip"], ips[r["ip"]], label))
         if r["ip"] == server_ip:
-            raise NetError("IP %s gehört dem WOL-Server selbst (%s)" % (r["ip"], label))
+            raise NetError("IP %s belongs to the WOL-Server itself (%s)" % (r["ip"], label))
         ips[r["ip"]] = label
         if rng and rng[0] <= ipaddress.IPv4Address(r["ip"]) <= rng[1]:
-            raise NetError("IP %s von %s liegt im dynamischen Bereich; Reservierungen müssen außerhalb liegen" % (r["ip"], label))
+            raise NetError("IP %s of %s is in the dynamic range; reservations must be outside it" % (r["ip"], label))
         if net is not None and ipaddress.IPv4Address(r["ip"]) not in net:
-            raise NetError("IP %s von %s liegt nicht im Netz %s" % (r["ip"], label, net))
+            raise NetError("IP %s of %s is outside the network %s" % (r["ip"], label, net))
         if r["name"]:
             if r["name"] in names:
-                raise NetError("Name „%s“ ist doppelt (%s)" % (r["name"], names[r["name"]]))
-            names[r["name"]] = "Reservierung %s" % r["ip"]
-    # Host-Einträge dürfen sich einen Namen teilen (z. B. IPv4 und IPv6), sonst ist jeder Name eindeutig.
+                raise NetError('Name "%s" is duplicated (%s)' % (r["name"], names[r["name"]]))
+            names[r["name"]] = "reservation %s" % r["ip"]
+    # Host records may share a name (e.g. IPv4 and IPv6); otherwise every name is unique.
     host_names = set()
     for rec in cfg["records"]:
         if rec["type"] == "host":
             if rec["name"] in names:
-                raise NetError("Name „%s“ ist schon vergeben (%s)" % (rec["name"], names[rec["name"]]))
+                raise NetError('Name "%s" is already taken (%s)' % (rec["name"], names[rec["name"]]))
             host_names.add(rec["name"])
     for rec in cfg["records"]:
         if rec["type"] == "alias":
             if rec["name"] in names or rec["name"] in host_names:
-                raise NetError("Alias „%s“ kollidiert mit einem vorhandenen Namen" % rec["name"])
+                raise NetError('Alias "%s" collides with an existing name' % rec["name"])
             names[rec["name"]] = "Alias"
     local = set(names) | host_names
     domain = cfg["dns"]["domain"]
@@ -410,18 +410,18 @@ def check_conflicts(cfg):
             target = rec["value"]
             short = target[: -len(domain) - 1] if target.endswith("." + domain) else target
             if short not in local:
-                raise NetError("Alias „%s“: Ziel „%s“ ist kein lokaler Name "
-                               "(Reservierung, Eintrag oder WOL-Server)" % (rec["name"], target))
+                raise NetError('Alias "%s": target "%s" is not a local name '
+                               "(reservation, record or WOL-Server)" % (rec["name"], target))
             if short == rec["name"]:
-                raise NetError("Alias „%s“ zeigt auf sich selbst" % rec["name"])
+                raise NetError('Alias "%s" points to itself' % rec["name"])
     return True
 
 
-# ---------------------------------------------------------------- Hilfen für die GUI
+# ---------------------------------------------------------------- Helpers for the GUI
 
 
 def next_free_ip(cfg, leases=(), start_host=10):
-    """Niedrigste freie Adresse ab .start_host: nicht Server, Gateway, Reservierung, Eintrag, Lease, Bereich."""
+    """Lowest free address from .start_host on: not server, gateway, reservation, record, lease or range."""
     net = network_of(cfg)
     if net is None:
         return None
@@ -443,7 +443,7 @@ def next_free_ip(cfg, leases=(), start_host=10):
 
 
 def unique_name(cfg, wanted, ignore_id=None):
-    """Freien Namen finden: annas-iphone, annas-iphone-2, …"""
+    """Find a free name: annas-iphone, annas-iphone-2, …"""
     taken = {cfg["server"]["name"]}
     taken.update(r["name"] for r in cfg["reservations"] if r["name"] and r["id"] != ignore_id)
     taken.update(rec["name"] for rec in cfg["records"] if rec["type"] in ("host", "alias"))
@@ -457,25 +457,25 @@ def unique_name(cfg, wanted, ignore_id=None):
 
 
 SETTING_LABELS = {
-    ("server", "ip"): "Adresse des Servers", ("server", "prefix"): "Netzmaske", ("server", "name"): "Name des Servers",
-    ("server", "interface"): "Interface", ("server", "port"): "DNS-Port",
-    ("dhcp", "enabled"): "DHCP", ("dhcp", "mode"): "DHCP-Modus", ("dhcp", "range_start"): "Bereichsanfang",
-    ("dhcp", "range_end"): "Bereichsende", ("dhcp", "lease_time"): "Lease-Zeit", ("dhcp", "gateway"): "Gateway",
-    ("dhcp", "dns"): "DNS-Server für Clients", ("dhcp", "ntp"): "NTP-Server", ("dhcp", "search"): "Suchdomänen",
-    ("dhcp", "boot_file"): "Boot-Datei", ("dhcp", "boot_server"): "TFTP-Server", ("dhcp", "tftp"): "Eigener TFTP-Server",
-    ("dns", "enabled"): "DNS", ("dns", "domain"): "Domäne", ("dns", "upstream"): "Upstream-DNS",
-    ("dns", "conditional"): "Bedingte Weiterleitungen", ("dns", "ttl"): "TTL", ("dns", "cache_size"): "Cache-Größe",
-    ("dns", "log_queries"): "Abfrageprotokoll",
+    ("server", "ip"): "Server address", ("server", "prefix"): "Netmask", ("server", "name"): "Server name",
+    ("server", "interface"): "Interface", ("server", "port"): "DNS port",
+    ("dhcp", "enabled"): "DHCP", ("dhcp", "mode"): "DHCP mode", ("dhcp", "range_start"): "Range start",
+    ("dhcp", "range_end"): "Range end", ("dhcp", "lease_time"): "Lease time", ("dhcp", "gateway"): "Gateway",
+    ("dhcp", "dns"): "DNS servers for clients", ("dhcp", "ntp"): "NTP servers", ("dhcp", "search"): "Search domains",
+    ("dhcp", "boot_file"): "Boot file", ("dhcp", "boot_server"): "TFTP server", ("dhcp", "tftp"): "Own TFTP server",
+    ("dns", "enabled"): "DNS", ("dns", "domain"): "Domain", ("dns", "upstream"): "Upstream DNS",
+    ("dns", "conditional"): "Conditional forwarding", ("dns", "ttl"): "TTL", ("dns", "cache_size"): "Cache size",
+    ("dns", "log_queries"): "Query log",
 }
 
 
 def _fmt_value(section, key, value):
     if isinstance(value, bool):
-        return "an" if value else "aus"
+        return "on" if value else "off"
     if key == "lease_time":
         return fmt_lease_time(value)
     if key == "mode":
-        return "nur bekannte Geräte" if value == "known-only" else "Adressbereich"
+        return "known devices only" if value == "known-only" else "address range"
     if isinstance(value, list):
         if value and isinstance(value[0], dict):
             return ", ".join("%s → %s" % (v["domain"], v["server"]) for v in value) or "–"
@@ -496,7 +496,7 @@ def _rec_label(rec):
 
 
 def diff(old, new):
-    """Lesbare Liste der Änderungen von old nach new (für Übernehmen-Leiste und Verlauf)."""
+    """Readable list of the changes from old to new (for the Apply bar and the History)."""
     changes = []
     for (section, key), label in SETTING_LABELS.items():
         a, b = old[section].get(key), new[section].get(key)
@@ -506,47 +506,47 @@ def diff(old, new):
     news = {r["id"]: r for r in new["reservations"]}
     for rid, r in news.items():
         if rid not in olds:
-            changes.append("Reservierung neu: %s" % _res_label(r))
+            changes.append("New reservation: %s" % _res_label(r))
         elif olds[rid] != r:
             o = olds[rid]
             parts = [p for p, k in (("IP %s → %s" % (o["ip"], r["ip"]), "ip"), ("Name %s → %s" % (o["name"] or "–", r["name"] or "–"), "name"),
                                     ("MAC %s → %s" % (o["mac"], r["mac"]), "mac"),
-                                    ("aktiv" if r["enabled"] else "inaktiv", "enabled"),
-                                    ("Lease-Zeit", "lease_time"), ("Kommentar", "comment")) if o[k] != r[k]]
-            changes.append("Reservierung %s: %s" % (r["name"] or r["mac"], ", ".join(parts)))
+                                    ("active" if r["enabled"] else "inactive", "enabled"),
+                                    ("Lease time", "lease_time"), ("Comment", "comment")) if o[k] != r[k]]
+            changes.append("Reservation %s: %s" % (r["name"] or r["mac"], ", ".join(parts)))
     for rid, r in olds.items():
         if rid not in news:
-            changes.append("Reservierung entfernt: %s" % _res_label(r))
+            changes.append("Removed reservation: %s" % _res_label(r))
     oldr = {r["id"]: r for r in old["records"]}
     newr = {r["id"]: r for r in new["records"]}
     for rid, r in newr.items():
         if rid not in oldr:
-            changes.append("DNS-Eintrag neu: %s" % _rec_label(r))
+            changes.append("New DNS record: %s" % _rec_label(r))
         elif oldr[rid] != r:
-            changes.append("DNS-Eintrag geändert: %s" % _rec_label(r))
+            changes.append("Changed DNS record: %s" % _rec_label(r))
     for rid, r in oldr.items():
         if rid not in newr:
-            changes.append("DNS-Eintrag entfernt: %s" % _rec_label(r))
+            changes.append("Removed DNS record: %s" % _rec_label(r))
     oldi = {i["mac"] for i in old["ignored"]}
     newi = {i["mac"] for i in new["ignored"]}
-    changes += ["Ignoriert: %s" % m for m in sorted(newi - oldi)]
-    changes += ["Nicht mehr ignoriert: %s" % m for m in sorted(oldi - newi)]
+    changes += ["Ignored: %s" % m for m in sorted(newi - oldi)]
+    changes += ["No longer ignored: %s" % m for m in sorted(oldi - newi)]
     return changes
 
 
-# ---------------------------------------------------------------- dnsmasq-Konfiguration
+# ---------------------------------------------------------------- dnsmasq configuration
 
 HOOK = "/opt/wol-server/deploy/dns-lease-hook.sh"
 
 
 def render(cfg, conf_dir="/etc/wol-dns", data_dir="/var/lib/wol-dns", user="dnsmasq", hook=HOOK):
-    """Dateien für dnsmasq: {"dnsmasq.conf": …, "hosts.dhcp": …, "hosts.dns": …}."""
+    """Files for dnsmasq: {"dnsmasq.conf": …, "hosts.dhcp": …, "hosts.dns": …}."""
     cfg = validate_config(cfg)
     s, d, n = cfg["server"], cfg["dhcp"], cfg["dns"]
     net = network_of(cfg)
     domain = n["domain"]
     lines = [
-        "# Erzeugt vom WOL-Server – Änderungen bitte über die Web-GUI (Netzwerk), nicht hier.",
+        "# Generated by WOL-Server - make changes in the web GUI (Network), not here.",
         "interface=%s" % s["interface"],
         "bind-dynamic",
         "user=%s" % user,
@@ -567,7 +567,7 @@ def render(cfg, conf_dir="/etc/wol-dns", data_dir="/var/lib/wol-dns", user="dnsm
         lines += ["server=/%s/%s" % (c["domain"], c["server"]) for c in n["conditional"]]
         lines += ["local=/%s/" % domain, "domain=%s" % domain, "expand-hosts",
                   "addn-hosts=%s/hosts.dns" % conf_dir]
-        def full(target):  # Ziele ohne Punkt sind lokale Namen
+        def full(target):  # targets without a dot are local names
             return target if "." in target else "%s.%s" % (target, domain)
 
         for rec in cfg["records"]:
@@ -614,7 +614,7 @@ def render(cfg, conf_dir="/etc/wol-dns", data_dir="/var/lib/wol-dns", user="dnsm
             "dhcp-scriptuser=%s" % user,
             "log-dhcp",
         ]
-    hosts_dhcp = ["# MAC,IP,Name[,Lease] – erzeugt vom WOL-Server"]
+    hosts_dhcp = ["# MAC,IP,Name[,Lease] - generated by WOL-Server"]
     for r in cfg["reservations"]:
         if not r["enabled"]:
             continue
@@ -622,13 +622,13 @@ def render(cfg, conf_dir="/etc/wol-dns", data_dir="/var/lib/wol-dns", user="dnsm
         if r["lease_time"]:
             fields.append(str(r["lease_time"]))
         hosts_dhcp.append(",".join(fields))
-    hosts_dns = ["# IP Name – erzeugt vom WOL-Server"]
+    hosts_dns = ["# IP Name - generated by WOL-Server"]
     if s["ip"]:
         hosts_dns.append("%s %s" % (s["ip"], s["name"]))
     for rec in cfg["records"]:
         if rec["type"] == "host":
             hosts_dns.append("%s %s" % (rec["value"], rec["name"]))
-    # Reservierungen auch ohne aktive Lease auflösbar machen (z. B. schlafende Geräte)
+    # Make reservations resolvable even without an active lease (e.g. sleeping devices)
     for r in cfg["reservations"]:
         if r["enabled"] and r["name"]:
             hosts_dns.append("%s %s" % (r["ip"], r["name"]))
@@ -639,11 +639,11 @@ def render(cfg, conf_dir="/etc/wol-dns", data_dir="/var/lib/wol-dns", user="dnsm
     }
 
 
-# ---------------------------------------------------------------- Leases, Ereignisse, Journal
+# ---------------------------------------------------------------- Leases, events, journal
 
 
 def parse_leases(text, now=None):
-    """dnsmasq.leases: "<Ablauf> <MAC> <IP> <Name|*> <Client-ID|*>" (Ablauf 0 = unbegrenzt)."""
+    """dnsmasq.leases: "<expiry> <MAC> <IP> <name|*> <client-ID|*>" (expiry 0 = unlimited)."""
     now = time.time() if now is None else now
     leases = []
     for line in (text or "").splitlines():
@@ -664,7 +664,7 @@ def parse_leases(text, now=None):
 
 
 def parse_lease_events(text, limit_per_mac=20):
-    """Zeilen des Lease-Hooks: "<Zeit> <add|old|del> <MAC> <IP> [Name]" → {mac: {last_seen, events}}."""
+    """Lines of the lease hook: "<time> <add|old|del> <MAC> <IP> [name]" → {mac: {last_seen, events}}."""
     seen = {}
     for line in (text or "").splitlines():
         parts = line.split()
@@ -689,7 +689,7 @@ _CLIENT_NAME = re.compile(r"^client provides name:\s+(?P<name>.+)$", re.I)
 
 
 def parse_unknown(journal_text):
-    """Abgewiesene DHCP-Anfragen aus `journalctl -u wol-dns -o short-unix` → {mac: {...}}."""
+    """Rejected DHCP requests from `journalctl -u wol-dns -o short-unix` → {mac: {...}}."""
     names_by_xid, result = {}, {}
     for line in (journal_text or "").splitlines():
         match = _JOURNAL.match(line.strip())
@@ -709,11 +709,11 @@ def parse_unknown(journal_text):
         entry["first"], entry["last"] = min(entry["first"], ts), max(entry["last"], ts)
         if xid and xid in names_by_xid:
             entry["name"] = names_by_xid[xid]
-    # Name kann auch nach der Abweisung geloggt werden (gleiche Transaktions-ID)
+    # The name may also be logged after the rejection (same transaction ID)
     return result
 
 
-# ---------------------------------------------------------------- Import aus ISC dhcpd
+# ---------------------------------------------------------------- Import from ISC dhcpd
 
 
 _TOKEN = re.compile(r'\s*(?:(#[^\n]*)|("(?:[^"\\]|\\.)*")|([{};,])|([^\s{};,"#]+))')
@@ -725,7 +725,7 @@ def _tokens(text):
         match = _TOKEN.match(text, pos)
         if not match or match.end() == pos:
             if text[pos:].strip():
-                raise NetError("dhcpd.conf: unerwartetes Zeichen bei Position %d" % pos)
+                raise NetError("dhcpd.conf: unexpected character at position %d" % pos)
             break
         pos = match.end()
         if match.group(1):
@@ -736,7 +736,7 @@ def _tokens(text):
 
 
 def _parse_blocks(tokens):
-    """Liste von Anweisungen: (wörter, unterblock|None)."""
+    """List of statements: (words, sub-block|None)."""
     statements, current = [], []
     for token in tokens:
         if token == ";":
@@ -758,11 +758,11 @@ def _parse_blocks(tokens):
 
 
 def import_dhcpd(text):
-    """ISC-dhcpd-Konfiguration lesen → Vorschau {settings, reservations, warnings}. Ändert nichts."""
+    """Read an ISC dhcpd configuration → preview {settings, reservations, warnings}. Changes nothing."""
     if not isinstance(text, str) or not text.strip():
-        raise NetError("Die Datei ist leer")
+        raise NetError("The file is empty")
     if len(text) > 512 * 1024:
-        raise NetError("Die Datei ist zu groß")
+        raise NetError("The file is too large")
     statements = _parse_blocks(iter(list(_tokens(text))))
     settings, hosts, warnings = {}, [], []
 
@@ -804,7 +804,7 @@ def import_dhcpd(text):
             elif words[0] in ("group", "shared-network", "pool"):
                 walk(block, scope)
             elif words[0] == "class":
-                warnings.append("Klasse „%s“ wird nicht übernommen" % (words[1] if len(words) > 1 else "?"))
+                warnings.append('Class "%s" is not imported' % (words[1] if len(words) > 1 else "?"))
             else:
                 walk(block, scope)
 
@@ -812,7 +812,7 @@ def import_dhcpd(text):
     preview = {"settings": {}, "reservations": [], "warnings": warnings}
     subnets = settings.get("subnets") or []
     if len(subnets) > 1:
-        warnings.append("Mehrere Subnetze gefunden – übernommen wird nur %s" % subnets[0]["network"])
+        warnings.append("Several subnets found - only %s is imported" % subnets[0]["network"])
     out = preview["settings"]
     if subnets:
         try:
@@ -820,7 +820,7 @@ def import_dhcpd(text):
             out["prefix"] = net.prefixlen
             out["network"] = str(net)
         except ValueError:
-            warnings.append("Subnetz %s ist ungültig" % subnets[0])
+            warnings.append("Subnet %s is invalid" % subnets[0])
     if "routers" in settings:
         out["gateway"] = settings["routers"][0]
     if "domain-name-servers" in settings:
@@ -839,7 +839,7 @@ def import_dhcpd(text):
     if "range" in settings:
         out["range_start"], out["range_end"] = settings["range"]
         if settings.get("deny-unknown"):
-            warnings.append("Adressbereich %s–%s ignoriert: „deny unknown-clients“ bedeutet „nur bekannte Geräte“"
+            warnings.append('Address range %s-%s ignored: "deny unknown-clients" means "known devices only"'
                             % tuple(settings["range"]))
 
     seen_macs, seen_ips, seen_names = set(), set(), set()
@@ -848,24 +848,24 @@ def import_dhcpd(text):
         try:
             entry["mac"] = _mac(host.get("mac"))
         except NetError as e:
-            entry["problems"].append(str(e) if host.get("mac") else "keine MAC-Adresse")
+            entry["problems"].append(str(e) if host.get("mac") else "no MAC address")
         if host.get("ip"):
             try:
                 entry["ip"] = str(_ipv4(host["ip"], "IP"))
             except NetError:
-                entry["problems"].append("IP „%s“ ist keine Adresse (Hostname?)" % host["ip"])
+                entry["problems"].append('IP "%s" is not an address (host name?)' % host["ip"])
         else:
-            entry["problems"].append("keine feste Adresse")
+            entry["problems"].append("no fixed address")
         name = normalize_name(host.get("host-name") or host["name"])
         entry["name"] = name
-        if name != host["name"].lower():  # reine Kleinschreibung ist keine Erwähnung wert
-            entry["comment"] = "importiert als „%s“" % host["name"]
+        if name != host["name"].lower():  # mere lowercasing is not worth a mention
+            entry["comment"] = 'imported as "%s"' % host["name"]
         if entry["mac"] in seen_macs:
-            entry["problems"].append("MAC doppelt")
+            entry["problems"].append("duplicate MAC")
         if entry["ip"] and entry["ip"] in seen_ips:
-            entry["problems"].append("IP doppelt")
+            entry["problems"].append("duplicate IP")
         if name in seen_names:
-            entry["problems"].append("Name doppelt")
+            entry["problems"].append("duplicate name")
         seen_macs.add(entry["mac"])
         seen_ips.add(entry["ip"])
         seen_names.add(name)
@@ -874,7 +874,7 @@ def import_dhcpd(text):
 
 
 def annotate_import(cfg, preview, server_mac=None):
-    """Vorschau gegen die aktuelle Konfiguration prüfen: eigener Server, Konflikte mit Vorhandenem."""
+    """Check a preview against the current configuration: own server, conflicts with existing entries."""
     server_ip = cfg["server"]["ip"]
     net = network_of(cfg) or (ipaddress.IPv4Network(preview["settings"]["network"])
                               if preview.get("settings", {}).get("network") else None)
@@ -882,22 +882,22 @@ def annotate_import(cfg, preview, server_mac=None):
     ips = {r["ip"]: r for r in cfg["reservations"]}
     for item in preview.get("reservations") or []:
         if item["ip"] and (item["ip"] == server_ip or (server_mac and item["mac"] == server_mac)):
-            item["problems"].append("WOL-Server selbst: feste Adresse statt Reservierung")
+            item["problems"].append("WOL-Server itself: static IP address instead of reservation")
         elif item["ip"] and net is not None and ipaddress.IPv4Address(item["ip"]) not in net:
-            item["problems"].append("IP liegt nicht im Netz %s" % net)
+            item["problems"].append("IP is outside the network %s" % net)
         if item["mac"] in existing:
             old = existing[item["mac"]]
             changes = [label for label, key in (("IP %s → %s" % (old["ip"], item["ip"]), "ip"),
                                                 ("Name %s → %s" % (old["name"] or "–", item["name"]), "name"))
                        if old[key] != item[key]]
-            item["exists"] = "ändert %s" % ", ".join(changes) if changes else "schon vorhanden"
+            item["exists"] = "changes %s" % ", ".join(changes) if changes else "already present"
         elif item["ip"] in ips:
-            item["problems"].append("IP schon vergeben an %s" % (ips[item["ip"]]["name"] or ips[item["ip"]]["mac"]))
+            item["problems"].append("IP already assigned to %s" % (ips[item["ip"]]["name"] or ips[item["ip"]]["mac"]))
     return preview
 
 
 def merge_import(cfg, preview, replace=False, take_settings=True):
-    """Vorschau in eine Konfiguration übernehmen. Einträge mit Problemen werden übersprungen."""
+    """Merge a preview into a configuration. Entries with problems are skipped."""
     new = copy.deepcopy(cfg)
     st = preview.get("settings") or {}
     if take_settings:
