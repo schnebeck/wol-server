@@ -194,3 +194,87 @@ class AccessListTest(unittest.TestCase):
             self.assertEqual(netinfo.ipv6_prefixes(f.name), [("wlan0", "fd00:1234::/64")])
         finally:
             os.unlink(f.name)
+
+
+class ApiTokenTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        cfg = dict(DEFAULTS, listen="127.0.0.1", port=0, data_dir=self.tmp)
+        self.app = App(cfg)
+        self.app.auth.set_password("geheim123")
+        self.server = Server("127.0.0.1", 0, self.app)
+        self.port = self.server.server_address[1]
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        self.sent = []
+        from unittest import mock
+        patcher = mock.patch("wolserver.wol.send_magic_packet", lambda *a, **kw: self.sent.append(a))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def tearDown(self):
+        self.server.shutdown()
+        self.server.server_close()
+        self.app.stop()
+        shutil.rmtree(self.tmp)
+
+    def request(self, method, path, token=None, body=None, headers=None):
+        conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=15)
+        hdrs = dict(headers or {})
+        if token:
+            hdrs["Authorization"] = "Bearer " + token
+        data = None
+        if body is not None:
+            data = json.dumps(body)
+            hdrs["Content-Type"] = "application/json"
+        conn.request(method, path, data, hdrs)
+        resp = conn.getresponse()
+        payload = json.loads(resp.read() or b"{}")
+        conn.close()
+        return resp.status, payload
+
+    def test_tokens(self):
+        from unittest import mock
+        device = self.app.store.add("devices", {"name": "Backup-Server", "mac": "a8:b8:e0:07:4b:4e", "host": "192.168.1.10",
+                                                "broadcast": "255.255.255.255", "wol_port": 9, "sleep_method": "none"})
+        entry = self.app.tokens.create("backup script")
+        token = entry["token"]
+        self.assertTrue(token.startswith("wol_"))
+        with open(self.app.tokens.path, encoding="utf-8") as f:
+            self.assertNotIn(token, f.read())  # only the hash is stored
+
+        # Wake by name, case-insensitive, without CSRF header
+        status, data = self.request("POST", "/api/devices/backup-server/wake", token)
+        self.assertEqual((status, data["ok"], data["device"]), (200, True, "Backup-Server"))
+        self.assertEqual(self.sent[0][0], "a8:b8:e0:07:4b:4e")
+        self.assertEqual(self.app.store.list("events")[0]["source"], "API: backup script")
+        self.assertEqual(self.request("POST", "/api/devices/%s/wake" % device["id"], token)[0], 200)
+        self.assertEqual(self.request("POST", "/api/devices/nas/wake", token)[0], 404)
+        self.assertEqual(self.request("GET", "/api/devices", token)[0], 200)
+        self.assertEqual(self.request("GET", "/api/status", token)[0], 200)
+
+        # Everything else stays closed for tokens; wrong tokens are rejected
+        self.assertEqual(self.request("GET", "/api/info", token)[0], 403)
+        self.assertEqual(self.request("DELETE", "/api/devices/%s" % device["id"], token)[0], 403)
+        self.assertEqual(self.request("GET", "/api/tokens", token)[0], 403)
+        self.assertEqual(self.request("GET", "/api/devices", "wol_falsch")[0], 401)
+        self.assertEqual(self.request("GET", "/api/devices")[0], 401)
+        self.assertEqual(self.request("POST", "/api/devices/sleeper/sleep", token)[0], 404)
+
+        # wait: until the device answers (simulated), otherwise 504
+        answers = iter([False, True])
+        with mock.patch("wolserver.server.check_host", lambda host: next(answers)), mock.patch("time.sleep"):
+            status, data = self.request("POST", "/api/devices/Backup-Server/wake?wait=60", token)
+        self.assertEqual((status, data["online"]), (200, True))
+        with mock.patch("wolserver.server.check_host", lambda host: False), mock.patch("time.sleep"), \
+                mock.patch("wolserver.server.App.MAX_WAIT", 0):
+            status, data = self.request("POST", "/api/devices/Backup-Server/wake?wait=5", token)
+        self.assertEqual(status, 200)  # MAX_WAIT 0: no waiting at all
+        with mock.patch("wolserver.server.check_host", lambda host: False):
+            status, data = self.request("POST", "/api/devices/Backup-Server/wake?wait=1", token)
+        self.assertEqual((status, data["ok"], data["online"]), (504, False, False))
+        self.assertEqual(self.request("POST", "/api/devices/Backup-Server/wake?wait=x", token)[0], 400)
+
+        # Revoke: the token stops working at once
+        self.assertTrue(self.app.tokens.revoke(entry["id"]))
+        self.assertEqual(self.request("GET", "/api/devices", token)[0], 401)
+        self.assertEqual(self.app.tokens.list(), [])

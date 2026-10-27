@@ -425,6 +425,30 @@ echo "$USER ALL=(root) NOPASSWD: /usr/bin/systemctl suspend, /usr/bin/systemctl 
             <p class="small" data-i18n>Command: <code>rundll32.exe powrprof.dll,SetSuspendState 0,1,0</code> (standby, with hibernation disabled) or <code>shutdown /h</code> (hibernate)</p>
           </details>
         </div>
+        <div class="panel wide" id="token-panel">
+          <div class="panel-head">
+            <h3>API tokens for scripts</h3>
+          </div>
+          <p class="muted small" data-i18n>Scripts can list devices, query their status and wake them or put them to sleep, e.g. a backup script that wakes the backup server first. Tokens cannot change anything else.</p>
+          <div id="token-list" class="saved"></div>
+          <form id="token-form" class="inline-form" novalidate>
+            <label class="field">
+              <span>Name of the new token</span>
+              <input name="name" maxlength="40" placeholder="e.g. backup script" autocomplete="off">
+            </label>
+            <button class="btn" type="submit">Create token</button>
+            <p class="form-error" hidden></p>
+          </form>
+          <div id="token-new" class="token-new" hidden>
+            <p class="small"><strong>New token, shown only once:</strong></p>
+            <div class="keybox">
+              <textarea id="token-value" readonly rows="1" spellcheck="false"></textarea>
+              <button type="button" class="btn small" id="token-copy">Copy</button>
+            </div>
+            <p class="small muted">Example:</p>
+            <pre><code id="token-example"></code></pre>
+          </div>
+        </div>
         <div class="panel">
           <h3 id="pw-title">Change password</h3>
           <form id="password-form" class="stack" novalidate>

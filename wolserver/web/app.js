@@ -575,7 +575,7 @@ async function onClearEvents() {
 // ---------- System ----------
 
 async function renderSystem() {
-  const [info] = await Promise.all([api("GET", "/api/info"), renderWifi(), renderVpn()]);
+  const [info] = await Promise.all([api("GET", "/api/info"), renderWifi(), renderVpn(), renderTokens()]);
   state.info = info;
   const rows = [
     [t("Hostname"), info.hostname],
@@ -984,6 +984,66 @@ async function onVpnRemove() {
     toast(e.message, "error");
   }
   await renderVpn();
+}
+
+// ---- API tokens ----
+
+async function renderTokens() {
+  const box = $("#token-list");
+  try {
+    const { tokens } = await api("GET", "/api/tokens");
+    box.replaceChildren(...(tokens.length ? tokens.map((tok) => el("div", { class: "saved-item" },
+      el("span", {}, el("strong", {}, tok.name)),
+      el("span", { class: "muted small" }, tok.last_used ? t("used {0}", fmtAgo(tok.last_used)) : t("never used"),
+        " · ", t("created {0}", fmtDateTime(tok.created))),
+      el("button", { type: "button", class: "btn small ghost danger", onclick: () => revokeToken(tok) }, t("Revoke"))))
+      : [el("p", { class: "muted small" }, t("No API tokens."))]));
+  } catch (e) {
+    box.replaceChildren(el("p", { class: "muted small" }, e.message));
+  }
+}
+
+async function onTokenSubmit(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  showError(form, "");
+  await busy($("button[type=submit]", form), async () => {
+    try {
+      const res = await api("POST", "/api/tokens", { name: form.elements.name.value });
+      form.reset();
+      const device = (state.devices[0] && state.devices[0].name) || "backup-server";
+      $("#token-value").value = res.token;
+      $("#token-example").textContent = `curl -fsS -X POST -H "Authorization: Bearer ${res.token}" \\\n` +
+        `  "${location.origin}/api/devices/${encodeURIComponent(device.toLowerCase())}/wake?wait=180"`;
+      $("#token-new").hidden = false;
+      await renderTokens();
+    } catch (e) {
+      showError(form, e.message);
+    }
+  });
+}
+
+async function revokeToken(tok) {
+  if (!(await confirmDialog(t("Revoke token \"{0}\"?", tok.name), t("Scripts using this token stop working immediately."), t("Revoke"), true))) return;
+  try {
+    await api("DELETE", `/api/tokens/${tok.id}`);
+    $("#token-new").hidden = true;
+    toast(t("Token revoked"), "success");
+    await renderTokens();
+  } catch (e) {
+    toast(e.message, "error");
+  }
+}
+
+async function copyToken() {
+  const area = $("#token-value");
+  try {
+    await navigator.clipboard.writeText(area.value);
+  } catch (e) {
+    area.select();
+    document.execCommand("copy");
+  }
+  toast(t("Token copied"), "success");
 }
 
 async function copyKey() {
@@ -2150,6 +2210,8 @@ function bind() {
   }
   for (const btn of $$("[data-close]")) btn.addEventListener("click", () => btn.closest("dialog").close());
   $("#copy-key").addEventListener("click", copyKey);
+  $("#token-form").addEventListener("submit", onTokenSubmit);
+  $("#token-copy").addEventListener("click", copyToken);
   $("#password-form").addEventListener("submit", onPasswordSubmit);
   $("#wifi-add").addEventListener("click", openWifiDialog);
   $("#wifi-rescan").addEventListener("click", scanWifi);
