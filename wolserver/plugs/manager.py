@@ -534,6 +534,7 @@ class PlugManager:
         plug = self.get(plug_id)
         result = self._driver(plug).security()
         self._set_fields(plug_id, security={"password": result["password"], "open": list(result["open"]),
+                                            "restart_required": bool(result.get("restart_required")),
                                             "checked": self.clock()})
         return result
 
@@ -557,7 +558,26 @@ class PlugManager:
         done = (["password set"] if new_password else []) + [EXPOSURE_TEXTS[e] for e in disable]
         self.on_event(device_id=None, device=plug["name"], action="secure", source="manual", ok=True,
                       message="Secured: %s" % ", ".join(done) if done else "Security checked")
-        return dict(state, restart_required=result.get("restart_required", False))
+        return dict(state, restart_required=bool(state.get("restart_required") or result.get("restart_required")))
+
+    def restart(self, plug_id):
+        """Restarts the plug's firmware, e.g. to finish switching Matter off. The output follows the power-on
+        state after it: refused where that would cut the power of what is plugged in."""
+        plug = self.get(plug_id)
+        driver = self._driver(plug)
+        status = driver.status()
+        if status.on:
+            if plug.get("locked"):
+                raise PlugError("%s supplies the WOL-Server or the network: it is never restarted" % plug["name"])
+            if driver.power_on_state() not in ("restore", "on"):
+                raise PlugError("After a restart %s would stay off. Set \"After a power outage\" to \"Restore last "
+                                "state\" or \"On\" first, or restart it while it is off" % plug["name"])
+        driver.restart()
+        with self._lock:
+            self._live.pop(plug_id, None)
+        self.on_event(device_id=None, device=plug["name"], action="secure", source="manual", ok=True,
+                      message="Plug restarted")
+        return {"ok": True, "message": "%s restarts, back in about 10 s" % plug["name"]}
 
     # -- energy --
 

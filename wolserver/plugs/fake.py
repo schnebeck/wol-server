@@ -33,6 +33,7 @@ class FakeDevice:
         self.on, self.energy_wh, self.switch_count, self.errors = True, 0.0, 0, []
         self.power_on_state = "restore"
         self.exposures = {"access_point"}  # like a new plug: its own Wi-Fi is open
+        self.pending = set()  # switched off, but only gone after a restart (like Matter on a Shelly)
         self.clock = clock
         self._last = clock()
         self.lock = threading.Lock()
@@ -105,17 +106,26 @@ class FakePlug(PlugDriver):
 
     def security(self):
         dev = self._device()
-        return {"password": bool(dev.password), "open": [e for e in EXPOSURES if e in dev.exposures]}
+        return {"password": bool(dev.password), "open": [e for e in EXPOSURES if e in dev.exposures],
+                "restart_required": bool(dev.pending)}
 
     def secure(self, password=None, disable=()):
         dev = self._device()
         unknown = set(disable) - set(EXPOSURES)
         if unknown:
             raise PlugError("Unknown setting: %s" % sorted(unknown)[0])
-        dev.exposures -= set(disable)
+        dev.pending |= set(disable) & {"matter"} & dev.exposures
+        dev.exposures -= set(disable) - {"matter"}
         if password:
             dev.password = self.password = password
-        return {"restart_required": "matter" in disable}
+        return {"restart_required": bool(dev.pending)}
+
+    def restart(self):
+        dev = self._device()
+        dev.exposures -= dev.pending
+        dev.pending = set()
+        if dev.power_on_state == "off":
+            dev.set(False)
 
 
 def register():

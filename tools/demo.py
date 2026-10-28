@@ -400,6 +400,7 @@ for dev, energy, count in zip(fakeplug.FakePlug.devices.values(), (15342.1, 9120
     dev.energy_wh, dev.switch_count = energy, count
 for host in ("192.168.1.31", "192.168.1.33", "192.168.1.32"):
     fakeplug.FakePlug.devices[host].exposures = set()  # secured; plug-backup still has its open access point
+fakeplug.FakePlug.devices["192.168.1.34"].exposures = {"access_point", "matter"}  # as it comes from the factory
 
 app = App(dict(DEFAULTS, listen="127.0.0.1", port=args.port, data_dir=os.path.join(RUN, "data"),
                wifi_socket="control.sock"))

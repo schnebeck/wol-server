@@ -263,6 +263,7 @@ class App:
             R("PUT", r"/api/plugs/(?P<item_id>\w+)/power-on-state", self.api_plug_power_on_state),
             R("GET", r"/api/plugs/(?P<item_id>\w+)/security", self.api_plug_security),
             R("POST", r"/api/plugs/(?P<item_id>\w+)/security", self.api_plug_secure),
+            R("POST", r"/api/plugs/(?P<item_id>\w+)/restart", self.api_plug_restart),
             R("GET", r"/api/energy", self.api_energy),
             R("GET", r"/api/energy/settings", self.api_energy_settings),
             R("PUT", r"/api/energy/settings", self.api_energy_settings),
@@ -1032,6 +1033,11 @@ class App:
 
     def api_plug_security(self, req, item_id):
         return 200, self._plug_call(self.plugs.security, item_id)
+
+    def api_plug_restart(self, req, item_id):
+        res = self._plug_call(self.plugs.restart, item_id)
+        log.info("Plug %s restarted by %s", item_id, req.client)
+        return 200, res
 
     def api_plug_secure(self, req, item_id):
         b = req.body
