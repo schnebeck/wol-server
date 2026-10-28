@@ -762,7 +762,7 @@ class NetManager:
             text = self.journal(["-n", str(lines * 3), "--grep", r"query\["])
             out = []
             for line in text.splitlines():
-                match = re.match(r"^(\d+(?:\.\d+)?)\s+\S+\s+dnsmasq\[\d+\]:\s+(?:\d+\s+)?query\[(\w+)\]\s+(\S+)\s+from\s+(\S+)", line)
+                match = re.match(netcfg.JOURNAL_PREFIX + r"dnsmasq\[\d+\]:\s+(?:\d+\s+)?query\[(\w+)\]\s+(\S+)\s+from\s+(\S+)", line)
                 if match:
                     out.append({"ts": float(match.group(1)), "type": match.group(2), "name": match.group(3),
                                 "client": match.group(4)})
@@ -771,7 +771,7 @@ class NetManager:
             text = self.journal(["-n", str(lines * 4), "--grep", r"DHCP(ACK|NAK|RELEASE|DECLINE|DISCOVER|OFFER|REQUEST)"])
             out = []
             for line in text.splitlines():
-                match = re.match(r"^(\d+(?:\.\d+)?)\s+\S+\s+dnsmasq-dhcp\[\d+\]:\s+(?:\d+\s+)?(DHCP\w+)\(([^)]+)\)\s*(.*)$", line)
+                match = re.match(netcfg.JOURNAL_PREFIX + r"dnsmasq-dhcp\[\d+\]:\s+(?:\d+\s+)?(DHCP\w+)\(([^)]+)\)\s*(.*)$", line)
                 if match:
                     out.append({"ts": float(match.group(1)), "type": match.group(2), "detail": match.group(4)[:160]})
             return {"entries": out[-lines:]}

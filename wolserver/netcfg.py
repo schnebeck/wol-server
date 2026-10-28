@@ -698,7 +698,10 @@ def parse_lease_events(text, limit_per_mac=20):
     return seen
 
 
-_JOURNAL = re.compile(r"^(?P<ts>\d+(?:\.\d+)?)\s+\S+\s+dnsmasq-dhcp\[\d+\]:\s+(?:(?P<xid>\d+)\s+)?(?P<msg>.*)$")
+# `journalctl -o short-unix`: "<time> <host> <tag>[pid]: <message>". With log-facility=- dnsmasq writes its own tag
+# to stderr and the journal puts the process tag in front: "dnsmasq[7]: dnsmasq-dhcp[7]: ..."
+JOURNAL_PREFIX = r"^(?P<ts>\d+(?:\.\d+)?)\s+\S+\s+(?:dnsmasq\[\d+\]:\s+)?"
+_JOURNAL = re.compile(JOURNAL_PREFIX + r"dnsmasq-dhcp\[\d+\]:\s+(?:(?P<xid>\d+)\s+)?(?P<msg>.*)$")
 _IGNORED = re.compile(r"^DHCP(?:DISCOVER|REQUEST)\((?P<iface>[^)]+)\)\s+(?:\S+\s+)?(?P<mac>[0-9a-f:]{17})\s+(?P<why>ignored|no address available)", re.I)
 _CLIENT_NAME = re.compile(r"^client provides name:\s+(?P<name>.+)$", re.I)
 
