@@ -324,6 +324,7 @@ td .key.box { margin-right: 8px; vertical-align: -1px; }
 .multiple + .multiple { margin-top: 6px; }
 .multiple-head { display: flex; align-items: center; gap: 7px; font-size: 0.84rem; font-weight: 600; margin-left: 4px; }
 .multiple-head .muted { font-weight: 400; }
+.multiple-head .head-value { margin-left: auto; margin-right: 10px; font-size: 1rem; font-variant-numeric: tabular-nums; }
 .chart-tip {
   position: absolute; z-index: 5; pointer-events: none; min-width: 140px; max-width: 260px;
   padding: 8px 10px; background: var(--surface); border: 1px solid var(--border-strong); border-radius: 9px;
