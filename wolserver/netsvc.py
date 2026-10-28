@@ -28,6 +28,7 @@ import os
 import pwd
 import re
 import shutil
+import socket
 import subprocess
 import threading
 import time
@@ -97,10 +98,28 @@ def read_arp(path="/proc/net/arp"):
     return result
 
 
+PROBE_FREE_TTL = 600  # s: an address found free is checked again after this
+PROBE_USED_TTL = 86400  # s: an address that answered stays taken for suggestions
+
+
+def probe_arp(ips, arp=read_arp, wait=1.0):
+    """The addresses among ips that answer ARP. A device with a static address (no reservation, no lease)
+    answers too, even if its firewall drops everything: one UDP datagram is enough to make the kernel ask."""
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+        for ip in ips:
+            try:
+                sock.sendto(b"", (ip, 9))  # discard port: only the ARP request matters
+            except OSError:
+                pass
+    time.sleep(wait)
+    found = arp()
+    return {ip for ip in ips if ip in found}
+
+
 class NetManager:
     def __init__(self, state_dir, conf_dir="/etc/wol-dns", data_dir="/var/lib/wol-dns", runner=_run,
                  clock=time.time, interfaces=netinfo.interfaces, arp=read_arp, journal=None, user=None,
-                 vendor_source=None):
+                 vendor_source=None, arp_probe=None):
         self.dir = os.path.join(state_dir, "dns")
         self.conf_dir = conf_dir
         self.data_dir = data_dir
@@ -109,6 +128,8 @@ class NetManager:
         self.interfaces = interfaces
         self.arp = arp
         self.journal = journal or self._journal
+        self.arp_probe = arp_probe or (lambda ips: probe_arp(ips, self.arp))
+        self._probed = {}  # ip -> (time, answered)
         self.user = user
         self.vendor_source = vendor_source
         self.lock = threading.RLock()
@@ -423,7 +444,7 @@ class NetManager:
                     "last_seen": {mac: e["last_seen"] for mac, e in events.items()},
                     "leases": {lease["mac"]: lease["ip"] for lease in leases},
                     "online": sorted(set(arp.values())),
-                    "next_ip": netcfg.next_free_ip(cfg, leases + [{"ip": ip} for ip in arp]),
+                    "next_ip": (self._free_ips(cfg, leases + [{"ip": ip} for ip in arp], 1) or [None])[0],
                     "lease_presets": list(netcfg.LEASE_PRESETS),
                     "network": str(netcfg.network_of(cfg)) if netcfg.network_of(cfg) else None,
                 },
@@ -467,17 +488,43 @@ class NetManager:
         vendors = oui.lookup_many([u["mac"] for u in items], self.vendor_source)
         arp_ips = list(self.arp())
         taken = list(leases) + [{"ip": ip} for ip in arp_ips]
+        free = self._free_ips(cfg, taken, len(items))
         suggestion_cfg = copy.deepcopy(cfg)
         result = []
-        for u in sorted(items, key=lambda x: -x["last"]):
-            ip = netcfg.next_free_ip(suggestion_cfg, taken)
+        for i, u in enumerate(sorted(items, key=lambda x: -x["last"])):
+            ip = free[i] if i < len(free) else None
             name = netcfg.unique_name(suggestion_cfg, u["name"] or vendors.get(u["mac"]) or "geraet")
-            if ip:
-                taken.append({"ip": ip})
             suggestion_cfg["reservations"].append({"id": "x", "mac": u["mac"], "ip": ip or "", "name": name})
             result.append(dict(u, vendor=vendors.get(u["mac"], ""), private=netcfg.is_private_mac(u["mac"]),
                                suggested_name=name, suggested_ip=ip))
         return result
+
+    def _free_ips(self, cfg, taken, count):
+        """Up to count free addresses for suggestions. Free in the configuration is not enough: a device with a
+        static address has neither reservation nor lease, so the candidates are checked on the network first."""
+        now = self.clock()
+        self._probed = {ip: (ts, used) for ip, (ts, used) in self._probed.items()
+                        if now - ts < (PROBE_USED_TTL if used else PROBE_FREE_TTL)}
+        taken = list(taken) + [{"ip": ip} for ip, (_, used) in self._probed.items() if used]
+        found = []
+        for _ in range(5):
+            found, candidates = [], list(taken)
+            while len(found) < count:
+                ip = netcfg.next_free_ip(cfg, candidates)
+                if not ip:
+                    break
+                found.append(ip)
+                candidates.append({"ip": ip})
+            unchecked = [ip for ip in found if ip not in self._probed]
+            if not unchecked:
+                break
+            used = self.arp_probe(unchecked)
+            for ip in unchecked:
+                self._probed[ip] = (now, ip in used)
+            if not used:
+                break
+            taken += [{"ip": ip} for ip in used]
+        return [ip for ip in found if not self._probed.get(ip, (0, False))[1]]
 
     def unknown(self, args=None):
         with self.lock:
