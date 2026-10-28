@@ -67,6 +67,8 @@ window.I18N_DE = {
  "All changes in the draft will be discarded. The active configuration stays unchanged.": "Alle Änderungen im Entwurf werden verworfen. Der aktive Stand bleibt unverändert.",
  "All entries will be deleted.": "Alle Einträge werden gelöscht.",
  "All plugs": "Alle Steckdosen",
+ "Already off or asleep": "Ist schon aus oder schläft",
+ "Already online": "Ist schon online",
  "Also switch while the consumer still draws power": "Auch schalten, wenn der Verbraucher noch Strom zieht",
  "An existing configuration is replaced. If OpenVPN is missing, it is installed; on the Pi Zero this takes a few minutes.": "Eine vorhandene Konfiguration wird ersetzt. Fehlt OpenVPN, wird es installiert; auf dem Pi Zero dauert das einige Minuten.",
  "Another DHCP server on the network: {0}. Two DHCP servers interfere with each other.": "Weiterer DHCP-Server im Netz: {0}. Zwei DHCP-Server stören sich gegenseitig.",
