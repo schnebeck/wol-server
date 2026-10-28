@@ -291,12 +291,15 @@ class HelpersTest(unittest.TestCase):
             "1700000060.0 wol dnsmasq-dhcp[1]: 124 DHCPDISCOVER(wlan0) 5a:1f:3c:d7:53:0c ignored",
             "1700000100.0 wol dnsmasq-dhcp[1]: DHCPDISCOVER(wlan0) 00:11:22:9e:ae:00 no address available",
             "1700000200.0 wol dnsmasq[1]: query[A] heise.de from 192.168.1.12",
+            # log-facility=-: the journal puts the process tag in front of dnsmasq's own
+            "1700000300.0 wol dnsmasq[1]: dnsmasq-dhcp[1]: 125 DHCPDISCOVER(wlan0) 02:5e:a1:7c:00:41 ignored",
         ])
         found = netcfg.parse_unknown(journal)
         self.assertEqual(found["5a:1f:3c:d7:53:0c"]["name"], "Annas-iPhone")
         self.assertEqual(found["5a:1f:3c:d7:53:0c"]["count"], 2)
         self.assertEqual(found["5a:1f:3c:d7:53:0c"]["last"], 1700000060.0)
         self.assertEqual(found["00:11:22:9e:ae:00"]["count"], 1)
+        self.assertEqual(found["02:5e:a1:7c:00:41"]["count"], 1)
 
 
 class ImportTest(unittest.TestCase):
@@ -749,11 +752,14 @@ class ManagerTest(unittest.TestCase):
     def test_logs(self):
         self.sys.journal = ("1700000000.5 wol dnsmasq[9]: query[A] heise.de from 192.168.1.12\n"
                             "1700000001.5 wol dnsmasq[9]: 12 query[PTR] 9.1.168.192.in-addr.arpa from 192.168.1.12\n"
-                            "1700000002.0 wol dnsmasq-dhcp[9]: 77 DHCPACK(wlan0) 192.168.1.9 00:d8:61:d7:1d:36 office\n")
+                            "1700000002.0 wol dnsmasq-dhcp[9]: 77 DHCPACK(wlan0) 192.168.1.9 00:d8:61:d7:1d:36 office\n"
+                            "1700000003.0 wol dnsmasq[9]: dnsmasq[9]: query[AAAA] example.org from 192.168.1.12\n"
+                            "1700000004.0 wol dnsmasq[9]: dnsmasq-dhcp[9]: 78 DHCPNAK(wlan0) 192.168.1.40 02:5e:a1:7c:00:41\n")
         queries = self.mgr.logs({"kind": "queries"})["entries"]
-        self.assertEqual([(q["type"], q["name"]) for q in queries], [("A", "heise.de"), ("PTR", "9.1.168.192.in-addr.arpa")])
+        self.assertEqual([(q["type"], q["name"]) for q in queries],
+                         [("A", "heise.de"), ("PTR", "9.1.168.192.in-addr.arpa"), ("AAAA", "example.org")])
         dhcp = self.mgr.logs({"kind": "dhcp"})["entries"]
-        self.assertEqual(dhcp[0]["type"], "DHCPACK")
+        self.assertEqual([d["type"] for d in dhcp], ["DHCPACK", "DHCPNAK"])
         with self.assertRaises(NetError):
             self.mgr.logs({"kind": "passwd"})
 
