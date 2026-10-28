@@ -21,7 +21,8 @@ FakePlug.devices maps host -> FakeDevice; a host that is not in it counts as unr
 import threading
 import time
 
-from .base import (CAPABILITIES, DRIVERS, PlugAuthError, PlugDriver, PlugInfo, PlugStatus, PlugUnreachable)
+from .base import (CAPABILITIES, DRIVERS, EXPOSURES, PlugAuthError, PlugDriver, PlugError, PlugInfo, PlugStatus,
+                   PlugUnreachable)
 
 
 class FakeDevice:
@@ -31,6 +32,7 @@ class FakeDevice:
         self.load_w, self.standby_w, self.temperature_c = load_w, standby_w, temperature_c
         self.on, self.energy_wh, self.switch_count, self.errors = True, 0.0, 0, []
         self.power_on_state = "restore"
+        self.exposures = {"access_point"}  # like a new plug: its own Wi-Fi is open
         self.clock = clock
         self._last = clock()
         self.lock = threading.Lock()
@@ -100,6 +102,20 @@ class FakePlug(PlugDriver):
 
     def set_power_on_state(self, state):
         self._device().power_on_state = state
+
+    def security(self):
+        dev = self._device()
+        return {"password": bool(dev.password), "open": [e for e in EXPOSURES if e in dev.exposures]}
+
+    def secure(self, password=None, disable=()):
+        dev = self._device()
+        unknown = set(disable) - set(EXPOSURES)
+        if unknown:
+            raise PlugError("Unknown setting: %s" % sorted(unknown)[0])
+        dev.exposures -= set(disable)
+        if password:
+            dev.password = self.password = password
+        return {"restart_required": "matter" in disable}
 
 
 def register():

@@ -25,9 +25,12 @@ from dataclasses import asdict, dataclass, field
 
 # What a driver's hardware can do. The manager adapts to it (e.g. no safety check without metering).
 CAPABILITIES = ("metering", "energy_counter", "temperature", "switch_count", "device_cycle", "power_on_state",
-                "errors")
+                "errors", "security")
 POWER_ON_STATES = ("restore", "on", "off")
 ERRORS = ("overtemp", "overpower", "overvoltage", "undervoltage")
+# Ways into the plug besides its local API that the WOL-Server does not need: its own (often open) Wi-Fi
+# access point, Bluetooth, Matter and the vendor cloud. secure() switches the chosen ones off.
+EXPOSURES = ("access_point", "bluetooth", "matter", "cloud")
 
 
 class PlugError(Exception):
@@ -116,6 +119,15 @@ class PlugDriver:
 
     def set_power_on_state(self, state):
         raise PlugUnsupported("This plug has no setting for the state after a power outage")
+
+    def security(self):
+        """{"password": bool, "open": [exposure, ...]}: is a password set, which EXPOSURES are switched on."""
+        raise PlugUnsupported("This plug cannot report its security settings")
+
+    def secure(self, password=None, disable=()):
+        """Switches the given EXPOSURES off, then sets password (if given) and uses it from then on.
+        Returns {"restart_required": bool}: some settings only take effect after the plug restarts."""
+        raise PlugUnsupported("This plug cannot be secured by the WOL-Server")
 
 
 DRIVERS = {}

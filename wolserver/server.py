@@ -261,6 +261,8 @@ class App:
             R("POST", r"/api/plugs/(?P<item_id>\w+)/(?P<action>on|off|cycle)", self.api_plug_switch),
             R("GET", r"/api/plugs/(?P<item_id>\w+)/power-on-state", self.api_plug_power_on_state),
             R("PUT", r"/api/plugs/(?P<item_id>\w+)/power-on-state", self.api_plug_power_on_state),
+            R("GET", r"/api/plugs/(?P<item_id>\w+)/security", self.api_plug_security),
+            R("POST", r"/api/plugs/(?P<item_id>\w+)/security", self.api_plug_secure),
             R("GET", r"/api/energy", self.api_energy),
             R("GET", r"/api/energy/settings", self.api_energy_settings),
             R("PUT", r"/api/energy/settings", self.api_energy_settings),
@@ -1015,6 +1017,15 @@ class App:
         if req.body.get("state") is not None:
             self._plug_call(self.plugs.set_power_on_state, item_id, req.body.get("state"))
         return 200, {"state": self._plug_call(self.plugs.power_on_state, item_id)}
+
+    def api_plug_security(self, req, item_id):
+        return 200, self._plug_call(self.plugs.security, item_id)
+
+    def api_plug_secure(self, req, item_id):
+        b = req.body
+        res = self._plug_call(self.plugs.secure, item_id, b.get("password") or None, b.get("disable") or [])
+        log.info("Plug %s secured by %s", item_id, req.client)
+        return 200, res
 
     # -- static files --
 

@@ -22,6 +22,7 @@ import copy
 import json
 import logging
 import os
+import secrets
 import threading
 import time
 import uuid
@@ -29,7 +30,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from .. import models
 from ..wol import normalize_mac
-from .base import POWER_ON_STATES, PlugError, PlugUnreachable, get_driver, probe_all
+from .base import EXPOSURES, POWER_ON_STATES, PlugError, PlugUnreachable, get_driver, probe_all
 from .energy import EnergyLog
 from .http import HttpClient
 
@@ -39,6 +40,8 @@ ACTIONS = ("on", "off", "cycle")
 WAKE_METHODS = ("wol", "power", "power_wol")
 ERROR_TEXTS = {"overtemp": "Overtemperature", "overpower": "Overload", "overvoltage": "Overvoltage",
                "undervoltage": "Undervoltage"}
+EXPOSURE_TEXTS = {"access_point": "access point off", "bluetooth": "Bluetooth off", "matter": "Matter off",
+                  "cloud": "cloud off"}
 
 
 class ConfirmRequired(PlugError):
@@ -135,6 +138,9 @@ class PlugManager:
     def get(self, plug_id):
         with self._lock:
             return copy.deepcopy(self._find(plug_id))
+
+    def get_public(self, plug_id):
+        return self.public(self.get(plug_id))
 
     def by_mac(self):
         with self._lock:
@@ -284,7 +290,11 @@ class PlugManager:
             self._save()
             self._live[plug["id"]] = (time.monotonic(), plug["host"], {"status": status.to_dict(), "error": None})
         log.info("Plug %s added (%s at %s)", plug["name"], plug["driver"], plug["host"])
-        return self.public(plug)
+        try:
+            self.security(plug["id"])  # so the overview can point out an open plug right away
+        except PlugError:
+            pass
+        return self.get_public(plug["id"])
 
     def update(self, plug_id, data):
         with self._lock:
@@ -508,6 +518,45 @@ class PlugManager:
         if state not in POWER_ON_STATES:
             raise PlugError("Unknown state: %s" % state)
         self._driver(self.get(plug_id)).set_power_on_state(state)
+
+    # -- security --
+
+    def _set_fields(self, plug_id, **fields):
+        with self._lock:
+            plug = self._find(plug_id)
+            if any(plug.get(k) != v for k, v in fields.items()):
+                plug.update(fields)
+                self._save()
+
+    def security(self, plug_id):
+        """Reads from the plug whether it has a password and which ways in are open; kept for the overview."""
+        plug = self.get(plug_id)
+        result = self._driver(plug).security()
+        self._set_fields(plug_id, security={"password": result["password"], "open": list(result["open"]),
+                                            "checked": self.clock()})
+        return result
+
+    def secure(self, plug_id, password=None, disable=()):
+        """Switches the chosen ways in off and sets a password. Without a password the plug keeps the one the
+        WOL-Server knows, or gets a random one: only the WOL-Server needs it, a reset of the plug clears it."""
+        plug = self.get(plug_id)
+        if password is not None and (not isinstance(password, str) or not 8 <= len(password) <= 128):
+            raise PlugError("Password: 8 to 128 characters")
+        if not isinstance(disable, (list, tuple)) or any(e not in EXPOSURES for e in disable):
+            raise PlugError("Unknown setting")
+        new_password = password or (None if plug.get("password") else secrets.token_urlsafe(12))
+        driver = self._driver(plug)
+        try:
+            result = driver.secure(new_password, list(disable))
+        finally:
+            if driver.password != plug.get("password"):  # set on the plug: keep it even if a later step failed
+                self._set_fields(plug_id, password=driver.password)
+                self._live.pop(plug_id, None)
+        state = self.security(plug_id)
+        done = (["password set"] if new_password else []) + [EXPOSURE_TEXTS[e] for e in disable]
+        self.on_event(device_id=None, device=plug["name"], action="secure", source="manual", ok=True,
+                      message="Secured: %s" % ", ".join(done) if done else "Security checked")
+        return dict(state, restart_required=result.get("restart_required", False))
 
     # -- energy --
 

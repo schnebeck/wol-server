@@ -71,17 +71,23 @@ class HttpClient:
         self._lock = threading.Lock()
 
     def get_json(self, url, user=None, password=None):
+        return self._json("GET", url, None, user, password)
+
+    def post_json(self, url, payload, user=None, password=None):
+        return self._json("POST", url, json.dumps(payload).encode("utf-8"), user, password)
+
+    def _json(self, method, url, data, user, password):
         parts = urlsplit(url)
         path = parts.path + ("?" + parts.query if parts.query else "")
         host = parts.netloc
-        status, headers, body = self._request(host, path, user, password)
+        status, headers, body = self._request(host, method, path, data, user, password)
         if status == 401 and password:
             challenge = parse_challenge(headers.get("www-authenticate"))
             if challenge is None:
                 raise PlugAuthError("The plug asks for a password in an unsupported way")
             with self._lock:
                 self._challenges[host] = [challenge, 0]
-            status, headers, body = self._request(host, path, user, password)
+            status, headers, body = self._request(host, method, path, data, user, password)
         if status == 401:
             raise PlugAuthError("Password required" if not password else "Wrong password for the plug")
         try:
@@ -93,18 +99,20 @@ class HttpClient:
             raise PlugError("Plug answered with error %d%s" % (status, ": %s" % message if message else ""))
         return data
 
-    def _request(self, host, path, user, password):
+    def _request(self, host, method, path, data, user, password):
         headers = {"Accept": "application/json", "Connection": "close"}
+        if data is not None:
+            headers["Content-Type"] = "application/json"
         if password:
             with self._lock:
                 entry = self._challenges.get(host)
                 if entry:
                     entry[1] += 1
-                    headers["Authorization"] = digest_response(entry[0], "GET", path, user, password, entry[1],
+                    headers["Authorization"] = digest_response(entry[0], method, path, user, password, entry[1],
                                                                os.urandom(8).hex())
         conn = http.client.HTTPConnection(host, timeout=self.timeout)
         try:
-            conn.request("GET", path, headers=headers)
+            conn.request(method, path, body=data, headers=headers)
             resp = conn.getresponse()
             body = resp.read(1024 * 1024)
             return resp.status, {k.lower(): v for k, v in resp.getheaders()}, body

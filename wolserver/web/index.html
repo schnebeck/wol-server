@@ -1032,6 +1032,16 @@ echo "$USER ALL=(root) NOPASSWD: /usr/bin/systemctl suspend, /usr/bin/systemctl 
           <input type="checkbox" name="locked">
           <span>Never switch off <small class="muted">For the plug of the WOL-Server, the router or a switch: it is switched on and measured, but never switched off or restarted.</small></span>
         </label>
+        <fieldset class="group span2 plug-security" id="plug-security" hidden>
+          <legend>Security</legend>
+          <p class="small" id="plug-security-state" role="status"></p>
+          <div id="plug-security-items" class="plug-security-items"></div>
+          <div class="input-with-btn">
+            <input name="secure_password" type="password" minlength="8" maxlength="128" autocomplete="new-password" aria-label="New password" placeholder="New password (optional)">
+            <button type="button" class="btn small" id="plug-secure">Secure now</button>
+          </div>
+          <small id="plug-secure-hint"></small>
+        </fieldset>
       </div>
       <details class="advanced">
         <summary>Advanced</summary>

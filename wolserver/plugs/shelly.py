@@ -17,17 +17,33 @@
 
 API: https://shelly-api-docs.shelly.cloud/gen2/ - GET /shelly identifies the device without a password,
 everything else goes through /rpc/<Method> with digest authentication (user "admin", SHA-256) when a
-password is set on the plug.
+password is set on the plug. Settings with nested objects go as JSON-RPC (POST /rpc), the documented way.
 """
 
+import hashlib
 import json
 from urllib.parse import urlencode
 
-from .base import CAPABILITIES, ERRORS, PlugDriver, PlugError, PlugInfo, PlugStatus, register
+from .base import CAPABILITIES, ERRORS, EXPOSURES, PlugDriver, PlugError, PlugInfo, PlugStatus, register
 from .http import HttpClient
 
-_TO_STATE = {"restore_last": "restore", "on": "on", "off": "off"}
+_TO_STATE = {"restore_last": "restore", "on": "on", "off": "off"}  # "match_input" (factory default) -> "other"
 _FROM_STATE = {"restore": "restore_last", "on": "on", "off": "off"}
+
+# exposure -> (section in Shelly.GetConfig, key path of its switch, method that switches it off, config)
+_EXPOSURES = {
+    "access_point": ("wifi", ("ap", "enable"), "Wifi.SetConfig", {"ap": {"enable": False}}),
+    "bluetooth": ("ble", ("enable",), "BLE.SetConfig", {"enable": False}),
+    "matter": ("matter", ("enable",), "Matter.SetConfig", {"enable": False}),
+    "cloud": ("cloud", ("enable",), "Cloud.SetConfig", {"enable": False}),
+}
+assert set(_EXPOSURES) == set(EXPOSURES)
+
+
+def _get(data, path):
+    for key in path:
+        data = data.get(key) if isinstance(data, dict) else None
+    return data
 
 
 def _mac(raw):
@@ -58,6 +74,17 @@ class ShellyGen2(PlugDriver):
         if not isinstance(data, dict):
             raise PlugError("Unexpected answer from the plug")
         return data
+
+    def _call(self, method, **params):
+        """JSON-RPC: POST /rpc with method and params in the body."""
+        data = self.http.post_json("http://%s/rpc" % self.host, {"id": 1, "method": method, "params": params},
+                                   self.USER, self.password or None)
+        if not isinstance(data, dict):
+            raise PlugError("Unexpected answer from the plug")
+        if isinstance(data.get("error"), dict):
+            raise PlugError("Plug refused %s: %s" % (method, data["error"].get("message") or data["error"].get("code")))
+        result = data.get("result")
+        return result if isinstance(result, dict) else {}
 
     def status(self):
         d = self._rpc("Switch.GetStatus", id=self.channel)
@@ -90,3 +117,29 @@ class ShellyGen2(PlugDriver):
         if state not in _FROM_STATE:
             raise PlugError("Unknown state: %s" % state)
         self._rpc("Switch.SetConfig", id=self.channel, config={"initial_state": _FROM_STATE[state]})
+
+    def _device_info(self):
+        return self.http.get_json("http://%s/shelly" % self.host)
+
+    def security(self):
+        config = self._rpc("Shelly.GetConfig")
+        return {"password": bool(self._device_info().get("auth_en")),
+                "open": [name for name, (section, path, _, _) in _EXPOSURES.items()
+                         if _get(config.get(section), path) is True]}
+
+    def secure(self, password=None, disable=()):
+        restart = False
+        for name in disable:
+            if name not in _EXPOSURES:
+                raise PlugError("Unknown setting: %s" % name)
+            _, _, method, config = _EXPOSURES[name]
+            restart = bool(self._call(method, config=config).get("restart_required")) or restart
+        if password:
+            realm = self._device_info().get("id")
+            if not realm:
+                raise PlugError("The plug does not report its ID")
+            ha1 = hashlib.sha256(("%s:%s:%s" % (self.USER, realm, password)).encode("utf-8")).hexdigest()
+            self._call("Shelly.SetAuth", user=self.USER, realm=realm, ha1=ha1)
+            self.password = password
+            self._rpc("Shelly.GetDeviceInfo")  # the new password works
+        return {"restart_required": restart}

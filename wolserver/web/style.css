@@ -279,6 +279,12 @@ details.menu > summary .icon:last-child { width: 14px; height: 14px; }
 .check small { display: block; }
 .plug-options .check, .lock-check { align-items: flex-start; }
 .lock-check input { margin-top: 2px; }
+.plug-security { display: grid; gap: 8px; }
+.plug-security p { margin: 0; }
+.plug-security-items { display: grid; gap: 4px; }
+.plug-security-items:empty { display: none; }
+.plug-security .ok { color: var(--wake); }
+.plug-warn { margin: 0; font-size: 0.86rem; color: var(--warn-text); }
 .plug-options .check input { margin-top: 2px; }
 
 /* Consumption */
