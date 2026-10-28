@@ -861,7 +861,8 @@ function securityIssues(sec) {
 function securityWarning(p) {
   const issues = securityIssues(p.security);
   if (!issues.length) return null;
-  return el("p", { class: "plug-warn" }, icon("alert"), " ", t("Open: {0}", issues.join(", ")), " ",
+  const pending = p.security.restart_required ? ` (${t("restart pending")})` : "";
+  return el("p", { class: "plug-warn" }, icon("alert"), " ", t("Open: {0}", issues.join(", ")) + pending, " ",
     el("button", { type: "button", class: "linkish", onclick: () => openPlugDialog(p, {}, true) }, t("Secure")));
 }
 
@@ -978,23 +979,54 @@ function fillPlugSecurity(plug) {
   $("#plug-secure").disabled = true;
   $("#plug-secure-hint").textContent = "";
   $("#plug-security-state").textContent = t("Reading from the plug …");
+  $("#plug-restart-row").hidden = true;
   api("GET", `/api/plugs/${plug.id}/security`).then((sec) => {
+    rememberSecurity(plug, sec);
     if (editingPlug === plug) renderPlugSecurity(plug, sec);
   }).catch((e) => { $("#plug-security-state").textContent = e.message; });
 }
 
+// The card behind the dialog shows the same state as the dialog
+function rememberSecurity(plug, sec) {
+  plug.security = { password: sec.password, open: sec.open, restart_required: Boolean(sec.restart_required) };
+  if (state.view === "plugs" && plugView.sub === "overview") renderPlugs();
+}
+
 function renderPlugSecurity(plug, sec) {
   const issues = securityIssues(sec);
-  $("#plug-security-state").replaceChildren(...(issues.length
-    ? [icon("alert"), " ", t("Open: {0}", issues.join(", "))]
-    : [el("span", { class: "ok" }, icon("check")), " ", t("Secured: password set, no other ways in.")]));
-  $("#plug-security-items").replaceChildren(...sec.open.map((e) => el("label", { class: "check" },
+  // Waiting for a restart: what is still listed goes off with it, offering it again would only confuse
+  const waiting = sec.restart_required && sec.open.length;
+  $("#plug-security-state").replaceChildren(...(waiting
+    ? [icon("clock"), " ", t("Waiting for a restart: {0}", sec.open.map((e) => EXPOSURE_TEXTS[e] || e).join(", "))]
+    : issues.length
+      ? [icon("alert"), " ", t("Open: {0}", issues.join(", "))]
+      : [el("span", { class: "ok" }, icon("check")), " ", t("Secured: password set, no other ways in.")]));
+  $("#plug-security-items").replaceChildren(...(waiting ? [] : sec.open).map((e) => el("label", { class: "check" },
     el("input", { type: "checkbox", name: "disable", value: e, checked: true }),
     el("span", {}, t("Switch off: {0}", EXPOSURE_TEXTS[e] || e)))));
   $("#plug-secure").disabled = false;
+  $("#plug-restart-row").hidden = !sec.restart_required;
   $("#plug-secure-hint").textContent = sec.password || plug.has_password
     ? t("Empty: the password stays as it is.")
     : t("Empty: the WOL-Server chooses a random password. Only the WOL-Server needs it; a reset of the plug removes it.");
+}
+
+async function onPlugRestart() {
+  const plug = editingPlug;
+  const form = $("#plug-form");
+  showError(form, "");
+  if (!(await confirmDialog(t("Restart {0}?", plug.name),
+    t("The plug is not reachable for about 10 s. Afterwards its output follows the setting \"After a power outage\"."), t("Restart")))) return;
+  await busy($("#plug-restart"), async () => {
+    try {
+      const res = await api("POST", `/api/plugs/${plug.id}/restart`);
+      toast(res.message, "success");
+      $("#plug-security-state").textContent = t("Reading from the plug …");
+      setTimeout(() => { if (editingPlug === plug && $("#plug-dialog").open) fillPlugSecurity(plug); }, 15000);
+    } catch (e) {
+      showError(form, e.message);
+    }
+  });
 }
 
 async function onPlugSecure() {
@@ -1009,11 +1041,9 @@ async function onPlugSecure() {
       const res = await api("POST", `/api/plugs/${plug.id}/security`, { password, disable });
       form.elements.secure_password.value = "";
       plug.has_password = true;
-      plug.security = { password: res.password, open: res.open };
+      rememberSecurity(plug, res);
       renderPlugSecurity(plug, res);
-      if (res.restart_required) $("#plug-secure-hint").textContent = t("Some settings take effect after the plug restarts.");
       toast(t("Plug secured"), "success");
-      if (state.view === "plugs") refreshPlugs().catch(() => {});
     } catch (e) {
       showError(form, e.message);
     }
@@ -3323,6 +3353,7 @@ function bind() {
   $("#plug-detect").addEventListener("click", detectPlug);
   $("#plug-delete").addEventListener("click", onPlugDelete);
   $("#plug-secure").addEventListener("click", onPlugSecure);
+  $("#plug-restart").addEventListener("click", onPlugRestart);
   $("#plug-consumer").addEventListener("change", (e) => {
     updatePlugConsumer();
     if (e.target.value === CONSUMER_OTHER) $("#plug-consumer-label").focus();

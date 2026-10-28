@@ -121,13 +121,19 @@ class PlugDriver:
         raise PlugUnsupported("This plug has no setting for the state after a power outage")
 
     def security(self):
-        """{"password": bool, "open": [exposure, ...]}: is a password set, which EXPOSURES are switched on."""
+        """{"password": bool, "open": [exposure, ...], "restart_required": bool}: is a password set, which
+        EXPOSURES are switched on, and is a change waiting for a restart of the plug (then "open" may still
+        list what goes off with the restart)."""
         raise PlugUnsupported("This plug cannot report its security settings")
 
     def secure(self, password=None, disable=()):
         """Switches the given EXPOSURES off, then sets password (if given) and uses it from then on.
         Returns {"restart_required": bool}: some settings only take effect after the plug restarts."""
         raise PlugUnsupported("This plug cannot be secured by the WOL-Server")
+
+    def restart(self):
+        """Restarts the plug's firmware. The output follows the power-on state afterwards."""
+        raise PlugUnsupported("This plug cannot be restarted by the WOL-Server")
 
 
 DRIVERS = {}

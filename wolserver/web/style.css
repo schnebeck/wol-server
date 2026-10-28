@@ -291,6 +291,8 @@ details.menu > summary .icon:last-child { width: 14px; height: 14px; }
 .plug-security-items:empty { display: none; }
 .plug-security .ok { color: var(--wake); }
 .plug-warn { margin: 0; font-size: 0.86rem; color: var(--warn-text); }
+.plug-restart-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;
+  padding: 8px 10px; border-radius: 8px; background: var(--warn-soft); color: var(--warn-text); }
 .plug-options .check input { margin-top: 2px; }
 
 /* Consumption */

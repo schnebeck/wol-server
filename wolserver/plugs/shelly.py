@@ -125,7 +125,8 @@ class ShellyGen2(PlugDriver):
         config = self._rpc("Shelly.GetConfig")
         return {"password": bool(self._device_info().get("auth_en")),
                 "open": [name for name, (section, path, _, _) in _EXPOSURES.items()
-                         if _get(config.get(section), path) is True]}
+                         if _get(config.get(section), path) is True],
+                "restart_required": bool(self._rpc("Sys.GetStatus").get("restart_required"))}
 
     def secure(self, password=None, disable=()):
         restart = False
@@ -143,3 +144,6 @@ class ShellyGen2(PlugDriver):
             self.password = password
             self._rpc("Shelly.GetDeviceInfo")  # the new password works
         return {"restart_required": restart}
+
+    def restart(self):
+        self._call("Shelly.Reboot")

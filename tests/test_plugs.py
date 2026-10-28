@@ -73,6 +73,7 @@ class FakeShelly(BaseHTTPRequestHandler):
     output = True
     config = None  # Shelly.GetConfig, a fresh copy of the fixture per test
     new_password = None  # the password a test is going to set: Shelly.SetAuth only sends its hash
+    pending = None  # config switched off that only takes effect with a restart (Matter on a real Shelly)
 
     def log_message(self, *args):
         pass
@@ -115,6 +116,14 @@ class FakeShelly(BaseHTTPRequestHandler):
         type(self).calls.append((method, params))
         sections = {"Wifi.SetConfig": "wifi", "BLE.SetConfig": "ble", "Matter.SetConfig": "matter",
                     "Cloud.SetConfig": "cloud"}
+        if method == "Matter.SetConfig":  # like the real plug: stays on until the restart
+            type(self).pending = params["config"]
+            return self._json(200, {"id": req["id"], "result": {"restart_required": True}})
+        if method == "Shelly.Reboot":
+            if type(self).pending:
+                type(self).config["matter"].update(type(self).pending)
+                type(self).pending = None
+            return self._json(200, {"id": req["id"], "result": None})
         if method in sections:
             section = type(self).config[sections[method]]
             for key, value in params["config"].items():
@@ -122,7 +131,7 @@ class FakeShelly(BaseHTTPRequestHandler):
                     section[key].update(value)
                 else:
                     section[key] = value
-            return self._json(200, {"id": req["id"], "result": {"restart_required": method == "Matter.SetConfig"}})
+            return self._json(200, {"id": req["id"], "result": {"restart_required": False}})
         if method == "Shelly.SetAuth":
             ha1 = hashlib.sha256(("admin:%s:%s" % (self.realm, self.new_password)).encode()).hexdigest()
             if params != {"user": "admin", "realm": self.realm, "ha1": ha1}:
@@ -155,6 +164,8 @@ class FakeShelly(BaseHTTPRequestHandler):
             return self._json(200, self.config)
         if parts.path == "/rpc/Shelly.GetDeviceInfo":
             return self._json(200, fixture("shelly.json"))
+        if parts.path == "/rpc/Sys.GetStatus":
+            return self._json(200, {"restart_required": bool(self.pending), "uptime": 4235})
         return self._json(404, {"code": 404, "message": "No handler for %s" % parts.path})
 
 
@@ -162,6 +173,7 @@ class ShellyTest(unittest.TestCase):
     def setUp(self):
         FakeShelly.calls, FakeShelly.requests, FakeShelly.output = [], 0, True
         FakeShelly.password, FakeShelly.config, FakeShelly.new_password = "geheim", copy.deepcopy(fixture("config.json")), None
+        FakeShelly.pending = None
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), FakeShelly)
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
         self.host = "127.0.0.1:%d" % self.server.server_address[1]
@@ -196,14 +208,17 @@ class ShellyTest(unittest.TestCase):
 
     def test_security_and_secure(self):
         d = self.driver()
-        self.assertEqual(d.security(), {"password": True, "open": ["access_point", "bluetooth", "matter"]})
+        self.assertEqual(d.security(), {"password": True, "open": ["access_point", "bluetooth", "matter"],
+                                        "restart_required": False})
         FakeShelly.new_password = "neu-und-lang"
         res = d.secure("neu-und-lang", ["access_point", "bluetooth", "matter"])
         self.assertEqual(res, {"restart_required": True})
         self.assertEqual(d.password, "neu-und-lang")
         self.assertEqual(FakeShelly.password, "neu-und-lang")
         self.assertIn(("Wifi.SetConfig", {"config": {"ap": {"enable": False}}}), FakeShelly.calls)
-        self.assertEqual(d.security(), {"password": True, "open": []})
+        self.assertEqual(d.security(), {"password": True, "open": ["matter"], "restart_required": True})
+        d.restart()  # Matter goes off with the restart
+        self.assertEqual(d.security(), {"password": True, "open": [], "restart_required": False})
         with self.assertRaises(PlugAuthError):
             self.driver("geheim").status()  # the old password no longer works
 
@@ -326,6 +341,25 @@ class ManagerTest(unittest.TestCase):
         with self.assertRaisesRegex(plugs.PlugError, "Unknown setting"):
             self.mgr.secure(plug["id"], None, ["telnet"])
 
+    def test_restart_finishes_matter_but_never_cuts_power(self):
+        dev = fake.FakePlug.devices["plug-1"]
+        dev.exposures = {"matter"}
+        plug = self.mgr.add({"host": "plug-1", "password": "pw"})
+        res = self.mgr.secure(plug["id"], None, ["matter"])
+        self.assertEqual((res["open"], res["restart_required"]), (["matter"], True))
+        self.assertTrue(self.mgr.get_public(plug["id"])["security"]["restart_required"])
+        dev.power_on_state = "off"  # a restart would leave the PC without power
+        with self.assertRaisesRegex(plugs.PlugError, "would stay off"):
+            self.mgr.restart(plug["id"])
+        dev.power_on_state = "restore"
+        self.assertTrue(self.mgr.restart(plug["id"])["ok"])
+        self.assertEqual(self.events[-1]["message"], "Plug restarted")
+        self.assertEqual(self.mgr.security(plug["id"]), {"password": True, "open": [], "restart_required": False})
+        self.assertTrue(dev.on)
+        locked = self.mgr.update(plug["id"], {"name": "router", "host": "plug-1", "locked": True})
+        with self.assertRaisesRegex(plugs.PlugError, "never restarted"):
+            self.mgr.restart(locked["id"])
+
     def test_secure_chooses_a_password(self):
         fake.FakePlug.devices["plug-2"] = dev = fake.FakeDevice(mac="02:00:00:00:00:02")
         plug = self.mgr.add({"host": "plug-2"})
@@ -374,6 +408,8 @@ class PlugApiTest(unittest.TestCase):
         self.assertEqual((status, res["password"], res["open"]), (200, True, []))
         status, res = self.call("POST", "/api/plugs/%s/security" % plug["id"], {"password": "kurz"})
         self.assertEqual(status, 400)
+        status, res = self.call("POST", "/api/plugs/%s/restart" % plug["id"], {})
+        self.assertEqual((status, res["ok"]), (200, True))
         status, res = self.call("GET", "/api/net/config")  # network service not running in the test
         self.assertEqual(status, 503)
         self.assertEqual(self.call("DELETE", "/api/plugs/%s" % plug["id"])[0], 200)
