@@ -374,8 +374,7 @@ function deviceCard(d) {
       el("div", { class: "card-title" },
         el("h3", {}, d.name),
         el("span", { class: `status-label ${cls}` }, label)),
-      power ? el("span", { class: "power-badge", title: t("Plug {0}", power.plug) }, icon("bolt"),
-        power.reachable ? (power.on ? `${fmtWatt(power.power_w)} W` : t("off")) : "–") : null,
+      power ? powerMenu({ id: power.plug_id, name: power.plug }, power) : null,
       el("button", { class: "icon-btn", type: "button", title: t("Edit"), "aria-label": t("Edit {0}", d.name), onclick: () => openDeviceDialog(d) }, icon("edit"))),
     el("dl", { class: "meta" },
       el("div", {}, el("dt", {}, "MAC"), el("dd", { class: "mono" }, d.mac)),
@@ -383,17 +382,16 @@ function deviceCard(d) {
       el("div", {}, el("dt", {}, t("Sleep")), el("dd", {}, SLEEP_METHODS[d.sleep_method]))),
     el("p", { class: next ? "next" : "next muted" }, icon("clock"),
       next ? el("span", {}, el("strong", {}, ACTIONS[next.action]), " ", fmtNext(next.next_run)) : t("No active schedule")),
-    el("div", { class: power ? "card-actions three" : "card-actions" },
+    el("div", { class: "card-actions" },
       el("button", { class: "btn wake", type: "button", onclick: (e) => deviceAction(d, "wake", e.currentTarget) }, icon("power"), t("Wake")),
       el("button", {
         class: "btn sleep", type: "button", disabled: !canSleep,
         title: canSleep ? "" : t("No sleep method configured"),
         onclick: (e) => deviceAction(d, "sleep", e.currentTarget),
-      }, icon("moon"), t("Sleep")),
-      power ? powerMenu({ id: power.plug_id, name: power.plug }, power) : null));
+      }, icon("moon"), t("Sleep"))));
 }
 
-// "Power" on the device card: the plug's switch, with the same safety rules as in the Plugs tab
+// The power of the plug in the card head, and its switch behind it: same safety rules as in the Plugs tab
 function powerMenu(plug, power) {
   const off = !power.reachable || !power.on || power.locked;
   const item = (action, label, disabled, title) => el("button", {
@@ -403,8 +401,10 @@ function powerMenu(plug, power) {
       plugAction(plug, action, e.currentTarget.closest("details").querySelector("summary"));
     },
   }, label);
-  return el("details", { class: "menu" },
-    el("summary", { class: "btn", title: t("Plug {0}", plug.name) }, icon("bolt"), t("Power"), icon("chevron")),
+  const value = power.reachable ? (power.on ? `${fmtWatt(power.power_w)} W` : t("off")) : "–";
+  return el("details", { class: "menu power-menu" },
+    el("summary", { class: "power-badge", title: t("Plug {0}", plug.name), "aria-label": `${t("Power")}: ${t("Plug {0}", plug.name)}, ${value}` },
+      icon("bolt"), value, icon("chevron")),
     el("div", { class: "menu-list" },
       item("on", t("Power on"), !power.reachable || power.on),
       item("off", t("Power off"), off),

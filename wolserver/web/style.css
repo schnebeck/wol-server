@@ -221,6 +221,7 @@ pre code { background: none; border: 0; padding: 0; }
 .card {
   background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
   padding: 16px; box-shadow: var(--shadow); display: grid; gap: 12px; align-content: start;
+  grid-template-columns: minmax(0, 1fr); /* long content must not widen the card */
 }
 .card-head { display: flex; align-items: center; gap: 11px; }
 .card-title { flex: 1; min-width: 0; }
@@ -258,7 +259,12 @@ pre code { background: none; border: 0; padding: 0; }
 .power-badge .icon { width: 15px; height: 15px; color: var(--muted); }
 .dot.warn { background: var(--danger); box-shadow: 0 0 0 4px var(--danger-soft); }
 .status-label.warn { color: var(--danger); font-weight: 600; }
-.card-actions.three { grid-template-columns: 1fr 1fr auto; }
+details.power-menu > summary.power-badge {
+  height: auto; padding: 4px 6px 4px 8px; border-radius: 8px; cursor: pointer; color: var(--text);
+}
+details.power-menu > summary.power-badge:hover, details.power-menu[open] > summary.power-badge { background: var(--surface-2); }
+details.power-menu > summary.power-badge:focus-visible { outline: 2px solid var(--wake); outline-offset: 1px; }
+details.power-menu .menu-list { top: calc(100% + 4px); bottom: auto; }
 details.menu { position: relative; }
 details.menu > summary { list-style: none; height: 100%; padding: 0 10px; gap: 4px; }
 details.menu > summary::-webkit-details-marker { display: none; }
