@@ -302,7 +302,7 @@ ARP = {"192.168.7.1": "3c:a6:2f:34:04:02", "192.168.7.10": "a8:b8:e0:23:47:fe", 
 
 net = netsvc.NetManager(os.path.join(RUN, "state"), conf_dir=os.path.join(RUN, "conf"),
                         data_dir=os.path.join(RUN, "dns-data"), runner=SYSTEM, interfaces=lambda: IFACES[:1],
-                        arp=lambda: dict(ARP), user=os.environ.get("USER", "nobody"))
+                        arp=lambda: dict(ARP), user=os.environ.get("USER", "nobody"), arp_probe=lambda ips: set())
 net._gateway = lambda iface: "192.168.7.1"
 _server_state = net._server_state
 net._server_state = lambda cfg: dict(_server_state(cfg), mac="b8:27:eb:50:a8:f0")
