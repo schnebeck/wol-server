@@ -368,6 +368,8 @@ function deviceCard(d) {
   const power = state.power[d.id];
   const next = nextActionFor(d.id);
   const canSleep = d.sleep_method !== "none";
+  const online = state.status[d.id] === true;
+  const offline = state.status[d.id] === false;
   return el("article", { class: `card device ${cls}` },
     el("header", { class: "card-head" },
       el("span", { class: `dot ${cls}`, "aria-hidden": "true" }),
@@ -382,11 +384,15 @@ function deviceCard(d) {
       el("div", {}, el("dt", {}, t("Sleep")), el("dd", {}, SLEEP_METHODS[d.sleep_method]))),
     el("p", { class: next ? "next" : "next muted" }, icon("clock"),
       next ? el("span", {}, el("strong", {}, ACTIONS[next.action]), " ", fmtNext(next.next_run)) : t("No active schedule")),
+    // Wake only what is not online, sleep only what is not known to be off (ping status, not the guess)
     el("div", { class: "card-actions" },
-      el("button", { class: "btn wake", type: "button", onclick: (e) => deviceAction(d, "wake", e.currentTarget) }, icon("power"), t("Wake")),
       el("button", {
-        class: "btn sleep", type: "button", disabled: !canSleep,
-        title: canSleep ? "" : t("No sleep method configured"),
+        class: "btn wake", type: "button", disabled: online, title: online ? t("Already online") : "",
+        onclick: (e) => deviceAction(d, "wake", e.currentTarget),
+      }, icon("power"), t("Wake")),
+      el("button", {
+        class: "btn sleep", type: "button", disabled: !canSleep || offline,
+        title: !canSleep ? t("No sleep method configured") : offline ? t("Already off or asleep") : "",
         onclick: (e) => deviceAction(d, "sleep", e.currentTarget),
       }, icon("moon"), t("Sleep"))));
 }
