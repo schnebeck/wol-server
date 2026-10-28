@@ -290,6 +290,7 @@ class PlugManager:
             self._save()
             self._live[plug["id"]] = (time.monotonic(), plug["host"], {"status": status.to_dict(), "error": None})
         log.info("Plug %s added (%s at %s)", plug["name"], plug["driver"], plug["host"])
+        self.energy.record(plug["id"], status.to_dict())  # the first reading counts like every other
         try:
             self.security(plug["id"])  # so the overview can point out an open plug right away
         except PlugError:
@@ -456,8 +457,8 @@ class PlugManager:
             return cached[2]
         return self._fetch(plug)
 
-    def list(self, live=True):
-        """All plugs with live values (at most CACHE_SECONDS old, fetched in parallel)."""
+    def list(self, live=True, max_age=CACHE_SECONDS):
+        """All plugs with live values (at most max_age seconds old, fetched in parallel)."""
         with self._lock:
             plugs = copy.deepcopy(self._plugs)
             cached = dict(self._live)
@@ -467,7 +468,7 @@ class PlugManager:
 
         def current(p):
             entry = cached.get(p["id"])
-            return entry and entry[1] == p["host"] and now - entry[0] < self.CACHE_SECONDS
+            return entry and entry[1] == p["host"] and now - entry[0] < max_age
 
         stale = [p for p in plugs if not current(p)]
         fresh = dict(zip([p["id"] for p in stale], self._pool.map(self._fetch, stale)))

@@ -21,7 +21,8 @@ counter goes down (reset, firmware update), the new value counts as the consumpt
 Plugs without a counter are integrated from the power (at most 5 minutes per reading).
 
 Easy on the SD card: the values of the running hour stay in RAM and are written once per hour (and on
-shutdown) in a single transaction. The per-minute curve of the last 24 hours lives in RAM only.
+shutdown) in a single transaction. The per-minute curve of the last 24 hours and the single readings of the
+last hour (for the live view) live in RAM only.
 """
 
 import collections
@@ -38,6 +39,9 @@ MAX_SPREAD = 31 * 24 * HOUR  # longer gaps go into the hour of the reading
 MAX_INTEGRATE = 300  # s, plugs without a counter
 CURVE_STEP = 300  # s, resolution of the day curve
 SAMPLES = 24 * 60  # minutes in RAM per plug
+READINGS = 900  # single readings in RAM per plug: an hour at one reading per 5 s, with some reserve
+RECENT_STEP = 5  # s, resolution of the live view
+RECENT_HOLD = 90  # s, a reading stands for the time after it up to this long (slow readings: once a minute)
 
 GROUPS = {"day": "%H", "month": "%d", "year": "%m"}
 
@@ -62,6 +66,7 @@ class EnergyLog:
         self._pending = {}  # (plug, hour) -> [wh, max_w, max_temp]
         self._flushed_hour = _hour(clock())
         self._samples = collections.defaultdict(lambda: collections.deque(maxlen=SAMPLES))  # [minute, sum_w, n]
+        self._readings = collections.defaultdict(lambda: collections.deque(maxlen=READINGS))  # (ts, w)
 
     # -- recording --
 
@@ -109,6 +114,9 @@ class EnergyLog:
             t = nxt
 
     def _sample(self, plug_id, ts, power):
+        readings = self._readings[plug_id]
+        if not readings or ts > readings[-1][0]:
+            readings.append((ts, power))
         minute = int(ts // 60 * 60)
         samples = self._samples[plug_id]
         if samples and samples[-1][0] == minute:
@@ -145,6 +153,7 @@ class EnergyLog:
             self._pending = {k: v for k, v in self._pending.items() if k[0] != plug_id}
             self._last.pop(plug_id, None)
             self._samples.pop(plug_id, None)
+            self._readings.pop(plug_id, None)
             with self._db:
                 self._db.execute("DELETE FROM hours WHERE plug = ?", (plug_id,))
                 self._db.execute("DELETE FROM counters WHERE plug = ?", (plug_id,))
@@ -231,6 +240,37 @@ class EnergyLog:
                     values.append(None)
             out[plug] = values
         return {"start": start, "step": CURVE_STEP, "plugs": out}
+
+    def recent(self, plug_ids, seconds=3600, step=RECENT_STEP, hold=RECENT_HOLD):
+        """Power of the last seconds in step buckets per plug (W), from the single readings in RAM. A reading
+        holds until the next one, at most hold seconds; None where nothing is known."""
+        now = self.clock()
+        steps = seconds // step
+        start = int(now // step * step) - (steps - 1) * step
+        with self._lock:
+            readings = {p: [r for r in self._readings.get(p, ()) if r[0] >= start - hold] for p in plug_ids}
+        out = {}
+        for plug in plug_ids:
+            sums = {}
+            for ts, power in readings[plug]:
+                bucket = sums.setdefault(max(-1, int((ts - start) // step)), [0.0, 0, ts])
+                bucket[0] += power
+                bucket[1] += 1
+                bucket[2] = max(bucket[2], ts)
+            values, last, last_ts = [], None, None
+            if -1 in sums:  # the reading before the window may still hold
+                last, last_ts = sums[-1][0] / sums[-1][1], sums[-1][2]
+            for i in range(steps):
+                t = start + i * step
+                if i in sums:
+                    last, last_ts = sums[i][0] / sums[i][1], sums[i][2]
+                    values.append(round(last, 1))
+                elif last is not None and t - last_ts <= hold and t <= now:
+                    values.append(round(last, 1))
+                else:
+                    values.append(None)
+            out[plug] = values
+        return {"start": start, "step": step, "plugs": out}
 
     def totals(self, plug_ids, now=None):
         """Wh today, this month and this year per plug."""

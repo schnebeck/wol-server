@@ -453,6 +453,12 @@ def seed_energy(days=90):
                     load, _ = sim_power(sim, ts, rng, relay)
                     power = load or (dev.standby_w * rng.uniform(0.95, 1.05) if relay else 0.0)
                     energy._samples[plug_id].append([ts // 60 * 60, power, 1])
+        # The single readings of the last hour (live view): as if someone had watched it every 5 s
+        for ts in range(int(now) - 3600, int(now), 5):
+            relay = sim.get("relay", lambda lt: True)(time.localtime(ts))
+            load, _ = sim_power(sim, ts, rng, relay)
+            power = load * rng.uniform(0.97, 1.03) if load else (dev.standby_w * rng.uniform(0.95, 1.05) if relay else 0.0)
+            energy._readings[plug_id].append((ts, round(power, 1)))
         with dev.lock:
             dev.tick()
         energy._last[plug_id] = (now, dev.energy_wh)

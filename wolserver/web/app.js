@@ -1158,11 +1158,11 @@ function fmtNum(value, digits = 1) {
   return value.toLocaleString(I18N.locale, { maximumFractionDigits: digits });
 }
 
-async function renderEnergy() {
+async function renderEnergy(quiet = false) {
   const box = $("#plug-sub-energy");
-  box.classList.add("loading");
+  if (!quiet) box.classList.add("loading");
   try {
-    const q = new URLSearchParams({ period: plugView.period, date: plugView.date });
+    const q = new URLSearchParams(plugView.period === "hour" ? { period: "hour" } : { period: plugView.period, date: plugView.date });
     plugView.data = await api("GET", `/api/energy?${q}`);
   } finally {
     box.classList.remove("loading");
@@ -1185,8 +1185,11 @@ function energySeries(data) {
     const n = Math.max(0, ...lists.map((l) => l.length));
     return Array.from({ length: n }, (_, i) => (lists.some((l) => l[i] != null) ? lists.reduce((sum, l) => sum + (l[i] || 0), 0) : null));
   };
+  const nowById = Object.fromEntries(data.plugs.map((p) => [p.id, p.power_w]));
   for (const sr of series) {
-    sr.energy = pick(data.values)(sr);
+    const ids0 = sr.members || [sr.id];
+    sr.now = ids0.some((id) => nowById[id] != null) ? ids0.reduce((sum, id) => sum + (nowById[id] || 0), 0) : null;
+    sr.energy = data.values ? pick(data.values)(sr) : [];
     sr.curve = data.curve ? pick(data.curve.plugs)(sr) : null;
     sr.total = sr.energy.reduce((sum, v) => sum + (v || 0), 0);
     const ids = sr.members || [sr.id];
@@ -1213,6 +1216,7 @@ function shiftPeriod(step) {
 }
 
 function isCurrentPeriod() {
+  if (plugView.period === "hour") return true;
   const today = isoDate(new Date());
   const n = { day: 10, month: 7, year: 4 }[plugView.period];
   return plugView.date.slice(0, n) >= today.slice(0, n);
@@ -1233,7 +1237,10 @@ function drawEnergy() {
   if (!data) return;
   const period = plugView.period;
   for (const radio of $$("#energy-period input")) radio.checked = radio.value === period;
-  $("#energy-label").textContent = periodLabel(period, plugView.date);
+  const live = period === "hour";
+  $("#energy-label").textContent = live ? t("Last 60 minutes") : periodLabel(period, plugView.date);
+  $("#energy-prev").hidden = live;
+  $("#energy-next").hidden = live;
   $("#energy-next").disabled = isCurrentPeriod();
   $("#energy-today").hidden = isCurrentPeriod();
   const select = $("#energy-plug");
@@ -1252,6 +1259,7 @@ function drawEnergy() {
   }
   $("#energy-chart-panel").hidden = false;
   const series = energySeries(data);
+  if (live) return drawLive(data, series);
   const total = series.reduce((sum, sr) => sum + sr.total, 0);
   const hasData = series.some((sr) => sr.energy.some((v) => v != null));
   const standby = series.filter((sr) => sr.standby_year != null);
@@ -1280,6 +1288,61 @@ function drawEnergy() {
     drawBars(chart, data, series, period);
   }
   drawEnergyTable(series, total, period);
+}
+
+// The last hour: power right now, and the curve in 5 s steps while the view is open (once a minute before)
+function drawLive(data, series) {
+  const known = (sr) => sr.curve.filter((v) => v != null);
+  for (const sr of series) {
+    const values = known(sr);
+    sr.avg = values.length ? values.reduce((a, v) => a + v, 0) / values.length : null;
+    sr.peak = values.length ? Math.max(...values) : null;
+    sr.wh = values.length ? values.reduce((a, v) => a + v, 0) * data.curve.step / 3600 : null;
+  }
+  const sum = (key) => (series.some((sr) => sr[key] != null) ? series.reduce((a, sr) => a + (sr[key] || 0), 0) : null);
+  const now = sum("now"), wh = sum("wh");
+  // Peak of the sum: the highest step of all plugs together
+  const n = series[0].curve.length;
+  let peak = null;
+  for (let i = 0; i < n; i++) {
+    if (!series.some((sr) => sr.curve[i] != null)) continue;
+    peak = Math.max(peak ?? 0, series.reduce((a, sr) => a + (sr.curve[i] || 0), 0));
+  }
+  const price = state.plugSettings.price_kwh;
+  $("#energy-stats").replaceChildren(
+    statCard(t("Power now"), now == null ? "–" : `${fmtWatt(now)} W`, [series.length > 1 ? t("all shown plugs together") : series[0].name], "live"),
+    statCard(t("Peak"), peak == null ? "–" : `${fmtWatt(peak)} W`, [t("in the last 60 minutes")]),
+    statCard(t("Energy"), wh == null ? "–" : `${fmtNum(wh, wh < 10 ? 1 : 0)} Wh`,
+      [wh != null && price != null ? fmtMoney(costOf(wh)) : t("in the last 60 minutes")]));
+  $("#energy-legend").replaceChildren();
+  $("#energy-chart-title").textContent = series.length === 1 ? t("Power of {0} in W", series[0].name) : t("Power in W, each plug on its own scale");
+  const chart = $("#energy-chart");
+  if (!series.some((sr) => known(sr).length)) {
+    chart.replaceChildren(el("div", { class: "table-empty muted" }, t("No readings yet: they arrive every few seconds while this view is open.")));
+  } else {
+    const start = data.curve.start, step = data.curve.step;
+    const fmtTime = (ts, seconds) => new Date(ts * 1000).toLocaleTimeString(I18N.locale, seconds ? { hour: "2-digit", minute: "2-digit", second: "2-digit" } : { hour: "2-digit", minute: "2-digit" });
+    drawCurve(chart, data, series, {
+      // a label every 10 (narrow: 20) minutes, on the full ten
+      axis: (narrow) => {
+        const every = (narrow ? 1200 : 600);
+        const out = [];
+        for (let ts = Math.ceil(start / every) * every; ts <= start + (n - 1) * step; ts += every) out.push([(ts - start) / step, fmtTime(ts)]);
+        return out;
+      },
+      time: (i) => fmtTime(start + i * step, true),
+      headValue: (sr) => (sr.now == null ? null : `${fmtWatt(sr.now)} W`),
+    });
+  }
+  const head = [t("Plug"), t("Plugged in"), t("Now"), t("Average"), t("Peak")];
+  const cell = (v) => el("td", { class: "num" }, v == null ? "–" : `${fmtWatt(v)} W`);
+  const row = (sr) => [el("td", {}, el("span", { class: `key line s${sr.slot}`, "aria-hidden": "true" }), sr.name),
+    el("td", { class: "hide-sm" }, sr.consumer || "–"), cell(sr.now), cell(sr.avg), cell(sr.peak)];
+  const tr_ = (cells) => el("tr", {}, cells.map((c, k) => { c.dataset.label = head[k]; return c; }));
+  $("#energy-table").replaceChildren(el("table", { class: "data energy-table" },
+    el("caption", { class: "sr-only" }, t("Power per plug in the last 60 minutes")),
+    el("thead", {}, el("tr", {}, head.map((h, k) => el("th", { scope: "col", class: k >= 2 ? "num" : k === 1 ? "hide-sm" : "" }, h)))),
+    el("tbody", {}, series.map((sr) => tr_(row(sr))))));
 }
 
 // Frame of a chart: SVG with gridlines and y-axis (the caller places it)
@@ -1352,7 +1415,7 @@ function tipRow(sr, value, unit, cls = "line") {
 
 // Power over the day. Several plugs: one panel each with its own scale (small multiples) and a shared time
 // axis - a 100 W PC would otherwise press a 1 W standby flat onto the baseline.
-function drawCurve(chart, data, series) {
+function drawCurve(chart, data, series, opts = {}) {
   const n = data.curve.plugs[data.plugs[0].id].length;
   const step = data.curve.step;
   const start = data.curve.start;
@@ -1371,9 +1434,12 @@ function drawCurve(chart, data, series) {
     const { m, plotW, y, root } = frame;
     const x = (i) => m.left + (i / (n - 1)) * plotW;
     if (last) {
-      for (const h of narrow ? [0, 6, 12, 18, 24] : [0, 3, 6, 9, 12, 15, 18, 21, 24]) {
-        const label = svg("text", { x: x(Math.min(n - 1, (h * 3600) / step)), y: frame.height - 8, "text-anchor": h === 0 ? "start" : h === 24 ? "end" : "middle", class: "tick" });
-        label.textContent = `${String(h).padStart(2, "0")}:00`;
+      const axis = opts.axis ? opts.axis(narrow)
+        : (narrow ? [0, 6, 12, 18, 24] : [0, 3, 6, 9, 12, 15, 18, 21, 24]).map((h) => [(h * 3600) / step, `${String(h).padStart(2, "0")}:00`]);
+      for (const [pos, text] of axis) {
+        const i = Math.min(n - 1, pos);
+        const label = svg("text", { x: x(i), y: frame.height - 8, "text-anchor": i <= 0 ? "start" : i >= n - 1 ? "end" : "middle", class: "tick" });
+        label.textContent = text;
         root.append(label);
       }
     }
@@ -1404,8 +1470,10 @@ function drawCurve(chart, data, series) {
       cross.setAttribute("x2", x(i));
       for (const sr of group) if (sr.curve[i] != null) dots.append(svg("circle", { cx: x(i), cy: y(sr.curve[i]), r: 4, class: `dot s${sr.slot}` }));
     };
+    const value = multiple && opts.headValue ? opts.headValue(group[0]) : null;
     const head = multiple ? el("div", { class: "multiple-head" }, el("span", { class: `key line s${group[0].slot}`, "aria-hidden": "true" }),
-      group[0].name, group[0].consumer ? el("span", { class: "muted" }, group[0].consumer) : null) : null;
+      group[0].name, group[0].consumer ? el("span", { class: "muted" }, group[0].consumer) : null,
+      value ? el("strong", { class: "head-value" }, value) : null) : null;
     return { frame, x, show, node: el("div", { class: "multiple" }, head, root) };
   });
   const tip = el("div", { class: "chart-tip", hidden: true, role: "status" });
@@ -1417,7 +1485,7 @@ function drawCurve(chart, data, series) {
     show: (i) => {
       for (const p of panels) p.show(i);
       if (i == null) return null;
-      const time = new Date((start + i * step) * 1000).toLocaleTimeString(I18N.locale, { hour: "2-digit", minute: "2-digit" });
+      const time = opts.time ? opts.time(i) : new Date((start + i * step) * 1000).toLocaleTimeString(I18N.locale, { hour: "2-digit", minute: "2-digit" });
       return [el("div", { class: "tip-head" }, time), ...series.map((sr) => tipRow(sr, sr.curve[i] == null ? null : fmtWatt(sr.curve[i]), "W"))];
     },
   });
@@ -1518,6 +1586,7 @@ function exportEnergyCsv() {
   const series = energySeries(data);
   const de = I18N.lang === "de";
   const sep = de ? ";" : ",";
+  if (plugView.period === "hour") return exportLiveCsv(data, series, de, sep);
   const num = (wh) => (wh == null ? "" : (wh / 1000).toFixed(3).replace(".", de ? "," : "."));
   const quote = (text) => `"${String(text).replace(/"/g, '""')}"`;
   const first = { day: t("Hour"), month: t("Day"), year: t("Month") }[plugView.period];
@@ -1529,7 +1598,26 @@ function exportEnergyCsv() {
     lines.push([key, ...values.map(num), num(sum)].join(sep));
   });
   const name = `wol-energy-${plugView.period}-${plugView.period === "day" ? data.date : plugView.period === "month" ? data.date.slice(0, 7) : data.date.slice(0, 4)}.csv`;
-  const blob = new Blob(["﻿" + lines.join("\r\n") + "\r\n"], { type: "text/csv;charset=utf-8" });
+  downloadCsv(lines, name);
+}
+
+// CSV of the last hour: one row per 5 s step, one column per plug (W)
+function exportLiveCsv(data, series, de, sep) {
+  const { start, step } = data.curve;
+  const num = (w) => (w == null ? "" : String(w).replace(".", de ? "," : "."));
+  const quote = (text) => `"${String(text).replace(/"/g, '""')}"`;
+  const lines = [[t("Time"), ...series.map((sr) => quote(`${sr.name} (W)`))].join(sep)];
+  const pad = (v) => String(v).padStart(2, "0");
+  series[0].curve.forEach((_, i) => {
+    const d = new Date((start + i * step) * 1000);
+    const key = `${isoDate(d)} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+    lines.push([key, ...series.map((sr) => num(sr.curve[i]))].join(sep));
+  });
+  downloadCsv(lines, `wol-power-${isoDate(new Date())}.csv`);
+}
+
+function downloadCsv(lines, name) {
+  const blob = new Blob(["\ufeff" + lines.join("\r\n") + "\r\n"], { type: "text/csv;charset=utf-8" });
   const a = el("a", { href: URL.createObjectURL(blob), download: name });
   document.body.append(a);
   a.click();
@@ -3271,10 +3359,12 @@ function bind() {
   setInterval(() => {
     if (document.visibilityState !== "visible" || $("#app").hidden || state.view !== "plugs") return;
     if (plugView.sub === "overview" && !$("#plug-dialog").open) refreshPlugs();
+    // the live hour: not while a tooltip is open, it would jump away under the pointer
+    if (plugView.sub === "energy" && plugView.period === "hour" && !$("#energy-chart .chart-tip:not([hidden])")) renderEnergy(true).catch(() => {});
   }, PLUG_INTERVAL);
   setInterval(() => {
     if (document.visibilityState !== "visible" || $("#app").hidden || state.view !== "plugs") return;
-    if (plugView.sub === "energy" && isCurrentPeriod()) renderEnergy().catch(() => {});
+    if (plugView.sub === "energy" && plugView.period !== "hour" && isCurrentPeriod()) renderEnergy().catch(() => {});
   }, ENERGY_INTERVAL);
 
   // Poll the status only while the page is visible; this saves load on the Pi.

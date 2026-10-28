@@ -58,6 +58,25 @@ class EnergyLogTest(unittest.TestCase):
     def hours(self, plug="p"):
         return self.log.series("day", self.day)["plugs"].get(plug)
 
+    def test_recent_power_in_5_s_steps(self):
+        t0 = local("2026-10-27 10:00")
+        self.read("p", t0 - 200, 1000, 40)  # too old to hold into the window
+        for k in range(12):  # live view open: a reading every 5 s
+            self.read("p", t0 + 3000 + k * 5, 1000, 100 + k)
+        self.read("p", t0 + 3300, 1001, 7)  # view closed: once a minute
+        self.read("p", t0 + 3360, 1001, 8)
+        self.clock.ts = t0 + 3400
+        res = self.log.recent(["p", "q"])
+        values, start = res["plugs"]["p"], res["start"]
+        self.assertEqual((res["step"], len(values), start), (5, 720, t0 + 3400 - 719 * 5))
+        at = lambda ts: values[int(ts - start) // 5]  # noqa: E731
+        self.assertIsNone(at(t0 + 2990))
+        self.assertEqual((at(t0 + 3000), at(t0 + 3055)), (100.0, 111.0))
+        self.assertEqual(at(t0 + 3140), 111.0)  # the last reading holds for 90 s
+        self.assertIsNone(at(t0 + 3150))
+        self.assertEqual((at(t0 + 3330), at(t0 + 3400)), (7.0, 8.0))
+        self.assertEqual(res["plugs"]["q"], [None] * 720)
+
     def test_counter_differences_per_hour(self):
         self.read("p", local("2026-10-27 10:00"), 1000, 60)
         self.read("p", local("2026-10-27 10:30"), 1030, 60)
@@ -303,6 +322,10 @@ class LinkedDeviceTest(unittest.TestCase):
         self.assertEqual(res["plugs"][0]["name"], "plug-office")
         status, res = self.call("GET", "/api/energy?period=year&date=2026-03-01")
         self.assertEqual((status, len(res["buckets"])), (200, 12))
+        status, res = self.call("GET", "/api/energy?period=hour")
+        self.assertEqual((status, res["period"], len(res["curve"]["plugs"][self.plug["id"]])), (200, "hour", 720))
+        self.assertIsNotNone(res["plugs"][0]["power_w"])
+        self.assertIsNotNone(res["curve"]["plugs"][self.plug["id"]][-1])  # just read
         self.assertEqual(self.call("GET", "/api/energy?period=week")[0], 400)
         self.assertEqual(self.call("GET", "/api/energy?date=yesterday")[0], 400)
         status, res = self.call("PUT", "/api/energy/settings", {"price_kwh": "0.32", "currency": "€"})

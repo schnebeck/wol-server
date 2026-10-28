@@ -342,6 +342,7 @@ class App:
     POWER_WOL_DELAY = 15  # s from power on to the magic packet: the network card needs power first
     CUT_WAIT = 300  # s: how long the device may take to shut down before its power is cut
     CUT_INTERVAL = 10
+    HOUR_VIEW_MAX_AGE = 3  # s: the live view polls every 5 s and should get a fresh reading each time
 
     def _power_wake(self, device, source):
         """Wake method of the device's plug. (ok, message) if done, (None, None) if WOL has to follow."""
@@ -985,8 +986,19 @@ class App:
         return 200, {"ok": True, "message": message}
 
     def api_energy(self, req):
-        """Energy per hour, day or month (?period=day|month|year&date=YYYY-MM-DD), for the day also the curve."""
+        """Energy per hour, day or month (?period=day|month|year&date=YYYY-MM-DD), for the day also the curve.
+        ?period=hour: the power of the last hour in 5 s steps and the current power; every call reads the plugs
+        anew, so the live view polling it gets a reading every few seconds."""
         period = (req.query.get("period") or ["day"])[0]
+        if period == "hour":
+            items = self.plugs.list(live=True, max_age=self.HOUR_VIEW_MAX_AGE)
+            curve = self.plugs.energy.recent([p["id"] for p in items])
+            return 200, {"period": "hour", "curve": curve, "settings": self.plugs.settings,
+                         "summary": self.plugs.energy_summary(),
+                         "plugs": [{"id": p["id"], "name": p["name"], "standby_w": p.get("standby_w"),
+                                    "consumer_name": self.plugs.consumer_name(p) if p.get("consumer") else None,
+                                    "power_w": ((p.get("live") or {}).get("status") or {}).get("power_w")}
+                                   for p in items]}
         if period not in ("day", "month", "year"):
             raise ApiError(400, "Unknown period: %s" % period)
         try:
