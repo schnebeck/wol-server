@@ -509,9 +509,14 @@ class ManagerTest(unittest.TestCase):
         self.now = 1_700_000_000.0
         self.ifaces = [{"name": "wlan0", "kind": "wifi", "up": True, "address": "192.168.1.8", "netmask": "255.255.255.0"}]
         self.arp = {"192.168.1.10": "a8:b8:e0:07:4b:4e"}
+        self.static, self.probed = set(), []  # devices with a static address: not in the ARP cache until asked
+
+        def probe(ips):
+            self.probed.append(list(ips))
+            return {ip for ip in ips if ip in self.static}
         self.mgr = netsvc.NetManager(self.tmp, conf_dir=os.path.join(self.tmp, "conf"), data_dir=self.data,
                                      runner=self.sys, clock=lambda: self.now, interfaces=lambda: self.ifaces,
-                                     arp=lambda: self.arp, user="nobody", vendor_source=(None, None))
+                                     arp=lambda: self.arp, user="nobody", vendor_source=(None, None), arp_probe=probe)
         self.mgr._gateway = lambda iface: "192.168.1.1"
 
     def finish(self, state="ok", message="done"):
@@ -608,12 +613,16 @@ class ManagerTest(unittest.TestCase):
                             "1700000001.0 wol dnsmasq-dhcp[1]: DHCPDISCOVER(wlan0) 00:11:22:9e:ae:00 ignored\n")
         self.mgr.settings({"settings": {"dhcp": {"enabled": True}, "dns": {"enabled": True}}})
         self.finish()
+        self.static = {"192.168.1.12"}  # static address, no reservation, no lease, not in the ARP cache
         unknown = {u["mac"]: u for u in self.mgr.unknown()["unknown"]}
         phone = unknown["5a:1f:3c:d7:53:0c"]
         self.assertEqual((phone["suggested_name"], phone["private"]), ("annas-iphone", True))
-        # .10 is taken per ARP; newest request first, each one gets its own address
+        # .10 is taken per ARP, .12 answers the probe; newest request first, each one gets its own address
         self.assertEqual({phone["suggested_ip"], unknown["00:11:22:9e:ae:00"]["suggested_ip"]},
-                         {"192.168.1.11", "192.168.1.12"})
+                         {"192.168.1.11", "192.168.1.13"})
+        self.assertEqual(self.probed, [["192.168.1.11", "192.168.1.12"], ["192.168.1.13"]])
+        self.mgr.unknown()
+        self.assertEqual(len(self.probed), 2)  # the results are kept for a while
         # a draft with another change must not block the approval
         export = self.mgr.export()["export"]
         export["config"]["dhcp"]["lease_time"] = 86400
@@ -937,7 +946,7 @@ class SocketApiTest(unittest.TestCase):
         net = netsvc.NetManager(tmp, conf_dir=os.path.join(tmp, "conf"), data_dir=os.path.join(tmp, "data"), runner=sysctl,
                                 interfaces=lambda: [{"name": "wlan0", "kind": "wifi", "up": True, "address": "192.168.1.8",
                                                      "netmask": "255.255.255.0"}], arp=lambda: {}, user="nobody",
-                                vendor_source=(None, None))
+                                vendor_source=(None, None), arp_probe=lambda ips: set())
         net._gateway = lambda iface: "192.168.1.1"
         path = os.path.join(tmp, "control.sock")
         server = wifi.ControlServer(path, mgr, {os.getuid()}, None, net)
