@@ -13,6 +13,8 @@
 # SPDX-FileContributor: Anthropic Claude Opus 5.5 (AI generated content)
 # SPDX-License-Identifier: GPL-3.0-or-later
 
+import copy
+import hashlib
 import json
 import os
 import shutil
@@ -69,6 +71,8 @@ class FakeShelly(BaseHTTPRequestHandler):
     calls = []
     requests = 0
     output = True
+    config = None  # Shelly.GetConfig, a fresh copy of the fixture per test
+    new_password = None  # the password a test is going to set: Shelly.SetAuth only sends its hash
 
     def log_message(self, *args):
         pass
@@ -83,24 +87,57 @@ class FakeShelly(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
-    def _authorized(self):
+    def _authorized(self, method):
+        if not self.password:
+            return True
         auth = parse_challenge(self.headers.get("Authorization"))
         if not auth:
             return False
         challenge = {"realm": self.realm, "nonce": auth["nonce"], "qop": "auth", "algorithm": "SHA-256"}
-        expected = digest_response(challenge, "GET", self.path, "admin", self.password, int(auth["nc"], 16),
+        expected = digest_response(challenge, method, self.path, "admin", self.password, int(auth["nc"], 16),
                                    auth["cnonce"])
         return parse_challenge(expected)["response"] == auth["response"]
+
+    def _unauthorized(self):
+        return self._json(401, {"code": 401, "message": "unauthorized"}, {
+            "WWW-Authenticate": 'Digest qop="auth", realm="%s", nonce="%x", algorithm=SHA-256'
+                                % (self.realm, int(time.time()))})
+
+    def do_POST(self):
+        """JSON-RPC: POST /rpc {"id", "method", "params"}."""
+        type(self).requests += 1
+        if self.path != "/rpc":
+            return self._json(404, {"code": 404, "message": "not found"})
+        if not self._authorized("POST"):
+            return self._unauthorized()
+        req = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        method, params = req["method"], req.get("params") or {}
+        type(self).calls.append((method, params))
+        sections = {"Wifi.SetConfig": "wifi", "BLE.SetConfig": "ble", "Matter.SetConfig": "matter",
+                    "Cloud.SetConfig": "cloud"}
+        if method in sections:
+            section = type(self).config[sections[method]]
+            for key, value in params["config"].items():
+                if isinstance(value, dict):
+                    section[key].update(value)
+                else:
+                    section[key] = value
+            return self._json(200, {"id": req["id"], "result": {"restart_required": method == "Matter.SetConfig"}})
+        if method == "Shelly.SetAuth":
+            ha1 = hashlib.sha256(("admin:%s:%s" % (self.realm, self.new_password)).encode()).hexdigest()
+            if params != {"user": "admin", "realm": self.realm, "ha1": ha1}:
+                return self._json(200, {"id": req["id"], "error": {"code": -103, "message": "Invalid argument"}})
+            type(self).password = self.new_password
+            return self._json(200, {"id": req["id"], "result": None})
+        return self._json(200, {"id": req["id"], "error": {"code": 404, "message": "No handler for %s" % method}})
 
     def do_GET(self):
         type(self).requests += 1
         parts = urlsplit(self.path)
         if parts.path == "/shelly":
-            return self._json(200, fixture("shelly.json"))
-        if not self._authorized():
-            return self._json(401, {"code": 401, "message": "unauthorized"}, {
-                "WWW-Authenticate": 'Digest qop="auth", realm="%s", nonce="%x", algorithm=SHA-256'
-                                    % (self.realm, int(time.time()))})
+            return self._json(200, dict(fixture("shelly.json"), auth_en=bool(self.password)))
+        if not self._authorized("GET"):
+            return self._unauthorized()
         params = {k: v[0] for k, v in parse_qs(parts.query).items()}
         type(self).calls.append((parts.path, params))
         if parts.path == "/rpc/Switch.GetStatus":
@@ -114,12 +151,17 @@ class FakeShelly(BaseHTTPRequestHandler):
             return self._json(200, fixture("switch_config.json"))
         if parts.path == "/rpc/Switch.SetConfig":
             return self._json(200, {"restart_required": False})
+        if parts.path == "/rpc/Shelly.GetConfig":
+            return self._json(200, self.config)
+        if parts.path == "/rpc/Shelly.GetDeviceInfo":
+            return self._json(200, fixture("shelly.json"))
         return self._json(404, {"code": 404, "message": "No handler for %s" % parts.path})
 
 
 class ShellyTest(unittest.TestCase):
     def setUp(self):
         FakeShelly.calls, FakeShelly.requests, FakeShelly.output = [], 0, True
+        FakeShelly.password, FakeShelly.config, FakeShelly.new_password = "geheim", copy.deepcopy(fixture("config.json")), None
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), FakeShelly)
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
         self.host = "127.0.0.1:%d" % self.server.server_address[1]
@@ -151,6 +193,34 @@ class ShellyTest(unittest.TestCase):
         self.assertEqual(d.power_on_state(), "restore")
         d.set_power_on_state("on")
         self.assertEqual(FakeShelly.calls[-1], ("/rpc/Switch.SetConfig", {"id": "0", "config": '{"initial_state": "on"}'}))
+
+    def test_security_and_secure(self):
+        d = self.driver()
+        self.assertEqual(d.security(), {"password": True, "open": ["access_point", "bluetooth", "matter"]})
+        FakeShelly.new_password = "neu-und-lang"
+        res = d.secure("neu-und-lang", ["access_point", "bluetooth", "matter"])
+        self.assertEqual(res, {"restart_required": True})
+        self.assertEqual(d.password, "neu-und-lang")
+        self.assertEqual(FakeShelly.password, "neu-und-lang")
+        self.assertIn(("Wifi.SetConfig", {"config": {"ap": {"enable": False}}}), FakeShelly.calls)
+        self.assertEqual(d.security(), {"password": True, "open": []})
+        with self.assertRaises(PlugAuthError):
+            self.driver("geheim").status()  # the old password no longer works
+
+    def test_secure_a_plug_without_password(self):
+        FakeShelly.password = ""
+        d = self.driver("")
+        self.assertFalse(d.security()["password"])
+        FakeShelly.new_password = "zufall-123"
+        d.secure("zufall-123", [])
+        self.assertTrue(self.driver("zufall-123").security()["password"])
+        with self.assertRaisesRegex(plugs.PlugError, "Unknown setting"):
+            d.secure(None, ["telnet"])
+
+    def test_factory_power_on_state(self):
+        d = self.driver()
+        d.http.get_json = lambda url, *a: dict(fixture("switch_config.json"), initial_state="match_input")
+        self.assertEqual(d.power_on_state(), "other")
 
     def test_one_round_trip_once_the_challenge_is_known(self):
         client = HttpClient(timeout=2)
@@ -243,6 +313,30 @@ class ManagerTest(unittest.TestCase):
         with self.assertRaises(plugs.PlugError):
             self.mgr.set_power_on_state(plug["id"], "sometimes")
 
+    def test_secure(self):
+        dev = fake.FakePlug.devices["plug-1"]
+        plug = self.mgr.add({"host": "plug-1", "password": "pw"})
+        self.assertEqual((plug["security"]["password"], plug["security"]["open"]), (True, ["access_point"]))
+        res = self.mgr.secure(plug["id"], None, ["access_point"])
+        self.assertEqual((res["password"], res["open"], dev.password), (True, [], "pw"))  # known password stays
+        self.assertEqual(self.events[-1]["message"], "Secured: access point off")
+        self.assertEqual(self.mgr.get_public(plug["id"])["security"]["open"], [])
+        with self.assertRaisesRegex(plugs.PlugError, "8 to 128"):
+            self.mgr.secure(plug["id"], "kurz", [])
+        with self.assertRaisesRegex(plugs.PlugError, "Unknown setting"):
+            self.mgr.secure(plug["id"], None, ["telnet"])
+
+    def test_secure_chooses_a_password(self):
+        fake.FakePlug.devices["plug-2"] = dev = fake.FakeDevice(mac="02:00:00:00:00:02")
+        plug = self.mgr.add({"host": "plug-2"})
+        self.assertFalse(plug["security"]["password"])
+        self.mgr.secure(plug["id"], None, [])
+        self.assertGreaterEqual(len(dev.password), 16)
+        self.assertEqual(self.mgr.get(plug["id"])["password"], dev.password)
+        self.assertEqual(self.events[-1]["message"], "Secured: password set")
+        self.mgr.live(plug["id"], max_age=0)  # the new password works for the poller
+        self.assertIsNone(self.mgr.live(plug["id"], max_age=0)["error"])
+
 
 class PlugApiTest(unittest.TestCase):
     call = test_api.ApiTest.call
@@ -274,6 +368,12 @@ class PlugApiTest(unittest.TestCase):
         self.assertEqual(res["events"][0]["action"], "power_off")
         status, res = self.call("PUT", "/api/plugs/%s/power-on-state" % plug["id"], {"state": "off"})
         self.assertEqual(res["state"], "off")
+        status, res = self.call("GET", "/api/plugs/%s/security" % plug["id"])
+        self.assertEqual((status, res["open"]), (200, ["access_point"]))
+        status, res = self.call("POST", "/api/plugs/%s/security" % plug["id"], {"disable": ["access_point"]})
+        self.assertEqual((status, res["password"], res["open"]), (200, True, []))
+        status, res = self.call("POST", "/api/plugs/%s/security" % plug["id"], {"password": "kurz"})
+        self.assertEqual(status, 400)
         status, res = self.call("GET", "/api/net/config")  # network service not running in the test
         self.assertEqual(status, 503)
         self.assertEqual(self.call("DELETE", "/api/plugs/%s" % plug["id"])[0], 200)

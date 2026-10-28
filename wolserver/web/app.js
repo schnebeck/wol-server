@@ -23,7 +23,7 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
 const DAYS = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"].map((d) => t(d));
-const ACTIONS = { wake: t("Wake"), sleep: t("Put to sleep"), net: t("Change"), power_on: t("Power on"), power_off: t("Power off"), power_cycle: t("Power cycle"), alert: t("Warning") };
+const ACTIONS = { wake: t("Wake"), sleep: t("Put to sleep"), net: t("Change"), power_on: t("Power on"), power_off: t("Power off"), power_cycle: t("Power cycle"), alert: t("Warning"), secure: t("Secured") };
 const SLEEP_METHODS = { none: "–", ssh: "SSH", http: "HTTP", sol: "Sleep-on-LAN" };
 const STATUS_INTERVAL = 10000;
 const PLUG_INTERVAL = 5000;
@@ -840,6 +840,7 @@ function plugCard(p) {
     st ? el("div", { class: "plug-power" }, el("strong", {}, fmtWatt(st.power_w)), el("span", {}, "W")) : null,
     (p.alerts || []).filter((a) => a.key !== "unreachable").map((a) => el("p", { class: "plug-error" }, icon("alert"), " ", tr(a.message))),
     !st && live.error ? el("p", { class: "plug-error" }, tr(live.error)) : null,
+    securityWarning(p),
     el("dl", { class: "meta" }, meta.map(([k, v]) => el("div", {}, el("dt", {}, k), el("dd", {}, v)))),
     plugNextLine(p),
     p.locked ? el("p", { class: "next muted" }, icon("lock"), t("Never switched off: supplies the WOL-Server or the network")) : null,
@@ -847,6 +848,21 @@ function plugCard(p) {
       el("button", { class: "btn wake", type: "button", disabled: !st || st.on, onclick: (e) => plugAction(p, "on", e.currentTarget) }, icon("power"), t("On")),
       el("button", { class: "btn", type: "button", disabled: !st || !st.on || p.locked, onclick: (e) => plugAction(p, "off", e.currentTarget) }, t("Off")),
       el("button", { class: "btn", type: "button", disabled: !st || !st.on || p.locked, title: t("Off, on again after 10 s - runs on the plug itself"), onclick: (e) => plugAction(p, "cycle", e.currentTarget) }, icon("undo"), t("Restart"))));
+}
+
+const EXPOSURE_TEXTS = {
+  access_point: t("own Wi-Fi access point"), bluetooth: t("Bluetooth"), matter: t("Matter"), cloud: t("vendor cloud"),
+};
+
+function securityIssues(sec) {
+  return sec ? [...(sec.password ? [] : [t("no password")]), ...sec.open.map((e) => EXPOSURE_TEXTS[e] || e)] : [];
+}
+
+function securityWarning(p) {
+  const issues = securityIssues(p.security);
+  if (!issues.length) return null;
+  return el("p", { class: "plug-warn" }, icon("alert"), " ", t("Open: {0}", issues.join(", ")), " ",
+    el("button", { type: "button", class: "linkish", onclick: () => openPlugDialog(p, {}, true) }, t("Secure")));
 }
 
 function plugNextLine(p) {
@@ -900,7 +916,7 @@ async function refreshPlugs() {
 let editingPlug = null;
 let plugPowerOnState = null;
 
-function openPlugDialog(plug = null, prefill = {}) {
+function openPlugDialog(plug = null, prefill = {}, focusSecurity = false) {
   editingPlug = plug;
   plugPowerOnState = null;
   const form = $("#plug-form");
@@ -936,15 +952,72 @@ function openPlugDialog(plug = null, prefill = {}) {
     api("GET", `/api/plugs/${plug.id}/power-on-state`).then((res) => {
       if (editingPlug !== plug) return;
       plugPowerOnState = res.state;
-      if (res.state in POWER_ON_STATES && res.state !== "other") pos.value = res.state;
+      pos.querySelector('option[value="other"]')?.remove();
+      if (res.state === "other") pos.append(el("option", { value: "other" }, POWER_ON_STATES.other));
+      pos.value = res.state;
       pos.disabled = false;
-      $("#plug-pos-hint").textContent = res.state === "off" ? t("Devices stay without power after an outage.") : "";
+      $("#plug-pos-hint").textContent = res.state === "off" ? t("Devices stay without power after an outage.")
+        : res.state === "other" ? t("The plug uses a setting of its own. Choose one to be sure.") : "";
     }).catch((e) => { $("#plug-pos-hint").textContent = e.message; });
   }
   $("#plug-dialog-title").textContent = plug ? t("Edit plug") : t("New wireless plug");
   $("#plug-delete").hidden = !plug;
   $("#plug-submit").textContent = plug ? t("Save") : t("Add");
+  fillPlugSecurity(plug);
   $("#plug-dialog").showModal();
+  if (focusSecurity) $("#plug-security").scrollIntoView({ block: "nearest" });
+}
+
+// Security: password and the ways into the plug besides its local API (own access point, Bluetooth, ...)
+function fillPlugSecurity(plug) {
+  const box = $("#plug-security");
+  const driver = plug && (state.plugDrivers || []).find((d) => d.name === plug.driver);
+  box.hidden = !driver || !driver.capabilities.includes("security");
+  if (box.hidden) return;
+  $("#plug-security-items").replaceChildren();
+  $("#plug-secure").disabled = true;
+  $("#plug-secure-hint").textContent = "";
+  $("#plug-security-state").textContent = t("Reading from the plug …");
+  api("GET", `/api/plugs/${plug.id}/security`).then((sec) => {
+    if (editingPlug === plug) renderPlugSecurity(plug, sec);
+  }).catch((e) => { $("#plug-security-state").textContent = e.message; });
+}
+
+function renderPlugSecurity(plug, sec) {
+  const issues = securityIssues(sec);
+  $("#plug-security-state").replaceChildren(...(issues.length
+    ? [icon("alert"), " ", t("Open: {0}", issues.join(", "))]
+    : [el("span", { class: "ok" }, icon("check")), " ", t("Secured: password set, no other ways in.")]));
+  $("#plug-security-items").replaceChildren(...sec.open.map((e) => el("label", { class: "check" },
+    el("input", { type: "checkbox", name: "disable", value: e, checked: true }),
+    el("span", {}, t("Switch off: {0}", EXPOSURE_TEXTS[e] || e)))));
+  $("#plug-secure").disabled = false;
+  $("#plug-secure-hint").textContent = sec.password || plug.has_password
+    ? t("Empty: the password stays as it is.")
+    : t("Empty: the WOL-Server chooses a random password. Only the WOL-Server needs it; a reset of the plug removes it.");
+}
+
+async function onPlugSecure() {
+  const plug = editingPlug;
+  const form = $("#plug-form");
+  showError(form, "");
+  const password = form.elements.secure_password.value;
+  if (password && password.length < 8) return showError(form, t("Password: 8 to 128 characters"));
+  const disable = [...form.querySelectorAll('input[name="disable"]:checked')].map((i) => i.value);
+  await busy($("#plug-secure"), async () => {
+    try {
+      const res = await api("POST", `/api/plugs/${plug.id}/security`, { password, disable });
+      form.elements.secure_password.value = "";
+      plug.has_password = true;
+      plug.security = { password: res.password, open: res.open };
+      renderPlugSecurity(plug, res);
+      if (res.restart_required) $("#plug-secure-hint").textContent = t("Some settings take effect after the plug restarts.");
+      toast(t("Plug secured"), "success");
+      if (state.view === "plugs") refreshPlugs().catch(() => {});
+    } catch (e) {
+      showError(form, e.message);
+    }
+  });
 }
 
 const CONSUMER_OTHER = "__label";
@@ -3161,6 +3234,7 @@ function bind() {
   $("#plug-form").addEventListener("submit", onPlugSubmit);
   $("#plug-detect").addEventListener("click", detectPlug);
   $("#plug-delete").addEventListener("click", onPlugDelete);
+  $("#plug-secure").addEventListener("click", onPlugSecure);
   $("#plug-consumer").addEventListener("change", (e) => {
     updatePlugConsumer();
     if (e.target.value === CONSUMER_OTHER) $("#plug-consumer-label").focus();
