@@ -1,6 +1,6 @@
 # Proposal: smart plugs in WOL-Server
 
-As of: 2026-10-27 · Status: **phases 1 to 3 implemented (branch `plugs`), not yet tested with real plugs** (section 10)
+As of: 2026-10-29 · Status: **phases 1 to 3 implemented and in use with three Shelly Plug M Gen3, released in v1.1.0** (section 10)
 
 WOL-Server learns to use metering smart plugs. A plug is a device in the network with the type "wireless plug". Linking
 it to a consumer tells WOL-Server what the plug measures and what it switches. If the consumer is a WOL device, the
@@ -334,8 +334,8 @@ existing devices.
 
 ## 10. Implementation status
 
-Phases 1 to 3 are implemented on the branch `plugs` and tested against the fake plug (unit tests and the demo).
-What differs from the plan above, and what is still open:
+Phases 1 to 3 are implemented, tested against the fake plug (unit tests and the demo) and in daily use with three
+Shelly Plug M Gen3 (firmware 1.8 and 2.2 beta). What differs from the plan above, and what is still open:
 
 | Topic | State |
 |---|---|
@@ -348,4 +348,9 @@ What differs from the plan above, and what is still open:
 | Wake methods, cut after sleep | Implemented as planned; "Power on" with the relay already on and the device at standby runs a short power cycle. |
 | Alerts | Welded contacts, error flags, temperature above 70 °C, relay wear above 80 %, plug unreachable for 5 minutes: once into the log when raised and when cleared, and as a notice in the Plugs tab. **Open:** the slow temperature rise over days. |
 | Rule 6 (no lock-out) | Consumer "This WOL-Server" (at most one plug) and "Never switch off" for the router or a switch: on and measuring yes, off and restart never (GUI, API, schedules). |
-
+| Securing a plug | Not in the plan, added after the first real plug: a new Shelly ships with an open access point of its own, Bluetooth RPC and Matter switched on and without a password. *Edit → Security* shows what is open, switches the chosen ways in off and sets a password (a random one unless one is given). Settings go as JSON-RPC (`POST /rpc`). The overview points out open plugs. |
+| Restart of a plug | Matter only goes off after a restart (`Sys.GetStatus` → `restart_required`). The dialog then shows "Waiting for a restart" and offers `Shelly.Reboot`, refused for locked plugs and where the output would stay off afterwards (power-on state off). |
+| Live view | Period "Hour": the power of the last 60 minutes in 5 s steps and the power right now. While the view is open every request reads the plugs anew; before that the readings of the background poll (once a minute) hold for up to 90 s. The single readings live in RAM only. |
+| Power-on state | The factory default of the Plug M Gen3 is `match_input`, which the API documentation does not define for a plug. It is shown as the plug's own setting and only changed when another one is chosen. |
+| Real hardware | The relay counter is `counts.switch_on` (also `on_time`, `on_above_thr` with firmware 2.2). Below about 1 W the plug reports 0 W and counts no energy, so a Pi Zero on its own plug mostly reads 0 W. |
+| API tokens | The plug and energy endpoints need a GUI session; tokens stay limited to devices. |
