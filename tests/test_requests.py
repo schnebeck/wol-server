@@ -194,11 +194,11 @@ class RequestApiTest(unittest.TestCase):
         answers = iter([False, False, True])
         with mock.patch("wolserver.server.check_host", lambda host: next(answers)), mock.patch("time.sleep"):
             status, a = self.call("POST", "/api/devices/backup/requests?wait=60", {"client": "aida"})
-        self.assertEqual((status, a["online"], a["client"], a["ttl"]), (201, True, "aida", 900))
+        self.assertEqual((status, a["online"], a["woken"], a["client"], a["ttl"]), (201, True, True, "aida", 900))
         self.assertEqual(len(self.sent), 1)  # woken
         with mock.patch("wolserver.server.check_host", lambda host: True):
             status, m = self.call("POST", "/api/devices/backup/requests", {"client": "mail", "ttl": 0})
-        self.assertEqual((status, m["online"], len(self.sent)), (201, True, 1))  # online: nothing sent
+        self.assertEqual((status, m["online"], m["woken"], len(self.sent)), (201, True, False, 1))  # online: nothing sent
         status, res = self.call("GET", "/api/devices/backup/requests")
         self.assertEqual([r["client"] for r in res["requests"]], ["aida", "mail"])
         self.assertEqual(self.call("PUT", "/api/devices/backup/requests/%s" % a["id"])[0], 200)

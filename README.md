@@ -718,7 +718,8 @@ The example needs `curl` and `jq`.
   released. Its total lifetime has no limit: as long as heartbeats come, a request lives for days, e.g. for a long
   job on the device itself.
 - Answers:
-  - `POST …/requests`: 201 with `id`, `client`, `ttl`, `expires` (Unix time, `null` for `ttl` 0) and `online`.
+  - `POST …/requests`: 201 with `id`, `client`, `ttl`, `expires` (Unix time, `null` for `ttl` 0), `online` and
+    `woken` (`true` if this request woke the device; a client can then ask for sleep only for a device it woke).
     The request also stays open on 502 and 504.
   - `PUT …/requests/<id>`: 200 with the new `expires`; 404 if the request has expired or was ended.
   - `DELETE …/requests/<id>`: 200 with `sleep` (`"pending"` or `null`), `waiting_for` (clients still holding

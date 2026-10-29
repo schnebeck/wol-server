@@ -685,6 +685,7 @@ class App:
         result = {"ok": True, "device": device["name"], **request}
         # Wake only what does not answer (a request for a running device sends nothing)
         online = check_host(device["host"]) if device.get("host") else None
+        result["woken"] = not online  # the client may then ask for sleep; a device that was on stays on
         if not online:
             ok, message = self.run_action(device, "wake", source)
             result["message"] = message
