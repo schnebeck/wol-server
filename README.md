@@ -693,21 +693,40 @@ WOL=https://wol.home.arpa
 AUTH="Authorization: Bearer $(cat ~/.config/wol-token)"
 DEV=$WOL/api/devices/backup-server
 
-# Request: wakes the device if needed and answers once it is online (201), 504 on timeout
-ID=$(curl -fsS -X POST -H "$AUTH" -d '{"client": "laptop"}' "$DEV/requests?wait=300" | jq -r .id) || exit 1
+# Request: wakes the device if needed and answers once it is online (201). The answer carries the request id
+# also when waking fails (502) or the device does not come up in time (504); the script then ends it again.
+RES=$(curl -sS -X POST -H "$AUTH" -d '{"client": "laptop"}' "$DEV/requests?wait=300") || exit 1
+ID=$(printf '%s' "$RES" | jq -r '.id // empty')
+[ -n "$ID" ] || { printf '%s\n' "$RES" >&2; exit 1; }
+if [ "$(printf '%s' "$RES" | jq -r .online)" != true ]; then
+    curl -sS -X DELETE -H "$AUTH" "$DEV/requests/$ID" >/dev/null
+    printf '%s\n' "$RES" >&2; exit 1
+fi
 # Heartbeat every 5 minutes while the backup runs (a request without heartbeat expires after 15 minutes)
-( while sleep 300; do curl -fsS -X PUT -H "$AUTH" "$DEV/requests/$ID" >/dev/null || break; done ) &
+( while sleep 300; do curl -fs -X PUT -H "$AUTH" "$DEV/requests/$ID" >/dev/null || break; done ) 2>/dev/null & HB=$!
 rsync -a /home/ backup-server:/srv/backup/home/; rc=$?
-kill $! 2>/dev/null
+pkill -P $HB  # ends the loop: stops its sleep (or curl)
 # Done, and asking for sleep: it runs 2 minutes after the last open request, unless the device is requested again
 curl -fsS -X DELETE -H "$AUTH" "$DEV/requests/$ID?then=sleep"
 exit $rc
 ```
 
-- `ttl` (seconds) sets how long a request lives without a heartbeat (default 900; `0` = until released). There is
-  no upper limit: as long as heartbeats come, a request lives for days, e.g. for a long job on the device itself.
-- `POST …/sleep?when=idle` asks for sleep without holding a request: at once if nothing is open, otherwise once
-  the last request is done (202). `DELETE …/sleep` takes that back.
+The example needs `curl` and `jq`.
+
+- `client` is the name shown on the device card and in the log; with a token it defaults to the token's name.
+- `ttl` (seconds) sets how long a request lives without a heartbeat: 60 s to 7 days, default 900, `0` = until
+  released. Its total lifetime has no limit: as long as heartbeats come, a request lives for days, e.g. for a long
+  job on the device itself.
+- Answers:
+  - `POST …/requests`: 201 with `id`, `client`, `ttl`, `expires` (Unix time, `null` for `ttl` 0) and `online`.
+    The request also stays open on 502 and 504.
+  - `PUT …/requests/<id>`: 200 with the new `expires`; 404 if the request has expired or was ended.
+  - `DELETE …/requests/<id>`: 200 with `sleep` (`"pending"` or `null`), `waiting_for` (clients still holding
+    the device) and `sleep_at`.
+  - `GET …/requests` lists the open requests and a remembered sleep; `GET /api/status` contains them for all
+    devices under `requests`.
+- `POST …/sleep?when=idle` asks for sleep without holding a request: at once if nothing is open (200), otherwise
+  2 minutes after the last request is done (202). `DELETE …/sleep` takes that back.
 - While requests are open, a sleep schedule waits for the last one, *Sleep* and a plain `POST …/sleep` ask first
   (409, `?force=1` puts the device to sleep anyway), and the device's plug is not switched off by a schedule.
 - The device card shows "In use: …"; *Details* lists every request (last heartbeat, expiry) and can end it. A
