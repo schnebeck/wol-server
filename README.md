@@ -782,6 +782,10 @@ PUT    /api/devices/<id>/plug {plug_id, wake_method, cut_after_sleep}
 GET    /api/energy?period=<hour|day|month|year>&date=YYYY-MM-DD     GET/PUT /api/energy/settings {price_kwh, currency}
 ```
 
+## Changes
+
+What changed in which version: [CHANGELOG.md](CHANGELOG.md).
+
 ## License
 
 WOL-Server is free software under the GNU General Public License, version 3 or later

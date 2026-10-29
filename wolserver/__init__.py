@@ -15,4 +15,4 @@
 
 """WOL-Server - lean Wake-on-LAN manager for the Raspberry Pi Zero W."""
 
-__version__ = "1.0.0"
+__version__ = "1.2.1"
