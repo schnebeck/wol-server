@@ -23,7 +23,7 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
 const DAYS = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"].map((d) => t(d));
-const ACTIONS = { wake: t("Wake"), sleep: t("Put to sleep"), net: t("Change"), power_on: t("Power on"), power_off: t("Power off"), power_cycle: t("Power cycle"), alert: t("Warning"), secure: t("Secured") };
+const ACTIONS = { wake: t("Wake"), sleep: t("Put to sleep"), net: t("Change"), power_on: t("Power on"), power_off: t("Power off"), power_cycle: t("Power cycle"), alert: t("Warning"), secure: t("Secured"), request: t("Request") };
 const SLEEP_METHODS = { none: "–", ssh: "SSH", http: "HTTP", sol: "Sleep-on-LAN" };
 const STATUS_INTERVAL = 10000;
 const PLUG_INTERVAL = 5000;
@@ -45,6 +45,7 @@ const state = {
   plugDrivers: null,
   plugSettings: { price_kwh: null, currency: "€" },
   power: {},
+  requests: {},
 };
 
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -57,6 +58,7 @@ const ICONS = {
   x: ["M6 6l12 12", "M18 6L6 18"],
   plus: ["M12 5v14", "M5 12h14"],
   lock: ["M7.5 11V8a4.5 4.5 0 0 1 9 0v3", "M5.5 11h13v9.5h-13z"],
+  users: ["M9 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7z", "M2.5 20c0-3.6 2.9-6 6.5-6s6.5 2.4 6.5 6", "M16 4.6a3.5 3.5 0 0 1 0 6.8", "M18.5 14.4c1.8.8 3 2.8 3 5.6"],
   alert: ["M12 4l9 16H3z", "M12 10v4.5", "M12 17.5v.01"],
   info: ["M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z", "M12 11v5.5", "M12 7.5v.01"],
   device: ["M4 5h16v11H4z", "M9 20h6", "M12 16v4"],
@@ -301,6 +303,7 @@ async function refreshStatus() {
     const data = await api("GET", "/api/status");
     state.status = data.status;
     state.power = data.power || {};
+    state.requests = data.requests || {};
     const online = Object.values(data.status).filter((s) => s === true).length;
     $("#status-line").textContent =
       t("{0} of {1} online · checked {2}", online, state.devices.length, new Date(data.checked * 1000).toLocaleTimeString(I18N.locale));
@@ -384,6 +387,7 @@ function deviceCard(d) {
       el("div", {}, el("dt", {}, t("Sleep")), el("dd", {}, SLEEP_METHODS[d.sleep_method]))),
     el("p", { class: next ? "next" : "next muted" }, icon("clock"),
       next ? el("span", {}, el("strong", {}, ACTIONS[next.action]), " ", fmtNext(next.next_run)) : t("No active schedule")),
+    requestsLine(d),
     // Wake only what is not online, sleep only what is not known to be off (ping status, not the guess)
     el("div", { class: "card-actions" },
       el("button", {
@@ -395,6 +399,83 @@ function deviceCard(d) {
         title: !canSleep ? t("No sleep method configured") : offline ? t("Already off or asleep") : "",
         onclick: (e) => deviceAction(d, "sleep", e.currentTarget),
       }, icon("moon"), t("Sleep"))));
+}
+
+// Requests: clients that hold the device through the API (they keep it awake), and a remembered sleep
+function requestsLine(d) {
+  const r = state.requests && state.requests[d.id];
+  if (!r) return null;
+  const clients = r.requests.map((q) => q.client);
+  const text = clients.length
+    ? t("In use: {0}", clients.join(", ")) + (r.sleep ? ` · ${t("sleep requested")}` : "")
+    : t("Sleep requested by {0}", tr(r.sleep.by));
+  return el("p", { class: "next in-use" }, icon("users"), el("span", {}, text),
+    el("button", { type: "button", class: "linkish", onclick: () => openRequestsDialog(d) }, t("Details")));
+}
+
+let requestsDevice = null;
+
+async function openRequestsDialog(device) {
+  requestsDevice = device;
+  $("#requests-title").textContent = t("Requests for {0}", device.name);
+  $("#requests-dialog").showModal();
+  await loadRequests();
+}
+
+async function loadRequests() {
+  const device = requestsDevice;
+  let data;
+  try {
+    data = await api("GET", `/api/devices/${device.id}/requests`);
+  } catch (e) {
+    $("#requests-list").replaceChildren(el("div", { class: "table-empty muted" }, e.message));
+    return;
+  }
+  const time = (ts) => new Date(ts * 1000).toLocaleString(I18N.locale, { weekday: "short", hour: "2-digit", minute: "2-digit" });
+  const fact = (label, value) => el("span", {}, el("span", { class: "muted" }, `${label} `), value);
+  $("#requests-list").replaceChildren(data.requests.length ? el("ul", { class: "request-list" },
+    data.requests.map((q) => el("li", {},
+      el("div", { class: "request-main" },
+        el("strong", {}, q.client), el("span", { class: "muted small" }, tr(q.source)),
+        el("div", { class: "request-facts small" },
+          fact(t("Since"), time(q.created)),
+          q.ttl ? fact(t("Last heartbeat"), fmtAgo(q.renewed)) : null,
+          fact(t("Expires"), q.expires ? time(q.expires) : t("until released")))),
+      el("button", { type: "button", class: "btn small danger ghost", onclick: (e) => endRequest(q, e.currentTarget) }, t("End")))))
+    : el("div", { class: "table-empty muted" }, t("No open requests.")));
+  const sleep = $("#requests-sleep");
+  sleep.hidden = !data.sleep;
+  if (data.sleep) {
+    const when = data.sleep.at ? t("runs at {0}", time(data.sleep.at)) : t("waits for the open requests");
+    sleep.replaceChildren(el("span", {}, icon("moon"), " ", t("Sleep requested by {0}", tr(data.sleep.by)), ", ", when),
+      el("button", { type: "button", class: "btn small", onclick: (e) => cancelRemoteSleep(e.currentTarget) }, t("Cancel")));
+  }
+}
+
+async function endRequest(q, button) {
+  if (!(await confirmDialog(t("End the request of {0}?", q.client),
+    t("The client may still be working; without its request the device can go to sleep."), t("End"), true))) return;
+  await busy(button, async () => {
+    try {
+      await api("DELETE", `/api/devices/${requestsDevice.id}/requests/${q.id}`);
+    } catch (e) {
+      toast(e.message, "error");
+    }
+  });
+  await loadRequests();
+  refreshStatus();
+}
+
+async function cancelRemoteSleep(button) {
+  await busy(button, async () => {
+    try {
+      await api("DELETE", `/api/devices/${requestsDevice.id}/sleep`);
+    } catch (e) {
+      toast(e.message, "error");
+    }
+  });
+  await loadRequests();
+  refreshStatus();
 }
 
 // The power of the plug in the card head, and its switch behind it: same safety rules as in the Plugs tab
@@ -422,14 +503,22 @@ async function deviceAction(device, action, button) {
       !(await confirmDialog(t("Put {0} to sleep?", device.name), t("Unsaved work on the device may be lost."), t("Put to sleep")))) {
     return;
   }
-  await busy(button, async () => {
+  const send = (body) => busy(button, async () => {
     try {
-      const res = await api("POST", `/api/devices/${device.id}/${action}`);
-      toast(`${device.name}: ${res.message}`, res.ok ? "success" : "error");
+      const res = await api("POST", `/api/devices/${device.id}/${action}`, body);
+      if (!res.confirm) toast(`${device.name}: ${res.message}`, res.ok ? "success" : "error");
+      return res;
     } catch (e) {
       toast(`${device.name}: ${e.message}`, "error");
+      return null;
     }
   });
+  const res = await send();
+  // Open requests: clients still work on the device
+  if (res && res.confirm && await confirmDialog(t("Put {0} to sleep anyway?", device.name),
+    `${res.message}. ${t("Their work on the device may be lost; the requests stay open.")}`, t("Put to sleep"), true)) {
+    await send({ force: true });
+  }
   // After waking, a PC usually needs 10-60 s: refresh the status at short intervals.
   for (const delay of [3000, 15000, 40000]) setTimeout(() => state.view === "devices" && refreshStatus(), delay);
 }
