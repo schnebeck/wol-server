@@ -23,9 +23,13 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
 const DAYS = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"].map((d) => t(d));
-const ACTIONS = { wake: t("Wake"), sleep: t("Put to sleep"), net: t("Change") };
+const ACTIONS = { wake: t("Wake"), sleep: t("Put to sleep"), net: t("Change"), power_on: t("Power on"), power_off: t("Power off"), power_cycle: t("Power cycle"), alert: t("Warning"), secure: t("Secured") };
 const SLEEP_METHODS = { none: "–", ssh: "SSH", http: "HTTP", sol: "Sleep-on-LAN" };
 const STATUS_INTERVAL = 10000;
+const PLUG_INTERVAL = 5000;
+const VIEWS = ["devices", "plugs", "schedules", "events", "network", "system"];
+const PLUG_SUBS = ["overview", "energy"];
+const ENERGY_INTERVAL = 60000;
 
 const state = {
   view: "devices",
@@ -37,6 +41,10 @@ const state = {
   hotspot: false,
   info: null,
   wifi: null,
+  plugs: [],
+  plugDrivers: null,
+  plugSettings: { price_kwh: null, currency: "€" },
+  power: {},
 };
 
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -53,6 +61,12 @@ const ICONS = {
   info: ["M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z", "M12 11v5.5", "M12 7.5v.01"],
   device: ["M4 5h16v11H4z", "M9 20h6", "M12 16v4"],
   undo: ["M9 14L4 9l5-5", "M4 9h10a6 6 0 0 1 0 12h-3"],
+  plug: ["M9 3v5", "M15 3v5", "M6 8h12v3a6 6 0 0 1-12 0z", "M12 17v4"],
+  log: ["M9 6h11", "M9 12h11", "M9 18h11", "M4.5 6h.01", "M4.5 12h.01", "M4.5 18h.01"],
+  network: ["M9.5 3h5v5h-5z", "M12 8v4", "M5.5 12h13", "M5.5 12v4", "M18.5 12v4", "M3 16h5v5H3z", "M16 16h5v5h-5z"],
+  settings: ["M4 7h9", "M17 7h3", "M15 5v4", "M4 17h3", "M11 17h9", "M9 15v4"],
+  bolt: ["M13 3L5 13.5h6L10 21l8-10.5h-6z"],
+  chevron: ["M7 10l5 5 5-5"],
 };
 
 function icon(name) {
@@ -195,6 +209,7 @@ function fmtDays(days) {
 }
 
 const deviceById = (id) => state.devices.find((d) => d.id === id);
+const plugById = (id) => state.plugs.find((p) => p.id === id);
 
 // ---------- Sign-in ----------
 
@@ -234,18 +249,28 @@ function setView(view) {
   state.view = view;
   for (const tab of $$(".tab")) tab.classList.toggle("active", tab.dataset.view === view);
   for (const section of $$(".view")) section.hidden = section.id !== `view-${view}`;
-  history.replaceState(null, "", view === "network" ? `#network/${net.sub}` : `#${view}`);
+  history.replaceState(null, "", view === "network" ? `#network/${net.sub}` : view === "plugs" ? `#plugs/${plugView.sub}` : `#${view}`);
   refreshView().catch((e) => toast(e.message, "error"));
 }
 
 async function refreshView() {
   if (state.view === "devices") {
-    await Promise.all([loadDevices(), loadSchedules()]);
+    await Promise.all([loadDevices(), loadSchedules(), loadPlugs(false).catch(() => {})]);
     renderDevices();
     refreshStatus();
   } else if (state.view === "schedules") {
-    await Promise.all([loadDevices(), loadSchedules()]);
+    await Promise.all([loadDevices(), loadSchedules(), loadPlugs(false)]);
     renderSchedules();
+  } else if (state.view === "plugs") {
+    showPlugSub();
+    if (plugView.sub === "energy") {
+      await loadPlugs();
+      renderPlugsLine();
+      await renderEnergy();
+    } else {
+      await Promise.all([loadPlugs(), loadSchedules(), loadDevices()]);
+      renderPlugs();
+    }
   } else if (state.view === "events") {
     await renderEvents();
   } else if (state.view === "network") {
@@ -275,6 +300,7 @@ async function refreshStatus() {
   try {
     const data = await api("GET", "/api/status");
     state.status = data.status;
+    state.power = data.power || {};
     const online = Object.values(data.status).filter((s) => s === true).length;
     $("#status-line").textContent =
       t("{0} of {1} online · checked {2}", online, state.devices.length, new Date(data.checked * 1000).toLocaleTimeString(I18N.locale));
@@ -286,14 +312,15 @@ async function refreshStatus() {
   }
 }
 
-function nextActionFor(deviceId) {
+function nextActionFor(id, key = "device_id") {
   return state.schedules
-    .filter((s) => s.device_id === deviceId && s.next_run)
+    .filter((s) => s[key] === id && s.next_run)
     .sort((a, b) => a.next_run.localeCompare(b.next_run))[0];
 }
 
 function renderDevices() {
   const list = $("#device-list");
+  if ($("details.menu[open]", list)) return; // do not close an open power menu with a status refresh
   if (!state.devices.length) {
     $("#status-line").textContent = " ";
     list.replaceChildren(el("div", { class: "empty" },
@@ -305,18 +332,51 @@ function renderDevices() {
   list.replaceChildren(...state.devices.map(deviceCard));
 }
 
-function deviceCard(d) {
+// Since when a device draws running power without answering (to tell "starting" from "hangs")
+const silentSince = new Map();
+const HANG_SECONDS = 300;
+
+// Status from ping and power: [css class, label]
+function deviceState(d) {
   const st = state.status[d.id];
-  const cls = st === true ? "online" : st === false ? "offline" : "unknown";
-  const label = st === true ? t("Online") : st === false ? t("Offline") : d.host ? t("Checking …") : t("No host");
+  const p = state.power[d.id];
+  if (st === true || !p || !p.reachable) {
+    silentSince.delete(d.id);
+    if (st === true) return ["online", t("Online")];
+    return st === false ? ["offline", t("Offline")] : ["unknown", d.host ? t("Checking …") : t("No host")];
+  }
+  if (!p.on) {
+    silentSince.delete(d.id);
+    return ["offline", t("No power")];
+  }
+  if (p.power_w == null || p.power_w <= p.standby_w) {
+    silentSince.delete(d.id);
+    return ["offline", st === false ? t("Standby") : t("Checking …")];
+  }
+  if (st !== false) return ["unknown", t("Checking …")];
+  if (p.running_w != null && p.power_w > p.running_w) {
+    if (!silentSince.has(d.id)) silentSince.set(d.id, Date.now());
+    if (Date.now() - silentSince.get(d.id) > HANG_SECONDS * 1000) return ["warn", t("Not responding")];
+  } else {
+    silentSince.delete(d.id);
+  }
+  return ["unknown", t("Starting or shutting down")];
+}
+
+function deviceCard(d) {
+  const [cls, label] = deviceState(d);
+  const power = state.power[d.id];
   const next = nextActionFor(d.id);
   const canSleep = d.sleep_method !== "none";
+  const online = state.status[d.id] === true;
+  const offline = state.status[d.id] === false;
   return el("article", { class: `card device ${cls}` },
     el("header", { class: "card-head" },
       el("span", { class: `dot ${cls}`, "aria-hidden": "true" }),
       el("div", { class: "card-title" },
         el("h3", {}, d.name),
         el("span", { class: `status-label ${cls}` }, label)),
+      power ? powerMenu({ id: power.plug_id, name: power.plug }, power) : null,
       el("button", { class: "icon-btn", type: "button", title: t("Edit"), "aria-label": t("Edit {0}", d.name), onclick: () => openDeviceDialog(d) }, icon("edit"))),
     el("dl", { class: "meta" },
       el("div", {}, el("dt", {}, "MAC"), el("dd", { class: "mono" }, d.mac)),
@@ -324,13 +384,37 @@ function deviceCard(d) {
       el("div", {}, el("dt", {}, t("Sleep")), el("dd", {}, SLEEP_METHODS[d.sleep_method]))),
     el("p", { class: next ? "next" : "next muted" }, icon("clock"),
       next ? el("span", {}, el("strong", {}, ACTIONS[next.action]), " ", fmtNext(next.next_run)) : t("No active schedule")),
+    // Wake only what is not online, sleep only what is not known to be off (ping status, not the guess)
     el("div", { class: "card-actions" },
-      el("button", { class: "btn wake", type: "button", onclick: (e) => deviceAction(d, "wake", e.currentTarget) }, icon("power"), t("Wake")),
       el("button", {
-        class: "btn sleep", type: "button", disabled: !canSleep,
-        title: canSleep ? "" : t("No sleep method configured"),
+        class: "btn wake", type: "button", disabled: online, title: online ? t("Already online") : "",
+        onclick: (e) => deviceAction(d, "wake", e.currentTarget),
+      }, icon("power"), t("Wake")),
+      el("button", {
+        class: "btn sleep", type: "button", disabled: !canSleep || offline,
+        title: !canSleep ? t("No sleep method configured") : offline ? t("Already off or asleep") : "",
         onclick: (e) => deviceAction(d, "sleep", e.currentTarget),
       }, icon("moon"), t("Sleep"))));
+}
+
+// The power of the plug in the card head, and its switch behind it: same safety rules as in the Plugs tab
+function powerMenu(plug, power) {
+  const off = !power.reachable || !power.on || power.locked;
+  const item = (action, label, disabled, title) => el("button", {
+    type: "button", class: "menu-item", disabled, title,
+    onclick: (e) => {
+      e.currentTarget.closest("details").open = false;
+      plugAction(plug, action, e.currentTarget.closest("details").querySelector("summary"));
+    },
+  }, label);
+  const value = power.reachable ? (power.on ? `${fmtWatt(power.power_w)} W` : t("off")) : "–";
+  return el("details", { class: "menu power-menu" },
+    el("summary", { class: "power-badge", title: t("Plug {0}", plug.name), "aria-label": `${t("Power")}: ${t("Plug {0}", plug.name)}, ${value}` },
+      icon("bolt"), value, icon("chevron")),
+    el("div", { class: "menu-list" },
+      item("on", t("Power on"), !power.reachable || power.on),
+      item("off", t("Power off"), off),
+      item("cycle", t("Power cycle"), off, t("Off, on again after 10 s - runs on the plug itself"))));
 }
 
 async function deviceAction(device, action, button) {
@@ -368,8 +452,44 @@ function openDeviceDialog(device = null, prefill = {}) {
   setSleepMethod(d.sleep_method || "none");
   $("#device-dialog-title").textContent = device ? t("Edit device") : t("New device");
   $("#delete-device").hidden = !device;
+  fillDevicePlug(device);
   $("#device-dialog").showModal();
   updateDeviceNetHint();
+  if (!state.plugDrivers) loadPlugs(false).then(() => editingDevice === device && fillDevicePlug(device)).catch(() => {});
+}
+
+const WAKE_HINTS = {
+  wol: t("Magic packet only, as without a plug."),
+  power: t("Switches the plug on; for devices that start when the power returns (BIOS setting, Raspberry Pi). With the plug already on and the device in standby, a short power cycle starts it."),
+  power_wol: t("Switches the plug on if it is off, waits 15 s for the network card and sends the magic packet."),
+};
+
+// The plug of a device: chosen in the device dialog, the same link as "Plugged in" in the plug dialog
+function fillDevicePlug(device) {
+  const form = $("#device-form");
+  const linked = device ? state.plugs.find((p) => p.consumer && p.consumer.kind === "device" && p.consumer.id === device.id) : null;
+  $("#device-plug-group").hidden = !state.plugs.length;
+  $("#device-plug").replaceChildren(el("option", { value: "" }, t("– none –")), ...state.plugs.map((p) => {
+    const other = p.consumer && (p.consumer.kind === "self" || (p.consumer.kind === "device" && (!device || p.consumer.id !== device.id)))
+      ? p.consumer_name || deviceById(p.consumer.id)?.name : null;
+    return el("option", { value: p.id }, other ? `${p.name} (${t("now: {0}", other)})` : p.name);
+  }));
+  form.elements.plug_id.value = linked ? linked.id : "";
+  const method = (linked && linked.wake_method) || "wol";
+  for (const radio of form.querySelectorAll("input[name=wake_method]")) radio.checked = radio.value === method;
+  form.elements.cut_after_sleep.checked = Boolean(linked && linked.cut_after_sleep);
+  updateDevicePlug();
+}
+
+function updateDevicePlug() {
+  const form = $("#device-form");
+  const plug = plugById(form.elements.plug_id.value);
+  $("#device-plug-options").hidden = !plug;
+  const method = form.querySelector("input[name=wake_method]:checked")?.value || "wol";
+  $("#wake-method-hint").textContent = WAKE_HINTS[method];
+  const power = editingDevice && state.power[editingDevice.id];
+  $("#device-plug-hint").textContent = plug && power && power.plug_id === plug.id && power.reachable
+    ? t("Measured now: {0} W", fmtWatt(power.power_w)) : "";
 }
 
 // Show the device's static IP in the network (DHCP reservation), only if network management is running.
@@ -405,10 +525,14 @@ async function onDeviceSubmit(event) {
   const data = Object.fromEntries(new FormData(form).entries());
   data.wol_port = Number(data.wol_port) || 9;
   data.ssh_port = Number(data.ssh_port) || 22;
+  const plugLink = {
+    plug_id: data.plug_id || null, wake_method: data.wake_method || "wol", cut_after_sleep: Boolean(form.elements.cut_after_sleep.checked),
+  };
+  for (const key of ["plug_id", "wake_method", "cut_after_sleep"]) delete data[key];
   await busy($("button[type=submit]", form), async () => {
     try {
-      if (editingDevice) await api("PUT", `/api/devices/${editingDevice.id}`, data);
-      else await api("POST", "/api/devices", data);
+      const saved = editingDevice ? await api("PUT", `/api/devices/${editingDevice.id}`, data) : await api("POST", "/api/devices", data);
+      if (state.plugs.length) await api("PUT", `/api/devices/${saved.id}/plug`, plugLink);
       $("#device-dialog").close();
       toast(editingDevice ? t("Device saved") : t("Device added"), "success");
       await refreshView();
@@ -440,24 +564,26 @@ function renderSchedules() {
   $("#server-time").textContent = state.serverNow
     ? t("Server time: {0}", state.serverNow.slice(11, 16))
     : " ";
-  if (!state.devices.length) {
+  if (!state.devices.length && !state.plugs.length) {
     list.replaceChildren(el("div", { class: "empty" },
       el("h3", {}, t("No devices")),
-      el("p", { class: "muted" }, t("Every schedule belongs to a device. Devices are added in the \"Devices\" tab."))));
+      el("p", { class: "muted" }, t("Every schedule belongs to a device or a plug. They are added in the \"Devices\" and \"Plugs\" tabs."))));
     return;
   }
   if (!state.schedules.length) {
     list.replaceChildren(el("div", { class: "empty" },
       el("h3", {}, t("No schedules")),
-      el("p", { class: "muted" }, t("Wake devices or put them to sleep automatically at fixed times.")),
+      el("p", { class: "muted" }, t("Wake devices, put them to sleep or switch plugs automatically at fixed times.")),
       el("button", { class: "btn primary", type: "button", onclick: () => openScheduleDialog() }, t("Create schedule"))));
     return;
   }
   list.replaceChildren(...state.schedules.map(scheduleRow));
 }
 
+const ACTION_ICONS = { wake: "power", sleep: "moon", power_on: "plug", power_off: "plug", power_cycle: "undo" };
+
 function scheduleRow(s) {
-  const device = deviceById(s.device_id);
+  const target = s.plug_id ? plugById(s.plug_id) : deviceById(s.device_id);
   return el("div", { class: `row sched ${s.enabled ? "" : "disabled"}` },
     el("label", { class: "switch", title: s.enabled ? t("Disable") : t("Enable") },
       el("input", { type: "checkbox", checked: s.enabled, "aria-label": t("Enabled"), onchange: (e) => toggleSchedule(s, e.currentTarget) }),
@@ -465,9 +591,9 @@ function scheduleRow(s) {
     el("div", { class: "sched-time mono" }, s.time),
     el("div", { class: "sched-main" },
       el("div", { class: "sched-title" },
-        el("span", { class: `badge ${s.action}` }, s.action === "wake" ? icon("power") : icon("moon"), ACTIONS[s.action]),
-        el("span", { class: "sched-device" }, device ? device.name : "?")),
-      el("div", { class: "muted small" }, [fmtDays(s.days), s.label].filter(Boolean).join(" · "))),
+        el("span", { class: `badge ${s.action}` }, icon(ACTION_ICONS[s.action] || "clock"), ACTIONS[s.action]),
+        el("span", { class: "sched-device" }, !target ? "?" : s.plug_id && target.consumer ? `${target.name} (${target.consumer.label})` : target.name)),
+      el("div", { class: "muted small" }, [fmtDays(s.days), s.label, s.force && t("switches even under load")].filter(Boolean).join(" · "))),
     el("div", { class: "days", "aria-label": fmtDays(s.days) },
       DAYS.map((name, i) => el("span", { class: s.days.includes(i) ? "day on" : "day" }, name))),
     el("div", { class: "sched-next small" },
@@ -502,36 +628,62 @@ function openScheduleDialog(schedule = null) {
   const form = $("#schedule-form");
   form.reset();
   showError(form, "");
-  const select = form.elements.device_id;
-  select.replaceChildren(...state.devices.map((d) => el("option", { value: d.id }, d.name)));
-  const s = schedule || { device_id: state.devices[0]?.id, action: "wake", time: "07:00", days: [0, 1, 2, 3, 4], enabled: true, label: "" };
-  select.value = s.device_id;
-  for (const radio of form.querySelectorAll("input[name=action]")) radio.checked = radio.value === s.action;
+  const select = form.elements.target;
+  select.replaceChildren(...[
+    state.devices.length && el("optgroup", { label: t("Devices") }, state.devices.map((d) => el("option", { value: `device:${d.id}` }, d.name))),
+    state.plugs.length && el("optgroup", { label: t("Plugs") }, state.plugs.map((p) => el("option", { value: `plug:${p.id}` },
+      p.consumer ? `${p.name} (${p.consumer.label})` : p.name))),
+  ].filter(Boolean));
+  const first = state.devices.length ? `device:${state.devices[0].id}` : state.plugs.length ? `plug:${state.plugs[0].id}` : "";
+  const s = schedule || { action: "", time: "07:00", days: [0, 1, 2, 3, 4], enabled: true, label: "", force: false };
+  select.value = schedule ? (s.plug_id ? `plug:${s.plug_id}` : `device:${s.device_id}`) : first;
+  renderScheduleActions(s.action);
+  form.elements.force.checked = Boolean(s.force);
+  updateForceRow();
   form.elements.time.value = s.time;
   form.elements.label.value = s.label || "";
   form.elements.enabled.checked = s.enabled;
   setDays(s.days);
-  updateSleepAvailability();
   $("#schedule-dialog-title").textContent = schedule ? t("Edit schedule") : t("New schedule");
   $("#delete-schedule").hidden = !schedule;
   $("#schedule-dialog").showModal();
 }
 
-function updateSleepAvailability() {
+// The actions depend on the target: wake/sleep for devices, on/off/restart for plugs
+function renderScheduleActions(selected) {
   const form = $("#schedule-form");
-  const device = deviceById(form.elements.device_id.value);
-  const sleepRadio = form.querySelector("input[name=action][value=sleep]");
-  const canSleep = device && device.sleep_method !== "none";
-  sleepRadio.disabled = !canSleep;
-  sleepRadio.closest("label").title = canSleep ? "" : t("No sleep method is configured for this device");
-  if (!canSleep && sleepRadio.checked) form.querySelector("input[name=action][value=wake]").checked = true;
+  const [kind, id] = form.elements.target.value.split(":");
+  const current = selected || (form.querySelector("input[name=action]:checked") || {}).value;
+  let actions;
+  if (kind === "plug") {
+    const locked = plugById(id)?.locked && t("Never switched off: supplies the WOL-Server or the network");
+    actions = [["power_on", t("Power on")], ["power_off", t("Power off"), locked], ["power_cycle", t("Restart"), locked]];
+  } else {
+    const device = deviceById(id);
+    const canSleep = device && device.sleep_method !== "none";
+    actions = [["wake", t("Wake")], ["sleep", t("Put to sleep"), !canSleep && t("No sleep method is configured for this device")]];
+  }
+  const fallback = actions[0][0];
+  const value = actions.some(([v, , off]) => v === current && !off) ? current : fallback;
+  $("#schedule-actions").replaceChildren(...actions.map(([v, label, off]) => el("label", { title: off || "" },
+    el("input", { type: "radio", name: "action", value: v, checked: v === value, disabled: Boolean(off), onchange: updateForceRow }),
+    el("span", {}, label))));
+  updateForceRow();
+}
+
+function updateForceRow() {
+  const form = $("#schedule-form");
+  const action = (form.querySelector("input[name=action]:checked") || {}).value;
+  $("#schedule-force-row").hidden = !["power_off", "power_cycle"].includes(action);
 }
 
 async function onScheduleSubmit(event) {
   event.preventDefault();
   const form = event.currentTarget;
+  const [kind, id] = form.elements.target.value.split(":");
   const data = {
-    device_id: form.elements.device_id.value,
+    [kind === "plug" ? "plug_id" : "device_id"]: id,
+    force: kind === "plug" && form.elements.force.checked,
     action: (form.querySelector("input[name=action]:checked") || {}).value,
     time: form.elements.time.value,
     label: form.elements.label.value,
@@ -587,6 +739,941 @@ async function onClearEvents() {
   if (!(await confirmDialog(t("Clear log?"), t("All entries will be deleted."), t("Clear"), true))) return;
   await api("DELETE", "/api/events");
   await renderEvents();
+}
+
+// ---------- Wireless plugs ----------
+
+const POWER_ON_STATES = { restore: t("Restore last state"), on: t("On"), off: t("Off"), other: t("other (set on the plug)") };
+
+async function loadPlugs(live = true) {
+  const data = await api("GET", live ? "/api/plugs" : "/api/plugs?live=0");
+  state.plugs = data.plugs;
+  state.plugDrivers = data.drivers;
+  state.plugSettings = data.settings || state.plugSettings;
+}
+
+const plugView = { sub: "overview", period: "day", date: isoDate(new Date()), plug: "all", data: null };
+
+function isoDate(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function setPlugSub(sub, push = true) {
+  plugView.sub = sub;
+  showPlugSub();
+  if (push) history.replaceState(null, "", `#plugs/${sub}`);
+  refreshView().catch((e) => toast(e.message, "error"));
+}
+
+function showPlugSub() {
+  for (const tab of $$("#plug-subtabs .subtab")) tab.classList.toggle("active", tab.dataset.sub === plugView.sub);
+  for (const view of $$("#view-plugs .subview")) view.hidden = view.id !== `plug-sub-${plugView.sub}`;
+}
+
+function fmtMoney(value) {
+  if (value == null) return "–";
+  return `${value.toLocaleString(I18N.locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${state.plugSettings.currency || "€"}`;
+}
+
+// Costs of an energy in Wh, or null without a price
+function costOf(wh) {
+  const price = state.plugSettings.price_kwh;
+  return price == null || wh == null ? null : (wh / 1000) * price;
+}
+
+function fmtWatt(w) {
+  if (w == null) return "–";
+  return w < 10 ? w.toLocaleString(I18N.locale, { maximumFractionDigits: 1 }) : Math.round(w).toLocaleString(I18N.locale);
+}
+
+function fmtKwh(wh) {
+  return wh == null ? "–" : `${(wh / 1000).toLocaleString(I18N.locale, { maximumFractionDigits: wh < 10000 ? 2 : 1 })} kWh`;
+}
+
+function renderPlugsLine() {
+  const reachable = state.plugs.filter((p) => p.live && p.live.status);
+  const total = reachable.reduce((sum, p) => sum + (p.live.status.power_w || 0), 0);
+  $("#plugs-line").textContent = state.plugs.length
+    ? t("{0} plugs · together {1} W", state.plugs.length, fmtWatt(total)) : " ";
+}
+
+function renderPlugs() {
+  const list = $("#plug-list");
+  renderPlugsLine();
+  $("#plug-subtabs").hidden = !state.plugs.length;
+  $("#plug-alerts").replaceChildren(...state.plugs.flatMap((p) => (p.alerts || []).map((a) =>
+    el("li", { class: `notice ${a.key === "unreachable" || a.key === "wear" ? "warn" : "danger"}` }, icon("alert"),
+      el("span", {}, el("strong", {}, p.name), ": ", tr(a.message))))));
+  if (!state.plugs.length) {
+    list.replaceChildren(el("div", { class: "empty" },
+      el("h3", {}, t("No plugs")),
+      el("p", { class: "muted" }, t("Metering wireless plugs switch and measure consumers. Approve a new plug under Network → Overview, or add one by its address.")),
+      el("button", { class: "btn primary", type: "button", onclick: () => openPlugDialog() }, t("Add plug"))));
+    return;
+  }
+  list.replaceChildren(...state.plugs.map(plugCard));
+}
+
+function plugCard(p) {
+  const live = p.live || {};
+  const st = live.status;
+  const cls = !st ? "unknown" : st.on ? "online" : "offline";
+  const label = !st ? (live.unreachable ? t("Not reachable") : t("Error")) : st.on ? t("On") : t("Off");
+  const consumer = p.consumer_name;
+  const energy = p.energy;
+  const meta = st ? [
+    [t("Plugged in"), consumer || "–"],
+    [t("Today"), energy ? fmtKwh(energy.day) : "–"],
+    [t("This month"), energy ? fmtKwh(energy.month) : "–"],
+    [t("Voltage"), st.voltage_v == null ? "–" : `${Math.round(st.voltage_v)} V`],
+    [t("Current"), st.current_a == null ? "–" : `${st.current_a.toLocaleString(I18N.locale, { maximumFractionDigits: st.current_a < 0.1 ? 3 : 2 })} A`],
+    [t("Temperature"), st.temperature_c == null ? "–" : `${Math.round(st.temperature_c)} °C`],
+    [t("Energy counter"), fmtKwh(st.energy_wh)],
+    [t("Switch cycles"), st.switch_count == null ? "–" : st.switch_count.toLocaleString(I18N.locale)],
+  ] : [[t("Plugged in"), consumer || "–"], [t("Address"), p.host]];
+  const standby = energy && energy.standby_year;
+  if (st && standby != null) {
+    const cost = costOf(standby);
+    meta.push([t("Standby per year"), cost == null ? fmtKwh(standby) : `${fmtKwh(standby)} · ${fmtMoney(cost)}`]);
+  }
+  return el("article", { class: `card plug ${st ? (st.on ? "on" : "off") : "unknown"}` },
+    el("header", { class: "card-head" },
+      el("span", { class: `dot ${cls}`, "aria-hidden": "true" }),
+      el("div", { class: "card-title" },
+        el("h3", {}, p.name),
+        el("span", { class: `status-label ${cls}` }, label)),
+      el("button", { class: "icon-btn", type: "button", title: t("Edit"), "aria-label": t("Edit {0}", p.name), onclick: () => openPlugDialog(p) }, icon("edit"))),
+    st ? el("div", { class: "plug-power" }, el("strong", {}, fmtWatt(st.power_w)), el("span", {}, "W")) : null,
+    (p.alerts || []).filter((a) => a.key !== "unreachable").map((a) => el("p", { class: "plug-error" }, icon("alert"), " ", tr(a.message))),
+    !st && live.error ? el("p", { class: "plug-error" }, tr(live.error)) : null,
+    securityWarning(p),
+    el("dl", { class: "meta" }, meta.map(([k, v]) => el("div", {}, el("dt", {}, k), el("dd", {}, v)))),
+    plugNextLine(p),
+    p.locked ? el("p", { class: "next muted" }, icon("lock"), t("Never switched off: supplies the WOL-Server or the network")) : null,
+    el("div", { class: "card-actions" },
+      el("button", { class: "btn wake", type: "button", disabled: !st || st.on, onclick: (e) => plugAction(p, "on", e.currentTarget) }, icon("power"), t("On")),
+      el("button", { class: "btn", type: "button", disabled: !st || !st.on || p.locked, onclick: (e) => plugAction(p, "off", e.currentTarget) }, t("Off")),
+      el("button", { class: "btn", type: "button", disabled: !st || !st.on || p.locked, title: t("Off, on again after 10 s - runs on the plug itself"), onclick: (e) => plugAction(p, "cycle", e.currentTarget) }, icon("undo"), t("Restart"))));
+}
+
+const EXPOSURE_TEXTS = {
+  access_point: t("own Wi-Fi access point"), bluetooth: t("Bluetooth"), matter: t("Matter"), cloud: t("vendor cloud"),
+};
+
+function securityIssues(sec) {
+  return sec ? [...(sec.password ? [] : [t("no password")]), ...sec.open.map((e) => EXPOSURE_TEXTS[e] || e)] : [];
+}
+
+function securityWarning(p) {
+  const issues = securityIssues(p.security);
+  if (!issues.length) return null;
+  const pending = p.security.restart_required ? ` (${t("restart pending")})` : "";
+  return el("p", { class: "plug-warn" }, icon("alert"), " ", t("Open: {0}", issues.join(", ")) + pending, " ",
+    el("button", { type: "button", class: "linkish", onclick: () => openPlugDialog(p, {}, true) }, t("Secure")));
+}
+
+function plugNextLine(p) {
+  const next = nextActionFor(p.id, "plug_id");
+  return el("p", { class: next ? "next" : "next muted" }, icon("clock"),
+    next ? el("span", {}, el("strong", {}, ACTIONS[next.action]), " ", fmtNext(next.next_run)) : t("No active schedule"));
+}
+
+async function plugAction(plug, action, button, confirm = false) {
+  let res;
+  await busy(button, async () => {
+    try {
+      res = await api("POST", `/api/plugs/${plug.id}/${action}`, { confirm });
+    } catch (e) {
+      toast(`${plug.name}: ${e.message}`, "error");
+    }
+  });
+  if (!res) return;
+  if (res.confirm) {
+    const title = action === "cycle" ? t("Restart {0} the hard way?", plug.name) : t("Switch off {0}?", plug.name);
+    const text = `${res.message}. ${t("Cutting the power of a running device can lose unsaved data.")}`;
+    if (await confirmDialog(title, text, action === "cycle" ? t("Restart") : t("Switch off"), true)) {
+      await plugAction(plug, action, button, true);
+    }
+    return;
+  }
+  toast(`${plug.name}: ${res.message}`, "success");
+  for (const delay of action === "cycle" ? [500, 12000] : [500]) {
+    setTimeout(() => {
+      if (state.view === "plugs" && plugView.sub === "overview") refreshPlugs();
+      else if (state.view === "devices") refreshStatus();
+    }, delay);
+  }
+}
+
+let plugsBusy = false;
+
+async function refreshPlugs() {
+  if (plugsBusy) return;
+  plugsBusy = true;
+  try {
+    await loadPlugs();
+    renderPlugs();
+  } catch (e) {
+    if (e.status !== 401) $("#plugs-line").textContent = e.message;
+  } finally {
+    plugsBusy = false;
+  }
+}
+
+let editingPlug = null;
+let plugPowerOnState = null;
+
+function openPlugDialog(plug = null, prefill = {}, focusSecurity = false) {
+  editingPlug = plug;
+  plugPowerOnState = null;
+  const form = $("#plug-form");
+  form.reset();
+  showError(form, "");
+  const data = plug ? { ...plug } : { channel: 0, standby_w: 5, ...prefill };
+  for (const key of ["host", "name", "channel", "standby_w", "running_w"]) form.elements[key].value = data[key] ?? "";
+  fillPlugConsumer(plug);
+  const power = plug && plug.live && plug.live.status ? plug.live.status.power_w : null;
+  const measured = $("#plug-measured");
+  measured.hidden = power == null;
+  if (power != null) {
+    // Suggest the thresholds from the current measurement
+    const standby = power <= 15;
+    const value = standby ? Math.ceil(power + 1) : Math.round(power / 2);
+    measured.replaceChildren(t("Measured now: {0} W", fmtWatt(power)), " ", el("button", {
+      type: "button", class: "linkish",
+      onclick: () => { form.elements[standby ? "standby_w" : "running_w"].value = value; },
+    }, standby ? t("Use {0} W as standby", value) : t("Use {0} W as running threshold", value)));
+  }
+  $("#plug-driver").replaceChildren(...[
+    !plug && el("option", { value: "auto" }, t("Detect automatically")),
+    ...(state.plugDrivers || []).map((d) => el("option", { value: d.name }, tr(d.label))),
+  ].filter(Boolean));
+  form.elements.driver.value = plug ? plug.driver : "auto";
+  form.elements.password.placeholder = plug && plug.has_password ? t("unchanged") : "";
+  $("#plug-detected").textContent = plug ? [plug.model, plug.firmware && t("firmware {0}", plug.firmware), plug.mac].filter(Boolean).join(" · ") : "";
+  $("#plug-wait").hidden = !prefill.waiting;
+  const pos = form.elements.power_on_state;
+  pos.disabled = true;
+  $("#plug-pos-hint").textContent = plug ? t("Reading from the plug …") : t("Can be set after adding.");
+  if (plug) {
+    api("GET", `/api/plugs/${plug.id}/power-on-state`).then((res) => {
+      if (editingPlug !== plug) return;
+      plugPowerOnState = res.state;
+      pos.querySelector('option[value="other"]')?.remove();
+      if (res.state === "other") pos.append(el("option", { value: "other" }, POWER_ON_STATES.other));
+      pos.value = res.state;
+      pos.disabled = false;
+      $("#plug-pos-hint").textContent = res.state === "off" ? t("Devices stay without power after an outage.")
+        : res.state === "other" ? t("The plug uses a setting of its own. Choose one to be sure.") : "";
+    }).catch((e) => { $("#plug-pos-hint").textContent = e.message; });
+  }
+  $("#plug-dialog-title").textContent = plug ? t("Edit plug") : t("New wireless plug");
+  $("#plug-delete").hidden = !plug;
+  $("#plug-submit").textContent = plug ? t("Save") : t("Add");
+  fillPlugSecurity(plug);
+  $("#plug-dialog").showModal();
+  if (focusSecurity) $("#plug-security").scrollIntoView({ block: "nearest" });
+}
+
+// Security: password and the ways into the plug besides its local API (own access point, Bluetooth, ...)
+function fillPlugSecurity(plug) {
+  const box = $("#plug-security");
+  const driver = plug && (state.plugDrivers || []).find((d) => d.name === plug.driver);
+  box.hidden = !driver || !driver.capabilities.includes("security");
+  if (box.hidden) return;
+  $("#plug-security-items").replaceChildren();
+  $("#plug-secure").disabled = true;
+  $("#plug-secure-hint").textContent = "";
+  $("#plug-security-state").textContent = t("Reading from the plug …");
+  $("#plug-restart-row").hidden = true;
+  api("GET", `/api/plugs/${plug.id}/security`).then((sec) => {
+    rememberSecurity(plug, sec);
+    if (editingPlug === plug) renderPlugSecurity(plug, sec);
+  }).catch((e) => { $("#plug-security-state").textContent = e.message; });
+}
+
+// The card behind the dialog shows the same state as the dialog
+function rememberSecurity(plug, sec) {
+  plug.security = { password: sec.password, open: sec.open, restart_required: Boolean(sec.restart_required) };
+  if (state.view === "plugs" && plugView.sub === "overview") renderPlugs();
+}
+
+function renderPlugSecurity(plug, sec) {
+  const issues = securityIssues(sec);
+  // Waiting for a restart: what is still listed goes off with it, offering it again would only confuse
+  const waiting = sec.restart_required && sec.open.length;
+  $("#plug-security-state").replaceChildren(...(waiting
+    ? [icon("clock"), " ", t("Waiting for a restart: {0}", sec.open.map((e) => EXPOSURE_TEXTS[e] || e).join(", "))]
+    : issues.length
+      ? [icon("alert"), " ", t("Open: {0}", issues.join(", "))]
+      : [el("span", { class: "ok" }, icon("check")), " ", t("Secured: password set, no other ways in.")]));
+  $("#plug-security-items").replaceChildren(...(waiting ? [] : sec.open).map((e) => el("label", { class: "check" },
+    el("input", { type: "checkbox", name: "disable", value: e, checked: true }),
+    el("span", {}, t("Switch off: {0}", EXPOSURE_TEXTS[e] || e)))));
+  $("#plug-secure").disabled = false;
+  $("#plug-restart-row").hidden = !sec.restart_required;
+  $("#plug-secure-hint").textContent = sec.password || plug.has_password
+    ? t("Empty: the password stays as it is.")
+    : t("Empty: the WOL-Server chooses a random password. Only the WOL-Server needs it; a reset of the plug removes it.");
+}
+
+async function onPlugRestart() {
+  const plug = editingPlug;
+  const form = $("#plug-form");
+  showError(form, "");
+  if (!(await confirmDialog(t("Restart {0}?", plug.name),
+    t("The plug is not reachable for about 10 s. Afterwards its output follows the setting \"After a power outage\"."), t("Restart")))) return;
+  await busy($("#plug-restart"), async () => {
+    try {
+      const res = await api("POST", `/api/plugs/${plug.id}/restart`);
+      toast(res.message, "success");
+      $("#plug-security-state").textContent = t("Reading from the plug …");
+      setTimeout(() => { if (editingPlug === plug && $("#plug-dialog").open) fillPlugSecurity(plug); }, 15000);
+    } catch (e) {
+      showError(form, e.message);
+    }
+  });
+}
+
+async function onPlugSecure() {
+  const plug = editingPlug;
+  const form = $("#plug-form");
+  showError(form, "");
+  const password = form.elements.secure_password.value;
+  if (password && password.length < 8) return showError(form, t("Password: 8 to 128 characters"));
+  const disable = [...form.querySelectorAll('input[name="disable"]:checked')].map((i) => i.value);
+  await busy($("#plug-secure"), async () => {
+    try {
+      const res = await api("POST", `/api/plugs/${plug.id}/security`, { password, disable });
+      form.elements.secure_password.value = "";
+      plug.has_password = true;
+      rememberSecurity(plug, res);
+      renderPlugSecurity(plug, res);
+      toast(t("Plug secured"), "success");
+    } catch (e) {
+      showError(form, e.message);
+    }
+  });
+}
+
+const CONSUMER_OTHER = "__label";
+const CONSUMER_SELF = "__self";
+
+function fillPlugConsumer(plug) {
+  const form = $("#plug-form");
+  const consumer = (plug && plug.consumer) || null;
+  const taken = new Map(state.plugs.filter((p) => p !== plug && p.consumer && p.consumer.kind === "device").map((p) => [p.consumer.id, p.name]));
+  const selfPlug = state.plugs.find((p) => p !== plug && p.consumer && p.consumer.kind === "self");
+  $("#plug-consumer").replaceChildren(
+    el("option", { value: "" }, t("– nothing –")),
+    el("option", { value: CONSUMER_SELF, disabled: Boolean(selfPlug) }, selfPlug ? `${t("This WOL-Server")} (${selfPlug.name})` : t("This WOL-Server")),
+    state.devices.length ? el("optgroup", { label: t("Devices") }, state.devices.map((d) => el("option", { value: d.id, disabled: taken.has(d.id) },
+      taken.has(d.id) ? `${d.name} (${taken.get(d.id)})` : d.name))) : null,
+    el("option", { value: CONSUMER_OTHER }, t("Something else …")));
+  form.elements.consumer_device.value = !consumer ? "" : consumer.kind === "device" ? consumer.id : consumer.kind === "self" ? CONSUMER_SELF : CONSUMER_OTHER;
+  form.elements.consumer_label.value = consumer && consumer.kind === "label" ? consumer.label : "";
+  form.elements.locked.checked = Boolean(plug && plug.locked);
+  updatePlugConsumer();
+}
+
+// The plug of the WOL-Server itself is always locked: switching it off would cut the server that switches it on again
+function updatePlugConsumer() {
+  const form = $("#plug-form");
+  const value = form.elements.consumer_device.value;
+  $("#plug-consumer-label").hidden = value !== CONSUMER_OTHER;
+  form.elements.locked.disabled = value === CONSUMER_SELF;
+  if (value === CONSUMER_SELF) form.elements.locked.checked = true;
+}
+
+async function detectPlug() {
+  const form = $("#plug-form");
+  showError(form, "");
+  const host = form.elements.host.value.trim();
+  if (!host) return showError(form, t("Enter a host name or an IP address"));
+  await busy($("#plug-detect"), async () => {
+    try {
+      const { info } = await api("POST", "/api/plugs/probe", { host, driver: form.elements.driver.value });
+      const driver = (state.plugDrivers || []).find((d) => d.name === info.driver);
+      $("#plug-detected").replaceChildren(icon("check"), " ", [tr(driver ? driver.label : info.driver), info.model,
+        info.firmware && t("firmware {0}", info.firmware), info.auth ? t("password protected") : t("no password")].filter(Boolean).join(" · "));
+      if (!form.elements.name.value.trim() && info.name) form.elements.name.value = info.name;
+      $("#plug-wait").hidden = true;
+    } catch (e) {
+      $("#plug-detected").textContent = "";
+      showError(form, e.message);
+    }
+  });
+}
+
+async function onPlugSubmit(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  showError(form, "");
+  const consumer = form.elements.consumer_device.value;
+  const data = {
+    host: form.elements.host.value.trim(), name: form.elements.name.value.trim(),
+    consumer_device: consumer && consumer !== CONSUMER_OTHER && consumer !== CONSUMER_SELF ? consumer : null,
+    consumer_label: consumer === CONSUMER_OTHER ? form.elements.consumer_label.value.trim() : "",
+    consumer_self: consumer === CONSUMER_SELF, locked: form.elements.locked.checked,
+    password: form.elements.password.value, driver: form.elements.driver.value, channel: Number(form.elements.channel.value) || 0,
+    standby_w: form.elements.standby_w.value, running_w: form.elements.running_w.value,
+  };
+  if (!editingPlug && openPlugDialog.prefillMac) data.mac = openPlugDialog.prefillMac;
+  await busy($("#plug-submit"), async () => {
+    try {
+      if (editingPlug) {
+        await api("PUT", `/api/plugs/${editingPlug.id}`, data);
+        const pos = form.elements.power_on_state;
+        if (!pos.disabled && plugPowerOnState !== pos.value) {
+          await api("PUT", `/api/plugs/${editingPlug.id}/power-on-state`, { state: pos.value });
+        }
+      } else {
+        await api("POST", "/api/plugs", data);
+      }
+      $("#plug-dialog").close();
+      toast(editingPlug ? t("Plug saved") : t("Plug added"), "success");
+      if (state.view === "plugs") await refreshPlugs();
+      else if (state.view === "network") await renderNetwork();
+    } catch (e) {
+      showError(form, e.message);
+    }
+  });
+}
+
+async function onPlugDelete() {
+  const plug = editingPlug;
+  if (!(await confirmDialog(t("Remove {0}?", plug.name), t("The WOL-Server forgets the plug. The plug itself and its reservation stay unchanged."), t("Remove"), true))) return;
+  try {
+    await api("DELETE", `/api/plugs/${plug.id}`);
+    $("#plug-dialog").close();
+    toast(t("Plug removed"), "success");
+    await refreshPlugs();
+  } catch (e) {
+    toast(e.message, "error");
+  }
+}
+
+// "Add as wireless plug" from a reservation (host: name.domain or IP)
+function plugAddButton(name, mac, ip) {
+  const label = t("Add as wireless plug");
+  return el("button", {
+    type: "button", class: "icon-btn", title: label, "aria-label": `${label}: ${name || mac}`,
+    onclick: () => openPlugFor(name, mac, name && net.config ? `${name}.${net.config.config.dns.domain}` : ip),
+  }, icon("plug"));
+}
+
+async function openPlugFor(name, mac, host, waiting = false) {
+  if (!state.plugDrivers) await loadPlugs().catch(() => {});
+  if (!state.devices.length) await loadDevices().catch(() => {});
+  openPlugDialog.prefillMac = mac;
+  openPlugDialog(null, { name: name || "", host, waiting });
+}
+
+// ---------- Consumption (energy of the plugs) ----------
+
+const SERIES_SLOTS = 8; // colors --series-1 … --series-8, in fixed order; more plugs fold into "Other"
+
+function svg(tag, attrs = {}, ...children) {
+  const node = document.createElementNS(SVG_NS, tag);
+  for (const [key, value] of Object.entries(attrs)) if (value != null) node.setAttribute(key, value);
+  for (const child of children.flat()) if (child) node.append(child);
+  return node;
+}
+
+function niceTicks(max, count = 4) {
+  if (!(max > 0)) return [0, 1];
+  const raw = max / count;
+  const power = 10 ** Math.floor(Math.log10(raw));
+  const step = [1, 2, 2.5, 5, 10].map((m) => m * power).find((v) => v >= raw);
+  const ticks = [];
+  for (let v = 0; v < max + step * 0.999; v += step) ticks.push(Math.round(v * 1e6) / 1e6);
+  return ticks;
+}
+
+function fmtNum(value, digits = 1) {
+  return value.toLocaleString(I18N.locale, { maximumFractionDigits: digits });
+}
+
+async function renderEnergy(quiet = false) {
+  const box = $("#plug-sub-energy");
+  if (!quiet) box.classList.add("loading");
+  try {
+    const q = new URLSearchParams(plugView.period === "hour" ? { period: "hour" } : { period: plugView.period, date: plugView.date });
+    plugView.data = await api("GET", `/api/energy?${q}`);
+  } finally {
+    box.classList.remove("loading");
+  }
+  state.plugSettings = plugView.data.settings;
+  drawEnergy();
+}
+
+// Series of the chosen plugs: color slot by the plug's position (it follows the plug, not the selection)
+function energySeries(data) {
+  let series = data.plugs.map((p, i) => ({ id: p.id, name: p.name, consumer: p.consumer_name, standby_w: p.standby_w, slot: i + 1 }));
+  if (series.length > SERIES_SLOTS) {
+    const rest = series.slice(SERIES_SLOTS - 1);
+    series = [...series.slice(0, SERIES_SLOTS - 1), { id: "__other", name: t("Other"), slot: SERIES_SLOTS, members: rest.map((r) => r.id) }];
+  }
+  if (plugView.plug !== "all") series = series.filter((sr) => sr.id === plugView.plug || (sr.members || []).includes(plugView.plug));
+  const pick = (values) => (sr) => {
+    if (!sr.members) return values[sr.id] || [];
+    const lists = sr.members.map((id) => values[id] || []);
+    const n = Math.max(0, ...lists.map((l) => l.length));
+    return Array.from({ length: n }, (_, i) => (lists.some((l) => l[i] != null) ? lists.reduce((sum, l) => sum + (l[i] || 0), 0) : null));
+  };
+  const nowById = Object.fromEntries(data.plugs.map((p) => [p.id, p.power_w]));
+  for (const sr of series) {
+    const ids0 = sr.members || [sr.id];
+    sr.now = ids0.some((id) => nowById[id] != null) ? ids0.reduce((sum, id) => sum + (nowById[id] || 0), 0) : null;
+    sr.energy = data.values ? pick(data.values)(sr) : [];
+    sr.curve = data.curve ? pick(data.curve.plugs)(sr) : null;
+    sr.total = sr.energy.reduce((sum, v) => sum + (v || 0), 0);
+    const ids = sr.members || [sr.id];
+    const standby = ids.map((id) => data.summary[id] && data.summary[id].standby_year);
+    sr.standby_year = standby.some((v) => v != null) ? standby.reduce((sum, v) => sum + (v || 0), 0) : null;
+  }
+  return series;
+}
+
+function periodLabel(period, iso) {
+  const d = new Date(`${iso}T12:00:00`);
+  if (period === "day") return d.toLocaleDateString(I18N.locale, { weekday: "short", day: "numeric", month: "long", year: "numeric" });
+  if (period === "month") return d.toLocaleDateString(I18N.locale, { month: "long", year: "numeric" });
+  return String(d.getFullYear());
+}
+
+function shiftPeriod(step) {
+  const d = new Date(`${plugView.date}T12:00:00`);
+  if (plugView.period === "day") d.setDate(d.getDate() + step);
+  else if (plugView.period === "month") d.setMonth(d.getMonth() + step, 1);
+  else d.setFullYear(d.getFullYear() + step, 0, 1);
+  plugView.date = isoDate(d);
+  renderEnergy().catch((e) => toast(e.message, "error"));
+}
+
+function isCurrentPeriod() {
+  if (plugView.period === "hour") return true;
+  const today = isoDate(new Date());
+  const n = { day: 10, month: 7, year: 4 }[plugView.period];
+  return plugView.date.slice(0, n) >= today.slice(0, n);
+}
+
+function bucketLabel(period, data, i, long = false) {
+  const b = data.buckets[i];
+  if (period === "day") return long ? `${b}:00–${String((Number(b) + 1) % 24).padStart(2, "0")}:00` : b;
+  if (period === "month") {
+    if (!long) return String(Number(b));
+    return new Date(`${data.date.slice(0, 8)}${b}T12:00:00`).toLocaleDateString(I18N.locale, { weekday: "short", day: "numeric", month: "short" });
+  }
+  return new Date(Number(data.date.slice(0, 4)), Number(b) - 1, 1).toLocaleDateString(I18N.locale, { month: long ? "long" : "short" });
+}
+
+function drawEnergy() {
+  const data = plugView.data;
+  if (!data) return;
+  const period = plugView.period;
+  for (const radio of $$("#energy-period input")) radio.checked = radio.value === period;
+  const live = period === "hour";
+  $("#energy-label").textContent = live ? t("Last 60 minutes") : periodLabel(period, plugView.date);
+  $("#energy-prev").hidden = live;
+  $("#energy-next").hidden = live;
+  $("#energy-next").disabled = isCurrentPeriod();
+  $("#energy-today").hidden = isCurrentPeriod();
+  const select = $("#energy-plug");
+  select.replaceChildren(el("option", { value: "all" }, t("All plugs")), ...data.plugs.map((p) => el("option", { value: p.id }, p.consumer_name ? `${p.name} · ${p.consumer_name}` : p.name)));
+  if (!data.plugs.some((p) => p.id === plugView.plug)) plugView.plug = "all";
+  select.value = plugView.plug;
+  $("#energy-currency").textContent = state.plugSettings.currency || "€";
+  const priceInput = $("#energy-price-form").elements.price_kwh;
+  if (document.activeElement !== priceInput) priceInput.value = state.plugSettings.price_kwh ?? "";
+
+  if (!data.plugs.length) {
+    $("#energy-stats").replaceChildren();
+    $("#energy-chart-panel").hidden = true;
+    $("#energy-table").replaceChildren(el("div", { class: "table-empty muted" }, t("No plugs yet.")));
+    return;
+  }
+  $("#energy-chart-panel").hidden = false;
+  const series = energySeries(data);
+  if (live) return drawLive(data, series);
+  const total = series.reduce((sum, sr) => sum + sr.total, 0);
+  const hasData = series.some((sr) => sr.energy.some((v) => v != null));
+  const standby = series.filter((sr) => sr.standby_year != null);
+  const standbyWh = standby.reduce((sum, sr) => sum + sr.standby_year, 0);
+  const periodName = isCurrentPeriod() ? { day: t("today so far"), month: t("this month so far"), year: t("this year so far") }[period]
+    : periodLabel(period, plugView.date);
+  const price = state.plugSettings.price_kwh;
+  $("#energy-stats").replaceChildren(
+    statCard(t("Energy"), hasData ? fmtKwh(total) : "–", [periodName]),
+    statCard(t("Costs"), price == null ? "–" : fmtMoney(costOf(total)), [price == null ? t("Enter a price below") : t("at {0} per kWh", fmtMoney(price))]),
+    statCard(t("Standby per year"), standby.length ? fmtKwh(standbyWh) : "–",
+      [standby.length ? (price == null ? t("estimated from the last 30 days") : fmtMoney(costOf(standbyWh))) : t("known after one day")]));
+
+  const legend = $("#energy-legend");
+  legend.replaceChildren(...(series.length > 1 && period !== "day" ? series.map((sr) => el("span", { class: "legend-item" },
+    el("span", { class: `key ${period === "day" ? "line" : "box"} s${sr.slot}`, "aria-hidden": "true" }), sr.name)) : []));
+  $("#energy-chart-title").textContent = period === "day"
+    ? (series.length === 1 ? t("Power of {0} in W", series[0].name) : t("Power in W, each plug on its own scale"))
+    : (series.length === 1 ? t("Energy of {0} in kWh", series[0].name) : t("Energy in kWh"));
+  const chart = $("#energy-chart");
+  if (!hasData && !(period === "day" && series.some((sr) => sr.curve && sr.curve.some((v) => v != null)))) {
+    chart.replaceChildren(el("div", { class: "table-empty muted" }, t("No values for this period yet.")));
+  } else if (period === "day") {
+    drawCurve(chart, data, series);
+  } else {
+    drawBars(chart, data, series, period);
+  }
+  drawEnergyTable(series, total, period);
+}
+
+// The last hour: power right now, and the curve in 5 s steps while the view is open (once a minute before)
+function drawLive(data, series) {
+  const known = (sr) => sr.curve.filter((v) => v != null);
+  for (const sr of series) {
+    const values = known(sr);
+    sr.avg = values.length ? values.reduce((a, v) => a + v, 0) / values.length : null;
+    sr.peak = values.length ? Math.max(...values) : null;
+    sr.wh = values.length ? values.reduce((a, v) => a + v, 0) * data.curve.step / 3600 : null;
+  }
+  const sum = (key) => (series.some((sr) => sr[key] != null) ? series.reduce((a, sr) => a + (sr[key] || 0), 0) : null);
+  const now = sum("now"), wh = sum("wh");
+  // Peak of the sum: the highest step of all plugs together
+  const n = series[0].curve.length;
+  let peak = null;
+  for (let i = 0; i < n; i++) {
+    if (!series.some((sr) => sr.curve[i] != null)) continue;
+    peak = Math.max(peak ?? 0, series.reduce((a, sr) => a + (sr.curve[i] || 0), 0));
+  }
+  const price = state.plugSettings.price_kwh;
+  $("#energy-stats").replaceChildren(
+    statCard(t("Power now"), now == null ? "–" : `${fmtWatt(now)} W`, [series.length > 1 ? t("all shown plugs together") : series[0].name], "live"),
+    statCard(t("Peak"), peak == null ? "–" : `${fmtWatt(peak)} W`, [t("in the last 60 minutes")]),
+    statCard(t("Energy"), wh == null ? "–" : `${fmtNum(wh, wh < 10 ? 1 : 0)} Wh`,
+      [wh != null && price != null ? fmtMoney(costOf(wh)) : t("in the last 60 minutes")]));
+  $("#energy-legend").replaceChildren();
+  $("#energy-chart-title").textContent = series.length === 1 ? t("Power of {0} in W", series[0].name) : t("Power in W, each plug on its own scale");
+  const chart = $("#energy-chart");
+  if (!series.some((sr) => known(sr).length)) {
+    chart.replaceChildren(el("div", { class: "table-empty muted" }, t("No readings yet: they arrive every few seconds while this view is open.")));
+  } else {
+    const start = data.curve.start, step = data.curve.step;
+    const fmtTime = (ts, seconds) => new Date(ts * 1000).toLocaleTimeString(I18N.locale, seconds ? { hour: "2-digit", minute: "2-digit", second: "2-digit" } : { hour: "2-digit", minute: "2-digit" });
+    drawCurve(chart, data, series, {
+      // a label every 10 (narrow: 20) minutes, on the full ten
+      axis: (narrow) => {
+        const every = (narrow ? 1200 : 600);
+        const out = [];
+        for (let ts = Math.ceil(start / every) * every; ts <= start + (n - 1) * step; ts += every) out.push([(ts - start) / step, fmtTime(ts)]);
+        return out;
+      },
+      time: (i) => fmtTime(start + i * step, true),
+      headValue: (sr) => (sr.now == null ? null : `${fmtWatt(sr.now)} W`),
+    });
+  }
+  const head = [t("Plug"), t("Plugged in"), t("Now"), t("Average"), t("Peak")];
+  const cell = (v) => el("td", { class: "num" }, v == null ? "–" : `${fmtWatt(v)} W`);
+  const row = (sr) => [el("td", {}, el("span", { class: `key line s${sr.slot}`, "aria-hidden": "true" }), sr.name),
+    el("td", { class: "hide-sm" }, sr.consumer || "–"), cell(sr.now), cell(sr.avg), cell(sr.peak)];
+  const tr_ = (cells) => el("tr", {}, cells.map((c, k) => { c.dataset.label = head[k]; return c; }));
+  $("#energy-table").replaceChildren(el("table", { class: "data energy-table" },
+    el("caption", { class: "sr-only" }, t("Power per plug in the last 60 minutes")),
+    el("thead", {}, el("tr", {}, head.map((h, k) => el("th", { scope: "col", class: k >= 2 ? "num" : k === 1 ? "hide-sm" : "" }, h)))),
+    el("tbody", {}, series.map((sr) => tr_(row(sr))))));
+}
+
+// Frame of a chart: SVG with gridlines and y-axis (the caller places it)
+function chartFrame(chart, max, fmtTick, opts = {}) {
+  const width = Math.max(280, chart.clientWidth);
+  const height = opts.height || (width < 520 ? 210 : 260);
+  const ticks = niceTicks(max, opts.ticks || 4);
+  const top = ticks[ticks.length - 1];
+  const left = opts.left || 10 + Math.max(...ticks.map((v) => fmtTick(v).length)) * 7;
+  const m = { left, right: 10, top: opts.top ?? 10, bottom: opts.bottom ?? 26 };
+  const plotW = width - m.left - m.right;
+  const plotH = height - m.top - m.bottom;
+  const y = (v) => m.top + plotH - (v / top) * plotH;
+  const root = svg("svg", { class: "chart-svg", width, height, viewBox: `0 0 ${width} ${height}`, role: "img" });
+  const grid = svg("g", { class: "grid" });
+  for (const v of ticks) {
+    grid.append(svg("line", { x1: m.left, x2: width - m.right, y1: y(v), y2: y(v), class: v === 0 ? "baseline" : "" }));
+    const label = svg("text", { x: m.left - 6, y: y(v) + 4, "text-anchor": "end", class: "tick" });
+    label.textContent = fmtTick(v);
+    grid.append(label);
+  }
+  root.append(grid);
+  return { root, width, height, m, plotW, plotH, y, ticks };
+}
+
+// Hover and keyboard: every position of the x-axis shows all series. targets: the SVGs that react
+// (one per panel); the tooltip stands beside the position, next to the panel the pointer is in.
+function chartHover(chart, { tip, width, buckets, targets, xOf, indexAt, show }) {
+  let current = null;
+  let panelTop = 0;
+  const move = (i) => {
+    if (i == null || i < 0 || i >= buckets) return;
+    current = i;
+    tip.replaceChildren(...show(i));
+    tip.hidden = false;
+    const x = xOf(i);
+    const tipW = tip.offsetWidth;
+    tip.style.left = `${x + 16 + tipW <= width ? x + 16 : Math.max(0, x - 16 - tipW)}px`;
+    tip.style.top = `${Math.min(panelTop, Math.max(0, chart.offsetHeight - tip.offsetHeight))}px`;
+  };
+  const hide = () => {
+    current = null;
+    tip.hidden = true;
+    show(null);
+  };
+  for (const target of targets) {
+    target.addEventListener("pointermove", (e) => {
+      const rect = target.getBoundingClientRect();
+      panelTop = rect.top - chart.getBoundingClientRect().top + 8;
+      move(indexAt(e.clientX - rect.left));
+    });
+    target.addEventListener("pointerleave", (e) => {
+      if (!targets.some((t2) => t2.contains(e.relatedTarget))) hide();
+    });
+  }
+  chart.tabIndex = 0;
+  chart.onkeydown = (e) => {
+    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+    e.preventDefault();
+    const step = e.key === "ArrowLeft" ? -1 : 1;
+    move(current == null ? (step > 0 ? 0 : buckets - 1) : Math.min(buckets - 1, Math.max(0, current + step)));
+  };
+  chart.onblur = hide;
+}
+
+function tipRow(sr, value, unit, cls = "line") {
+  return el("div", { class: "tip-row" }, el("span", { class: `key ${cls} s${sr.slot}`, "aria-hidden": "true" }),
+    el("strong", {}, value == null ? "–" : `${value} ${unit}`), el("span", { class: "muted" }, sr.name));
+}
+
+// Power over the day. Several plugs: one panel each with its own scale (small multiples) and a shared time
+// axis - a 100 W PC would otherwise press a 1 W standby flat onto the baseline.
+function drawCurve(chart, data, series, opts = {}) {
+  const n = data.curve.plugs[data.plugs[0].id].length;
+  const step = data.curve.step;
+  const start = data.curve.start;
+  const multiple = series.length > 1;
+  const fmtTick = (v) => fmtNum(v, v < 10 ? 1 : 0);
+  const maxOf = (sr) => Math.max(1, ...sr.curve.filter((v) => v != null));
+  const groups = multiple ? series.map((sr) => [sr]) : [series];
+  const tickSets = groups.map((g) => niceTicks(Math.max(...g.map(maxOf)), multiple ? 3 : 4));
+  const left = 10 + Math.max(...tickSets.flat().map((v) => fmtTick(v).length)) * 7;
+  const narrow = chart.clientWidth < 520;
+  const panels = groups.map((group, k) => {
+    const last = k === groups.length - 1;
+    const frame = chartFrame(chart, Math.max(...group.map(maxOf)), fmtTick, multiple
+      ? { height: (narrow ? 84 : 96) + (last ? 20 : 0), ticks: 3, left, top: 8, bottom: last ? 26 : 6 }
+      : { left });
+    const { m, plotW, y, root } = frame;
+    const x = (i) => m.left + (i / (n - 1)) * plotW;
+    if (last) {
+      const axis = opts.axis ? opts.axis(narrow)
+        : (narrow ? [0, 6, 12, 18, 24] : [0, 3, 6, 9, 12, 15, 18, 21, 24]).map((h) => [(h * 3600) / step, `${String(h).padStart(2, "0")}:00`]);
+      for (const [pos, text] of axis) {
+        const i = Math.min(n - 1, pos);
+        const label = svg("text", { x: x(i), y: frame.height - 8, "text-anchor": i <= 0 ? "start" : i >= n - 1 ? "end" : "middle", class: "tick" });
+        label.textContent = text;
+        root.append(label);
+      }
+    }
+    for (const sr of group) {
+      // Line with gaps where nothing is known; a wash below it when the panel has one series
+      let d = "", area = "", run = [];
+      const flush = () => {
+        if (run.length > 1 && group.length === 1) area += `M${x(run[0])},${y(0)}${run.map((i) => `L${x(i)},${y(sr.curve[i])}`).join("")}L${x(run[run.length - 1])},${y(0)}Z`;
+        run = [];
+      };
+      sr.curve.forEach((v, i) => {
+        if (v == null) return flush();
+        d += `${run.length ? "L" : "M"}${x(i)},${y(v)}`;
+        run.push(i);
+      });
+      flush();
+      if (area) root.append(svg("path", { d: area, class: `area s${sr.slot}` }));
+      root.append(svg("path", { d, class: `line s${sr.slot}` }));
+    }
+    const cross = svg("line", { class: "crosshair", y1: m.top, y2: m.top + frame.plotH, visibility: "hidden" });
+    const dots = svg("g", {});
+    root.append(cross, dots);
+    const show = (i) => {
+      dots.replaceChildren();
+      cross.setAttribute("visibility", i == null ? "hidden" : "visible");
+      if (i == null) return;
+      cross.setAttribute("x1", x(i));
+      cross.setAttribute("x2", x(i));
+      for (const sr of group) if (sr.curve[i] != null) dots.append(svg("circle", { cx: x(i), cy: y(sr.curve[i]), r: 4, class: `dot s${sr.slot}` }));
+    };
+    const value = multiple && opts.headValue ? opts.headValue(group[0]) : null;
+    const head = multiple ? el("div", { class: "multiple-head" }, el("span", { class: `key line s${group[0].slot}`, "aria-hidden": "true" }),
+      group[0].name, group[0].consumer ? el("span", { class: "muted" }, group[0].consumer) : null,
+      value ? el("strong", { class: "head-value" }, value) : null) : null;
+    return { frame, x, show, node: el("div", { class: "multiple" }, head, root) };
+  });
+  const tip = el("div", { class: "chart-tip", hidden: true, role: "status" });
+  chart.replaceChildren(...panels.map((p) => p.node), tip);
+  const { frame, x } = panels[0];
+  chartHover(chart, {
+    tip, width: frame.width, buckets: n, targets: panels.map((p) => p.frame.root), xOf: x,
+    indexAt: (px) => Math.round(((px - frame.m.left) / frame.plotW) * (n - 1)),
+    show: (i) => {
+      for (const p of panels) p.show(i);
+      if (i == null) return null;
+      const time = opts.time ? opts.time(i) : new Date((start + i * step) * 1000).toLocaleTimeString(I18N.locale, { hour: "2-digit", minute: "2-digit" });
+      return [el("div", { class: "tip-head" }, time), ...series.map((sr) => tipRow(sr, sr.curve[i] == null ? null : fmtWatt(sr.curve[i]), "W"))];
+    },
+  });
+}
+
+function drawBars(chart, data, series, period) {
+  const n = data.buckets.length;
+  const totals = data.buckets.map((_, i) => series.reduce((sum, sr) => sum + (sr.energy[i] || 0), 0) / 1000);
+  const max = Math.max(0.1, ...totals);
+  const digits = max < 1 ? 2 : max < 10 ? 1 : 0;
+  const frame = chartFrame(chart, max, (v) => fmtNum(v, 2));
+  const { m, plotW, y, root } = frame;
+  const band = plotW / n;
+  const barW = Math.max(3, Math.min(24, band - 4));
+  const cx = (i) => m.left + band * (i + 0.5);
+  const every = Math.ceil(n / Math.max(1, Math.floor(plotW / 34)));
+  data.buckets.forEach((_, i) => {
+    if (i % every && i !== n - 1) return;
+    const label = svg("text", { x: cx(i), y: frame.height - 8, "text-anchor": "middle", class: "tick" });
+    label.textContent = bucketLabel(period, data, i);
+    root.append(label);
+  });
+  const columns = svg("g", {});
+  const peak = totals.indexOf(Math.max(...totals));
+  data.buckets.forEach((_, i) => {
+    const col = svg("g", { class: "column" });
+    let base = 0;
+    const segments = series.map((sr) => ({ sr, v: (sr.energy[i] || 0) / 1000 })).filter((sg) => sg.v > 0);
+    segments.forEach((sg, k) => {
+      const y0 = y(base), y1 = y(base + sg.v);
+      const gap = k ? 2 : 0; // surface gap between stacked segments
+      const h = Math.max(0, y0 - y1 - gap);
+      const x0 = cx(i) - barW / 2;
+      const top = y0 - gap - h;
+      if (k === segments.length - 1 && h > 0) {
+        const r = Math.min(4, h, barW / 2); // rounded data end, square at the baseline
+        col.append(svg("path", { class: `bar s${sg.sr.slot}`, d: `M${x0},${y0 - gap}V${top + r}Q${x0},${top} ${x0 + r},${top}H${x0 + barW - r}Q${x0 + barW},${top} ${x0 + barW},${top + r}V${y0 - gap}Z` }));
+      } else if (h > 0) {
+        col.append(svg("rect", { class: `bar s${sg.sr.slot}`, x: x0, y: top, width: barW, height: h }));
+      }
+      base += sg.v;
+    });
+    if (i === peak && totals[i] > 0) {
+      const label = svg("text", { x: cx(i), y: y(totals[i]) - 6, "text-anchor": "middle", class: "value" });
+      label.textContent = fmtNum(totals[i], digits);
+      col.append(label);
+    }
+    columns.append(col);
+  });
+  root.append(columns);
+  const cols = [...columns.children];
+  const tip = el("div", { class: "chart-tip", hidden: true, role: "status" });
+  chart.replaceChildren(root, tip);
+  chartHover(chart, {
+    tip, width: frame.width, buckets: n, targets: [root], xOf: cx, indexAt: (px) => Math.floor((px - m.left) / band),
+    show: (i) => {
+      cols.forEach((c, k) => c.classList.toggle("dim", i != null && k !== i));
+      if (i == null) return null;
+      const rows = series.map((sr) => tipRow(sr, sr.energy[i] == null ? null : fmtNum(sr.energy[i] / 1000, 2), "kWh", "box"));
+      const cost = costOf(totals[i] * 1000);
+      return [el("div", { class: "tip-head" }, bucketLabel(period, data, i, true)),
+        el("div", { class: "tip-total" }, el("strong", {}, `${fmtNum(totals[i], 2)} kWh`), cost == null ? null : el("span", { class: "muted" }, fmtMoney(cost))),
+        ...(series.length > 1 ? rows : [])];
+    },
+  });
+}
+
+function drawEnergyTable(series, total, period) {
+  const price = state.plugSettings.price_kwh;
+  const head = [t("Plug"), t("Plugged in"), t("Energy"), t("Share"), price != null && t("Costs"), t("Standby per year")].filter(Boolean);
+  const row = (sr) => [
+    el("td", {}, el("span", { class: `key box s${sr.slot}`, "aria-hidden": "true" }), sr.name),
+    el("td", { class: "hide-sm" }, sr.consumer || "–"),
+    el("td", { class: "num" }, fmtKwh(sr.total)),
+    el("td", { class: "num" }, total > 0 ? `${fmtNum((sr.total / total) * 100, 0)} %` : "–"),
+    price != null && el("td", { class: "num" }, fmtMoney(costOf(sr.total))),
+    el("td", { class: "num" }, sr.standby_year == null ? "–" : price == null ? fmtKwh(sr.standby_year) : `${fmtKwh(sr.standby_year)} · ${fmtMoney(costOf(sr.standby_year))}`),
+  ].filter(Boolean);
+  const labels = head;
+  const tr_ = (cells, cls = "") => el("tr", { class: cls }, cells.map((c, k) => { c.dataset.label = labels[k]; return c; }));
+  const standbyAll = series.filter((sr) => sr.standby_year != null).reduce((sum, sr) => sum + sr.standby_year, 0);
+  const foot = series.length > 1 ? tr_([
+    el("td", {}, el("strong", {}, t("Together"))), el("td", { class: "hide-sm" }),
+    el("td", { class: "num" }, el("strong", {}, fmtKwh(total))), el("td", {}),
+    price != null && el("td", { class: "num" }, el("strong", {}, fmtMoney(costOf(total)))),
+    el("td", { class: "num" }, standbyAll ? fmtKwh(standbyAll) : "–"),
+  ].filter(Boolean), "total") : null;
+  $("#energy-table").replaceChildren(el("table", { class: "data energy-table" },
+    el("caption", { class: "sr-only" }, t("Energy per plug, {0}", periodLabel(period, plugView.date))),
+    el("thead", {}, el("tr", {}, head.map((h, k) => el("th", { scope: "col", class: k >= 2 ? "num" : k === 1 ? "hide-sm" : "" }, h)))),
+    el("tbody", {}, series.map((sr) => tr_(row(sr))), foot)));
+}
+
+// CSV of the shown period: one row per hour, day or month, one column per plug (kWh)
+function exportEnergyCsv() {
+  const data = plugView.data;
+  if (!data) return;
+  const series = energySeries(data);
+  const de = I18N.lang === "de";
+  const sep = de ? ";" : ",";
+  if (plugView.period === "hour") return exportLiveCsv(data, series, de, sep);
+  const num = (wh) => (wh == null ? "" : (wh / 1000).toFixed(3).replace(".", de ? "," : "."));
+  const quote = (text) => `"${String(text).replace(/"/g, '""')}"`;
+  const first = { day: t("Hour"), month: t("Day"), year: t("Month") }[plugView.period];
+  const lines = [[first, ...series.map((sr) => quote(`${sr.name} (kWh)`)), quote(`${t("Together")} (kWh)`)].join(sep)];
+  data.buckets.forEach((b, i) => {
+    const values = series.map((sr) => sr.energy[i]);
+    const sum = values.some((v) => v != null) ? values.reduce((a, v) => a + (v || 0), 0) : null;
+    const key = plugView.period === "day" ? `${data.date} ${b}:00` : plugView.period === "month" ? `${data.date.slice(0, 8)}${b}` : `${data.date.slice(0, 4)}-${b}`;
+    lines.push([key, ...values.map(num), num(sum)].join(sep));
+  });
+  const name = `wol-energy-${plugView.period}-${plugView.period === "day" ? data.date : plugView.period === "month" ? data.date.slice(0, 7) : data.date.slice(0, 4)}.csv`;
+  downloadCsv(lines, name);
+}
+
+// CSV of the last hour: one row per 5 s step, one column per plug (W)
+function exportLiveCsv(data, series, de, sep) {
+  const { start, step } = data.curve;
+  const num = (w) => (w == null ? "" : String(w).replace(".", de ? "," : "."));
+  const quote = (text) => `"${String(text).replace(/"/g, '""')}"`;
+  const lines = [[t("Time"), ...series.map((sr) => quote(`${sr.name} (W)`))].join(sep)];
+  const pad = (v) => String(v).padStart(2, "0");
+  series[0].curve.forEach((_, i) => {
+    const d = new Date((start + i * step) * 1000);
+    const key = `${isoDate(d)} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+    lines.push([key, ...series.map((sr) => num(sr.curve[i]))].join(sep));
+  });
+  downloadCsv(lines, `wol-power-${isoDate(new Date())}.csv`);
+}
+
+function downloadCsv(lines, name) {
+  const blob = new Blob(["\ufeff" + lines.join("\r\n") + "\r\n"], { type: "text/csv;charset=utf-8" });
+  const a = el("a", { href: URL.createObjectURL(blob), download: name });
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+async function onPriceSubmit(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  await busy($("button[type=submit]", form), async () => {
+    try {
+      const res = await api("PUT", "/api/energy/settings", { price_kwh: form.elements.price_kwh.value.trim() });
+      state.plugSettings = res.settings;
+      toast(t("Price saved"), "success");
+      drawEnergy();
+    } catch (e) {
+      toast(e.message, "error");
+    }
+  });
 }
 
 // ---------- System ----------
@@ -1238,7 +2325,7 @@ async function renderNetwork() {
 function setNetSub(sub, push = true) {
   net.sub = sub;
   for (const tab of $$("#net-subtabs .subtab")) tab.classList.toggle("active", tab.dataset.sub === sub);
-  for (const view of $$(".subview")) view.hidden = view.id !== `net-sub-${sub}`;
+  for (const view of $$("#view-network .subview")) view.hidden = view.id !== `net-sub-${sub}`;
   if (push) history.replaceState(null, "", `#network/${sub}`);
   renderNetSub(true);
 }
@@ -1439,6 +2526,10 @@ function openApprove(u) {
   form.elements.ip.value = u.suggested_ip || "";
   $("#approve-name-hint").textContent = u.name && u.name !== u.suggested_name ? t("reported by the device: \"{0}\"", u.name) : "";
   $("#approve-private").hidden = !u.private;
+  // Only a hint from the reported name; whether it really is a plug is checked after approving ("Detect")
+  const looksLikePlug = /shelly|tasmota|plug/i.test(u.name || "");
+  for (const r of $$("#approve-type input")) r.checked = r.value === (looksLikePlug ? "plug" : "device");
+  $("#approve-type-hint").textContent = looksLikePlug ? t("The reported name suggests a wireless plug.") : "";
   $("#approve-dialog").showModal();
 }
 
@@ -1455,6 +2546,7 @@ async function onApproveSubmit(event) {
       await loadNetStatus();
       renderNetHeader();
       watchNetJob(t("{0} approved", data.name));
+      if (($("#approve-type input:checked") || {}).value === "plug") openPlugFor(data.name, approving.mac, data.ip, true);
     } catch (e) {
       showError(form, e.message);
     }
@@ -1479,12 +2571,13 @@ function renderReservations() {
   const cfg = net.config.config;
   const meta = net.config.meta;
   const devices = net.config.devices || {};
+  const plugsByMac = net.config.plugs || {};
   const online = new Set(meta.online);
   const search = $("#res-search").value.trim().toLowerCase();
   const filter = ($("#res-filter input:checked") || {}).value || "all";
   const rows = cfg.reservations.map((r) => ({
     ...r, vendor: meta.vendors[r.mac] || "", seen: meta.last_seen[r.mac] || null, online: online.has(r.mac),
-    lease: meta.leases[r.mac] || null, device: devices[r.mac] || null, _cls: r.enabled ? "" : "is-disabled",
+    lease: meta.leases[r.mac] || null, device: devices[r.mac] || null, plug: plugsByMac[r.mac] || null, _cls: r.enabled ? "" : "is-disabled",
   })).filter((r) => {
     if (filter === "online" && !r.online) return false;
     if (filter === "wol" && !r.device) return false;
@@ -1504,8 +2597,11 @@ function renderReservations() {
     { key: "vendor", label: t("Vendor"), cls: "hide-md", sort: (r) => r.vendor || "~", render: (r) => el("span", { class: "small" }, tr(r.vendor) || "–") },
     { key: "seen", label: t("Last seen"), cls: "hide-sm", sort: (r) => -(r.online ? Infinity : r.seen || 0), render: (r) => el("span", { class: "small" }, r.online ? t("now") : fmtAgo(r.seen)) },
     { key: "actions", label: "", cls: "actions", render: (r) => el("div", { class: "row-actions" },
-      r.device ? el("button", { type: "button", class: "icon-btn wake-btn", title: t("Wake {0}", r.device.name), "aria-label": t("Wake {0}", r.device.name),
-        onclick: (e) => deviceAction(r.device, "wake", e.currentTarget) }, icon("power")) : wolDeviceButton(r.name, r.mac, r.ip),
+      r.plug ? el("button", { type: "button", class: "icon-btn plug-link", title: t("Wireless plug {0}", r.plug.name), "aria-label": t("Wireless plug {0}", r.plug.name),
+        onclick: () => setView("plugs") }, icon("plug"))
+        : r.device ? el("button", { type: "button", class: "icon-btn wake-btn", title: t("Wake {0}", r.device.name), "aria-label": t("Wake {0}", r.device.name),
+          onclick: (e) => deviceAction(r.device, "wake", e.currentTarget) }, icon("power"))
+          : [wolDeviceButton(r.name, r.mac, r.ip), plugAddButton(r.name, r.mac, r.ip)],
       el("button", { type: "button", class: "icon-btn", title: t("Edit"), "aria-label": t("Edit {0}", r.name || r.mac), onclick: () => openResDialog(r) }, icon("edit"))) },
   ], rows, search || filter !== "all" ? t("No matching reservations.") : t("No reservations. Add one with \"Reservation\" or import under Tools.")));
   $("#res-foot").textContent = t("{0} of {1} · reachable as name.{2}", rows.length, cfg.reservations.length, domain);
@@ -2189,7 +3285,8 @@ async function startApp() {
   }
   const [fromHash, sub] = location.hash.slice(1).split("/");
   if (fromHash === "network" && NET_SUBS.includes(sub)) net.sub = sub;
-  setView(["devices", "schedules", "events", "network", "system"].includes(fromHash) ? fromHash : "devices");
+  if (fromHash === "plugs" && PLUG_SUBS.includes(sub)) plugView.sub = sub;
+  setView(VIEWS.includes(fromHash) ? fromHash : "devices");
   refreshNetBadge();
 }
 
@@ -2209,7 +3306,14 @@ function bind() {
   renderLangSwitch();
   $("#login-form").addEventListener("submit", onLogin);
   $("#logout").addEventListener("click", onLogout);
-  for (const tab of $$(".tab")) tab.addEventListener("click", () => setView(tab.dataset.view));
+  for (const tab of $$(".tab")) {
+    // Icons for the menu bar; on narrow screens the labels shrink or disappear, the name stays for screen readers
+    const label = $(".tab-label", tab).textContent;
+    tab.prepend(icon(tab.dataset.icon));
+    tab.setAttribute("aria-label", label);
+    tab.title = label;
+    tab.addEventListener("click", () => setView(tab.dataset.view));
+  }
   $("#add-device").addEventListener("click", () => openDeviceDialog());
   $("#add-schedule").addEventListener("click", () => openScheduleDialog());
   $("#clear-events").addEventListener("click", onClearEvents);
@@ -2220,7 +3324,7 @@ function bind() {
     btn.addEventListener("click", () => { $("#device-form").elements.ssh_command.value = btn.dataset.cmd; });
   }
   $("#schedule-form").addEventListener("submit", onScheduleSubmit);
-  $("#schedule-form").elements.device_id.addEventListener("change", updateSleepAvailability);
+  $("#schedule-form").elements.target.addEventListener("change", () => renderScheduleActions());
   $("#delete-schedule").addEventListener("click", onScheduleDelete);
   for (const btn of $$("[data-days]")) {
     btn.addEventListener("click", () => setDays(btn.dataset.days.split(",").map(Number)));
@@ -2250,7 +3354,55 @@ function bind() {
   $("#vpn-form").addEventListener("submit", onVpnSubmit);
   $("#vpn-toggle").addEventListener("click", onVpnToggle);
   $("#vpn-remove").addEventListener("click", onVpnRemove);
+  $("#add-plug").addEventListener("click", () => openPlugFor("", "", ""));
+  $("#plug-form").addEventListener("submit", onPlugSubmit);
+  $("#plug-detect").addEventListener("click", detectPlug);
+  $("#plug-delete").addEventListener("click", onPlugDelete);
+  $("#plug-secure").addEventListener("click", onPlugSecure);
+  $("#plug-restart").addEventListener("click", onPlugRestart);
+  $("#plug-consumer").addEventListener("change", (e) => {
+    updatePlugConsumer();
+    if (e.target.value === CONSUMER_OTHER) $("#plug-consumer-label").focus();
+  });
+  $("#device-plug").addEventListener("change", updateDevicePlug);
+  for (const radio of $$("#device-form input[name=wake_method]")) radio.addEventListener("change", updateDevicePlug);
+  for (const tab of $$("#plug-subtabs .subtab")) tab.addEventListener("click", () => setPlugSub(tab.dataset.sub));
+  $("#energy-period").addEventListener("change", (e) => {
+    plugView.period = e.target.value;
+    renderEnergy().catch((err) => toast(err.message, "error"));
+  });
+  $("#energy-prev").addEventListener("click", () => shiftPeriod(-1));
+  $("#energy-next").addEventListener("click", () => shiftPeriod(1));
+  $("#energy-today").addEventListener("click", () => {
+    plugView.date = isoDate(new Date());
+    renderEnergy().catch((e) => toast(e.message, "error"));
+  });
+  $("#energy-plug").addEventListener("change", (e) => {
+    plugView.plug = e.target.value;
+    drawEnergy();
+  });
+  $("#energy-csv").addEventListener("click", exportEnergyCsv);
+  $("#energy-price-form").addEventListener("submit", onPriceSubmit);
+  let resizeTimer = null;
+  window.addEventListener("resize", () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => state.view === "plugs" && plugView.sub === "energy" && drawEnergy(), 150);
+  });
+  // Close open menus (Power on the device cards) on a click elsewhere
+  document.addEventListener("click", (e) => {
+    for (const menu of $$("details.menu[open]")) if (!menu.contains(e.target)) menu.open = false;
+  });
   buildDayPicker();
+  setInterval(() => {
+    if (document.visibilityState !== "visible" || $("#app").hidden || state.view !== "plugs") return;
+    if (plugView.sub === "overview" && !$("#plug-dialog").open) refreshPlugs();
+    // the live hour: not while a tooltip is open, it would jump away under the pointer
+    if (plugView.sub === "energy" && plugView.period === "hour" && !$("#energy-chart .chart-tip:not([hidden])")) renderEnergy(true).catch(() => {});
+  }, PLUG_INTERVAL);
+  setInterval(() => {
+    if (document.visibilityState !== "visible" || $("#app").hidden || state.view !== "plugs") return;
+    if (plugView.sub === "energy" && plugView.period !== "hour" && isCurrentPeriod()) renderEnergy().catch(() => {});
+  }, ENERGY_INTERVAL);
 
   // Poll the status only while the page is visible; this saves load on the Pi.
   setInterval(() => {
@@ -2275,8 +3427,11 @@ function bind() {
     const [view, sub] = location.hash.slice(1).split("/");
     if (view === "network" && NET_SUBS.includes(sub) && state.view === "network") {
       if (sub !== net.sub) setNetSub(sub, false);
-    } else if (["devices", "schedules", "events", "network", "system"].includes(view) && view !== state.view) {
+    } else if (view === "plugs" && PLUG_SUBS.includes(sub) && state.view === "plugs") {
+      if (sub !== plugView.sub) setPlugSub(sub, false);
+    } else if (VIEWS.includes(view) && view !== state.view) {
       if (view === "network" && NET_SUBS.includes(sub)) net.sub = sub;
+      if (view === "plugs" && PLUG_SUBS.includes(sub)) plugView.sub = sub;
       setView(view);
     }
   });

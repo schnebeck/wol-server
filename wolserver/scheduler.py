@@ -47,9 +47,10 @@ def next_run(schedule, now=None):
 
 
 class Scheduler:
-    def __init__(self, store, run_action, clock=time.time):
+    def __init__(self, store, run_action, clock=time.time, run_plug=None):
         self.store = store
         self.run_action = run_action  # (device, action, source) -> (ok, message)
+        self.run_plug = run_plug  # (plug_id, action, force, source) -> (ok, message)
         self.clock = clock
         self._stop = threading.Event()
         self._thread = None
@@ -99,14 +100,18 @@ class Scheduler:
             if key in self._fired:
                 continue
             self._fired[key] = ts
-            device = self.store.get("devices", sched["device_id"])
-            if device is None:
-                continue
-            log.info("Schedule: %s -> %s (%s)", device["name"], sched["action"], hhmm)
-            threading.Thread(
-                target=self.run_action, args=(device, sched["action"], "schedule"),
-                name="action-%s" % sched["id"], daemon=True,
-            ).start()
+            if sched.get("plug_id"):
+                if self.run_plug is None:
+                    continue
+                log.info("Schedule: plug %s -> %s (%s)", sched["plug_id"], sched["action"], hhmm)
+                target, args = self.run_plug, (sched["plug_id"], sched["action"], bool(sched.get("force")), "schedule")
+            else:
+                device = self.store.get("devices", sched.get("device_id"))
+                if device is None:
+                    continue
+                log.info("Schedule: %s -> %s (%s)", device["name"], sched["action"], hhmm)
+                target, args = self.run_action, (device, sched["action"], "schedule")
+            threading.Thread(target=target, args=args, name="action-%s" % sched["id"], daemon=True).start()
             fired.append(sched["id"])
         return fired
 
