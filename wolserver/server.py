@@ -32,6 +32,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlsplit
 
 from . import __version__, dnsclient, models, netinfo, plugs, power, wifi, wol
+from .devrequests import DeviceRequests, RequestError
 from .auth import ApiTokens, Auth, LoginLimiter
 from .scheduler import Scheduler, next_run
 from .status import StatusMonitor, check_host
@@ -184,7 +185,11 @@ class App:
         self.status = StatusMonitor(config["status_cache_seconds"])
         self.plugs = plugs.PlugManager(data_dir, on_event=self.store.add_event,
                                        device_lookup=lambda device_id: self.store.get("devices", device_id))
-        self.scheduler = Scheduler(self.store, self.run_action, run_plug=self.run_plug_action)
+        self.requests = DeviceRequests(os.path.join(data_dir, "requests.json"),
+                                       sleep=lambda device, source: self.run_action(device, "sleep", source),
+                                       device_lookup=lambda device_id: self.store.get("devices", device_id),
+                                       on_event=self.store.add_event)
+        self.scheduler = Scheduler(self.store, self.run_scheduled, run_plug=self.run_plug_action)
         self.started = time.time()
         self._static_cache = {}
 
@@ -201,6 +206,12 @@ class App:
             R("DELETE", r"/api/devices/(?P<item_id>\w+)", self.api_device_delete),
             # Device by ID or name; also allowed for API tokens (scripts)
             R("POST", r"/api/devices/(?P<item_id>[^/]+)/(?P<action>wake|sleep)", self.api_device_action, token=True),
+            R("DELETE", r"/api/devices/(?P<item_id>[^/]+)/sleep", self.api_device_sleep_cancel, token=True),
+            R("GET", r"/api/devices/(?P<item_id>[^/]+)/requests", self.api_requests, token=True),
+            R("POST", r"/api/devices/(?P<item_id>[^/]+)/requests", self.api_request_create, token=True),
+            R("PUT", r"/api/devices/(?P<item_id>[^/]+)/requests/(?P<request_id>\w+)", self.api_request_renew, token=True),
+            R("DELETE", r"/api/devices/(?P<item_id>[^/]+)/requests/(?P<request_id>\w+)", self.api_request_release,
+              token=True),
             R("PUT", r"/api/devices/(?P<item_id>\w+)/plug", self.api_device_plug),
             R("GET", r"/api/status", self.api_status, token=True),
             R("GET", r"/api/tokens", self.api_tokens),
@@ -291,8 +302,10 @@ class App:
     def start(self):
         self.scheduler.start()
         self.plugs.start()
+        self.requests.start()
 
     def stop(self):
+        self.requests.stop()
         self.scheduler.stop()
         self.status.shutdown()
         self.plugs.shutdown()
@@ -409,6 +422,20 @@ class App:
         self.store.add_event(device_id=device["id"], device=device["name"], action="power_off", source=source,
                              ok=False, message=message)
 
+    def run_scheduled(self, device, action, source):
+        """Device action from a schedule: a sleep that falls into open requests waits for the last one."""
+        if action == "sleep":
+            state = self.requests.request_sleep(device, "schedule", source)
+            if state["sleep"] == "pending":
+                log.info("sleep %s (%s): deferred, in use by %s", device["name"], source, ", ".join(state["waiting_for"]))
+                return True, "Deferred: in use by %s" % ", ".join(state["waiting_for"])
+        return self.run_action(device, action, source)
+
+    def _in_use_by(self, plug):
+        """Clients holding the device a plug supplies (empty if none)."""
+        consumer = plug.get("consumer") or {}
+        return self.requests.clients(consumer["id"]) if consumer.get("kind") == "device" else []
+
     def run_plug_action(self, plug_id, action, force, source):
         """Plug action from a schedule. Nobody can confirm at that moment: while the consumer draws more than
         standby, "off" and "power cycle" are skipped unless the schedule is set to switch anyway (force)."""
@@ -416,6 +443,13 @@ class App:
             plug = self.plugs.get(plug_id)
         except KeyError:
             return False, "Plug not found"
+        users = self._in_use_by(plug) if action in ("power_off", "power_cycle") else []
+        if users:
+            message = "Skipped: %s is in use by %s" % (self.plugs.consumer_name(plug), ", ".join(users))
+            log.warning("%s %s (%s): %s", action, plug["name"], source, message)
+            self.store.add_event(device_id=None, device=plug["name"], action=action, source=source, ok=False,
+                                 message=message)
+            return False, message
         try:
             return True, self.plugs.switch(plug_id, action.replace("power_", ""), confirm=force, source=source)
         except plugs.ConfirmRequired as e:
@@ -559,6 +593,7 @@ class App:
         if not self.store.delete("devices", item_id):
             raise ApiError(404, "Device not found")
         self.plugs.unlink_device(item_id, device["name"])
+        self.requests.forget_device(item_id)
         self.status.invalidate(item_id)
         return 200, {"ok": True}
 
@@ -573,36 +608,141 @@ class App:
 
     MAX_WAIT = 300  # s
 
-    def api_device_action(self, req, item_id, action):
-        device = self._device_by_ref(item_id)
-        if action == "sleep" and device["sleep_method"] == "none":
-            raise ApiError(400, "No sleep method is configured for this device")
+    def _wait_param(self, req, device):
         try:
             wait = min(self.MAX_WAIT, max(0, int((req.query.get("wait") or ["0"])[0])))
         except ValueError:
             raise ApiError(400, "wait: number of seconds expected") from None
         if wait and not device.get("host"):
             raise ApiError(400, "wait needs a host or IP address for the device")
-        source = "API: %s" % req.token["name"] if req.token else "manual"
+        return wait
+
+    def _wait_for(self, device, want, wait, result):
+        """Scripts can rely on the device: wake -> until it answers, sleep -> until it is gone. Adds online
+        and waited to result; False on timeout (then with the message)."""
+        start = time.monotonic()
+        online = check_host(device["host"])
+        while online != want and time.monotonic() - start < wait:
+            time.sleep(3)
+            online = check_host(device["host"])
+        self.status.invalidate(device["id"])
+        result.update(online=online, waited=round(time.monotonic() - start))
+        if online != want:
+            result.update(ok=False, message=("%s did not come online within %d s" if want
+                                             else "%s is still online after %d s") % (device["name"], wait))
+            return False
+        return True
+
+    @staticmethod
+    def _source(req):
+        return "API: %s" % req.token["name"] if req.token else "manual"
+
+    def api_device_action(self, req, item_id, action):
+        device = self._device_by_ref(item_id)
+        if action == "sleep" and device["sleep_method"] == "none":
+            raise ApiError(400, "No sleep method is configured for this device")
+        wait = self._wait_param(req, device)
+        source = self._source(req)
+        if action == "sleep":
+            when = (req.query.get("when") or [""])[0]
+            if when == "idle":
+                state = self.requests.request_sleep(device, req.token["name"] if req.token else "GUI", source)
+                if state["sleep"] == "pending":
+                    return 202, {"ok": True, "pending": True, "waiting_for": state["waiting_for"], "device": device["name"],
+                                 "message": "Sleep requested: waits for %s" % ", ".join(state["waiting_for"])}
+            elif when:
+                raise ApiError(400, "when: only \"idle\" is known")
+            else:
+                users = self.requests.clients(device["id"])
+                force = req.body.get("force") or (req.query.get("force") or [""])[0] in ("1", "true")
+                if users and not force:
+                    # "ok" in the answer: the GUI asks and sends the request again with force
+                    return 409, {"ok": False, "confirm": True, "waiting_for": users,
+                                 "message": "%s is in use by %s" % (device["name"], ", ".join(users))}
         ok, message = self.run_action(device, action, source)
         if not ok:
             return 502, {"ok": False, "message": message}
         result = {"ok": True, "message": message, "device": device["name"]}
-        if wait:
-            # Scripts can rely on the device: wake -> until it answers, sleep -> until it is gone
-            want = action == "wake"
-            start = time.monotonic()
-            online = check_host(device["host"])
-            while online != want and time.monotonic() - start < wait:
-                time.sleep(3)
-                online = check_host(device["host"])
-            self.status.invalidate(device["id"])
-            result.update(online=online, waited=round(time.monotonic() - start))
-            if online != want:
-                result.update(ok=False, message=("%s did not come online within %d s" if want
-                                                 else "%s is still online after %d s") % (device["name"], wait))
-                return 504, result
+        if wait and not self._wait_for(device, action == "wake", wait, result):
+            return 504, result
         return 200, result
+
+    # -- Requests: several clients share a device (devrequests.py) --
+
+    def api_requests(self, req, item_id):
+        device = self._device_by_ref(item_id)
+        return 200, dict(self.requests.get(device["id"]), device=device["name"])
+
+    def api_request_create(self, req, item_id):
+        device = self._device_by_ref(item_id)
+        wait = self._wait_param(req, device)
+        source = self._source(req)
+        client = req.body.get("client") or (req.token["name"] if req.token else None)
+        try:
+            request = self.requests.create(device, client, req.body.get("ttl"), source)
+        except RequestError as e:
+            raise ApiError(400, str(e)) from None
+        result = {"ok": True, "device": device["name"], **request}
+        # Wake only what does not answer (a request for a running device sends nothing)
+        online = check_host(device["host"]) if device.get("host") else None
+        if not online:
+            ok, message = self.run_action(device, "wake", source)
+            result["message"] = message
+            if not ok:
+                result["ok"] = False
+                return 502, result
+        else:
+            result["message"] = "%s is online" % device["name"]
+        if wait and not online and not self._wait_for(device, True, wait, result):
+            return 504, result
+        if online:
+            result.update(online=True, waited=0)
+        return 201, result
+
+    def _own_request(self, req, device, request_id):
+        """A token may only touch its own requests; the GUI may end any of them."""
+        try:
+            owner = self.requests.owner(device["id"], request_id)
+        except KeyError:
+            raise ApiError(404, "Request not found - it has expired or was ended") from None
+        if req.token and owner != self._source(req):
+            raise ApiError(403, "This request belongs to another client")
+
+    def api_request_renew(self, req, item_id, request_id):
+        device = self._device_by_ref(item_id)
+        self._own_request(req, device, request_id)
+        try:
+            request = self.requests.renew(device["id"], request_id)
+        except KeyError:
+            raise ApiError(404, "Request not found - it has expired or was ended") from None
+        return 200, {"ok": True, **request}
+
+    def api_request_release(self, req, item_id, request_id):
+        device = self._device_by_ref(item_id)
+        then = (req.query.get("then") or [""])[0]
+        if then not in ("", "sleep"):
+            raise ApiError(400, "then: only \"sleep\" is known")
+        if then and device["sleep_method"] == "none":
+            raise ApiError(400, "No sleep method is configured for this device")
+        self._own_request(req, device, request_id)
+        try:
+            state = self.requests.release(device["id"], request_id, then_sleep=bool(then), source=self._source(req),
+                                          ended_by=None if req.token or then else "GUI")
+        except KeyError:
+            raise ApiError(404, "Request not found - it has expired or was ended") from None
+        if state["sleep"] and state["waiting_for"]:
+            message = "Done; sleep waits for %s" % ", ".join(state["waiting_for"])
+        elif state["sleep"]:
+            message = "Done; sleep in %d s unless the device is requested again" % self.requests.grace
+        else:
+            message = "Done"
+        return 200, {"ok": True, "message": message, **state}
+
+    def api_device_sleep_cancel(self, req, item_id):
+        device = self._device_by_ref(item_id)
+        if not self.requests.cancel_sleep(device["id"], self._source(req)):
+            raise ApiError(404, "No sleep request for this device")
+        return 200, {"ok": True}
 
     # -- API tokens (managed in the GUI with a session, used by scripts) --
 
@@ -631,7 +771,8 @@ class App:
 
     def api_status(self, req):
         devices = self.store.list("devices")
-        return 200, {"status": self.status.get(devices), "power": self._device_power(devices), "checked": time.time()}
+        return 200, {"status": self.status.get(devices), "power": self._device_power(devices),
+                     "requests": self.requests.snapshot([d["id"] for d in devices]), "checked": time.time()}
 
     def _device_power(self, devices):
         """Live values of the plugs the devices are plugged into: {device id: {...}}."""
@@ -979,6 +1120,14 @@ class App:
         return 200, {"ok": True}
 
     def api_plug_switch(self, req, item_id, action):
+        if action in ("off", "cycle") and not req.body.get("confirm"):
+            try:
+                users = self._in_use_by(self.plugs.get(item_id))
+            except KeyError:
+                raise ApiError(404, "Plug not found") from None
+            if users:
+                return 409, {"ok": False, "confirm": True, "power_w": None,
+                             "message": "In use by %s" % ", ".join(users)}
         try:
             message = self._plug_call(self.plugs.switch, item_id, action, bool(req.body.get("confirm")), "manual")
         except plugs.ConfirmRequired as e:

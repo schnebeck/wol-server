@@ -291,6 +291,15 @@ details.menu > summary .icon:last-child { width: 14px; height: 14px; }
 .plug-security-items:empty { display: none; }
 .plug-security .ok { color: var(--wake); }
 .plug-warn { margin: 0; font-size: 0.86rem; color: var(--warn-text); }
+.next.in-use { background: var(--sleep-soft); }
+.next.in-use .icon { color: var(--sleep); }
+.next.in-use .linkish { margin-left: auto; }
+.requests-sleep { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.request-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.request-list li { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; }
+.request-main { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; }
+.request-main strong { overflow-wrap: anywhere; }
+.request-facts { flex-basis: 100%; display: flex; flex-wrap: wrap; gap: 2px 14px; }
 .plug-restart-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;
   padding: 8px 10px; border-radius: 8px; background: var(--warn-soft); color: var(--warn-text); }
 .plug-options .check input { margin-top: 2px; }

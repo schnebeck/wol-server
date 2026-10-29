@@ -424,6 +424,9 @@ for host, name, consumer, password, options in (
     plug_ids[name] = app.plugs.add(dict(options, host=host, name=name, password=password,
                                         consumer_device=device_ids.get(consumer)))["id"]
 app.plugs.set_settings({"price_kwh": 0.32, "currency": "€"})
+# Two clients hold the NAS through the API (requests): a backup with heartbeats and a long job until released
+app.requests.create(app.store.get("devices", device_ids["NAS"]), "laptop-backup", ttl=900, source="API: laptop")
+app.requests.create(app.store.get("devices", device_ids["NAS"]), "photo-index", ttl=0, source="API: media-pi")
 
 
 def seed_energy(days=90):
