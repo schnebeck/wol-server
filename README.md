@@ -736,6 +736,26 @@ later) does all of this by itself with `WOL_SERVER_URL`, `WOL_SERVER_TOKEN` and 
   token can only renew and end its own requests; the GUI can end any.
 - Requests survive a restart of the WOL-Server; afterwards every request has one `ttl` for its next heartbeat.
 
+#### Other jobs
+
+Requests are not tied to backups: any job that needs a device for a while can hold one — a central
+update, a long computation, a copy. With its own token and a `client` name that says what it is:
+
+```bash
+ID=$(curl -fsS -X POST -H "$AUTH" -d '{"client": "updates", "ttl": 1800}' "$WOL/api/devices/aida/requests?wait=300" | jq -r .id)
+ssh root@aida 'systemd-inhibit --what=shutdown:sleep --who=updates --why="apt full-upgrade" apt-get -y full-upgrade'
+curl -fsS -X DELETE -H "$AUTH" "$WOL/api/devices/aida/requests/$ID"
+```
+
+The request keeps the WOL-Server from putting the device to sleep, also in the gaps between the
+steps of a job. On the device itself, `systemd-inhibit` announces the work to the system: a sleep
+command that respects inhibitors — the forced command the WOL-Server's key runs, for example —
+can refuse and name the job, even when *Sleep* is forced or the job holds no request. Such a
+command should refuse on every inhibitor in `block` mode for `sleep` (or `shutdown` for a device
+that is switched off) and ignore the `delay` ones that desktops and NetworkManager hold all the
+time. [snapshot-backup](https://github.com/schnebeck/snapshot-backup) does both: requests on the
+WOL-Server, inhibitors on the backup server (19.5 and later).
+
 #### Over the VPN
 
 The API is reachable over the VPN: the allowlist (`auto`) contains the network of the tunnel. With HTTPS, the

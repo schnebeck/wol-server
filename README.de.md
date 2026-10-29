@@ -754,6 +754,28 @@ erledigt das alles selbst, mit `WOL_SERVER_URL`, `WOL_SERVER_TOKEN` und `WOL_DEV
 - Anforderungen überstehen einen Neustart des WOL-Servers; danach hat jede Anforderung eine `ttl` Zeit für ihr
   nächstes Lebenszeichen.
 
+#### Andere Aufgaben
+
+Anforderungen sind nicht an Backups gebunden: Jede Aufgabe, die ein Gerät eine Weile braucht, kann
+es halten – ein zentrales Update, eine lange Berechnung, eine Kopie. Mit eigenem Token und einem
+`client`-Namen, der sagt, was sie ist:
+
+```bash
+ID=$(curl -fsS -X POST -H "$AUTH" -d '{"client": "updates", "ttl": 1800}' "$WOL/api/devices/aida/requests?wait=300" | jq -r .id)
+ssh root@aida 'systemd-inhibit --what=shutdown:sleep --who=updates --why="apt full-upgrade" apt-get -y full-upgrade'
+curl -fsS -X DELETE -H "$AUTH" "$WOL/api/devices/aida/requests/$ID"
+```
+
+Die Anforderung hält den WOL-Server davon ab, das Gerät schlafen zu legen, auch in den Pausen
+zwischen den Schritten einer Aufgabe. Auf dem Gerät selbst meldet `systemd-inhibit` die Arbeit beim
+System an: Ein Schlafbefehl, der Sperren beachtet – etwa der erzwungene Befehl, den der Schlüssel des
+WOL-Servers ausführt –, kann dann verweigern und die Aufgabe nennen, auch wenn *Schlafen* erzwungen
+wird oder die Aufgabe keine Anforderung hält. Ein solcher Befehl sollte bei jeder Sperre im Modus
+`block` für `sleep` verweigern (bzw. `shutdown` bei einem Gerät, das ausgeschaltet wird) und die
+`delay`-Sperren übergehen, die Desktop und NetworkManager ständig halten.
+[snapshot-backup](https://github.com/schnebeck/snapshot-backup) macht beides: Anforderungen beim
+WOL-Server, Sperren auf dem Backup-Server (ab 19.5).
+
 #### Über VPN
 
 Die API ist über das VPN erreichbar: Die Allowlist (`auto`) enthält das Netz des Tunnels. Bei HTTPS zeigt der Name
