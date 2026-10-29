@@ -1,6 +1,6 @@
 # Proposal: smart plugs in WOL-Server
 
-As of: 2026-10-27 · Status: **draft, not implemented**
+As of: 2026-10-29 · Status: **phases 1 to 3 implemented and in use with three Shelly Plug M Gen3, released in v1.1.0** (section 10)
 
 WOL-Server learns to use metering smart plugs. A plug is a device in the network with the type "wireless plug". Linking
 it to a consumer tells WOL-Server what the plug measures and what it switches. If the consumer is a WOL device, the
@@ -36,7 +36,7 @@ The consumer can also be a network device without WOL, or just a name such as "F
 | Welded contacts | No positively driven contacts in a plug. Detection by measurement instead (section 3). |
 | Plug in the network | **A type at the reservation:** "wireless plug" next to the existing "WOL device". Name and fixed IP live in the reservation only, never on the plug. |
 | Plugs behind a hub | A DECT plug (or later Zigbee) has no IP of its own. Then the **hub** is reserved (e.g. the FRITZ!Box); its plugs are added in the Plugs tab through the hub (driver + host of the hub + channel = device ID). Type, link and safety rules are the same. |
-| Detection | **By asking the device, never by vendor prefix alone.** An Espressif MAC can be a Shelly, a Tasmota plug or any home-made ESP project. A driver's `probe` decides; the result is only a suggestion and can always be changed, including back to "normal device". |
+| Detection | **By asking the device, never by vendor prefix alone, and only on request.** An Espressif MAC can be a Shelly, a Tasmota plug or any home-made ESP project. A driver's `probe` decides; the type stays a choice of the user. |
 | Linking | **Plug → consumer:** a WOL device, a reservation (network device without WOL) or just a name. One plug has at most one consumer; a consumer has at most one plug. |
 
 ## 3. Safety rules
@@ -62,8 +62,10 @@ These rules are enforced in WOL-Server itself, not only in the GUI.
    - on any error flag;
    - above a fixed limit;
    - on a slow rise over days at the same load, which is a sign of a worn contact.
-6. **No lock-out:** WOL-Server refuses to cut the power of a plug whose linked device is the WOL-Server itself
-   or the gateway (router). The README warns against plugging the Pi or the router into a plug it controls.
+6. **No lock-out:** the WOL-Server, the router or a switch may well hang on a plug: WOL-Server then measures
+   its own consumption, too. But such a plug is **never switched off**: the consumer "This WOL-Server" locks it
+   by itself, "Never switch off" locks the plug of the router or a switch. A locked plug can be switched on,
+   never off or restarted, neither in the GUI nor by the API or a schedule.
 7. **Relay wear:** the plug counts its switching cycles (`counts.switch_on`). The GUI shows "312 of 10,000
    cycles" and warns at 80 %.
 
@@ -73,16 +75,19 @@ These rules are enforced in WOL-Server itself, not only in the GUI.
 
 - **Setup, step by step:**
   1. **On the plug's hotspot:** choose the Wi-Fi, enter the password, leave DHCP on.
-  2. **Network → Overview → Unknown devices:** the plug appears with the name it reports. WOL-Server asks the
-     drivers once, read-only (for Shelly: `GET /shelly`), and shows the result: "Shelly Plug M Gen3 detected".
-  3. **Approve:** IP and name as for every reservation, plus the **type**. "wireless plug" with the detected driver is
-     preselected; "normal device" or another driver can be chosen instead. Then WOL-Server asks for the plug's
-     password.
-- **Later changes:** the type of a reservation can be changed at any time. An existing reservation gets an
-  *As plug* button next to *As WOL device*. "Do not detect" for a MAC stops all probing of that device, e.g. for a
-  home-made ESP project that should not get unexpected HTTP requests.
+  2. **Network → Overview → Unknown devices:** the plug appears with the name it reports. An unknown device
+     has no address yet, so WOL-Server cannot ask it anything at this point. The reported name only gives a hint
+     (e.g. `ShellyPlugMG3-…`), and the approve dialog preselects the type "wireless plug" from it.
+  3. **Approve:** IP and name as for every reservation, plus the **type**: "network device" or "wireless plug".
+     With "wireless plug" the plug dialog opens next, with the reserved IP filled in. As soon as the plug has its
+     address (its next DHCP request, usually within a minute), *Detect* asks the drivers, read-only (for Shelly:
+     `GET /shelly`), and shows e.g. "Shelly (Gen2+) · S3PL-30110EU · firmware 1.7.1 · password protected".
+- **Detection only on request.** WOL-Server never probes devices by itself; only *Detect* and *Add* send
+  requests, and only to the address entered. A home-made ESP project therefore never gets unexpected requests.
+- **Later changes:** an existing reservation gets an *Add as wireless plug* button next to *Add as WOL device*.
+  Removing a plug only makes WOL-Server forget it; the reservation stays.
 - **Manual:** a plug outside the DHCP (e.g. a fixed IP) can be entered by host name or IP, with the driver chosen
-  by hand.
+  by hand or detected automatically.
 - **Password:** digest authentication as the plug requires (user `admin`, SHA-256). The password is stored on the
   server only and is never sent back to the browser.
 - **Live view:** relay state, power (W), voltage, current, temperature, energy counter, switching cycles, error
@@ -242,8 +247,7 @@ The plug control is split in two, like a hardware abstraction layer:
 - **Shared helpers:** HTTP with timeouts and digest authentication (MD5 and SHA-256) in `wolserver/plugs/http.py`,
   so a new driver is usually 100–200 lines.
 - **Registry:** each driver registers under a fixed name (`shelly-gen2`, later `tasmota`, `fritz-dect`). The
-  plug stores the name. When a new device appears, WOL-Server tries the `probe` of every driver once; the result is
-  a suggestion only.
+  plug stores the name. *Detect* tries the `probe` of every driver on the address entered.
 - **Tests:** each driver is tested against recorded answers of the real device (JSON fixtures). The core is tested
   against the fake plug, which also runs in the demo.
 
@@ -299,7 +303,7 @@ Log entries like the existing ones, with the source (GUI, schedule, API):
 | Risk | Mitigation |
 |---|---|
 | **Data loss from cutting the power** of a running or suspended device | Rules 1 and 2 (section 3): only at standby level, cut after sleep only with a confirmed shutdown, the API cannot cut a running device |
-| **Lock-out:** the plug of the Pi or the router is switched off | Rule 6; note in the README |
+| **Lock-out:** the plug of the Pi or the router is switched off | Rule 6: such plugs are locked and never switched off |
 | Relay wear from inrush current, welded contacts | Switching under load is avoided; switching cycles shown; welded contacts detected by measurement (rule 4) |
 | Worn contact gets hot | Temperature and error flags of the plug, warning on a slow rise (rule 5) |
 | Device without power after an outage | Plug setting "restore last state"; WOL-Server shows the setting and warns if it is "off" |
@@ -327,3 +331,26 @@ Log entries like the existing ones, with the source (GUI, schedule, API):
 
 Phase 1 can be tested with the real plugs as soon as they are set up; it does not change anything for the
 existing devices.
+
+## 10. Implementation status
+
+Phases 1 to 3 are implemented, tested against the fake plug (unit tests and the demo) and in daily use with three
+Shelly Plug M Gen3 (firmware 1.8 and 2.2 beta). What differs from the plan above, and what is still open:
+
+| Topic | State |
+|---|---|
+| Energy log | `energy.db` with one row per plug and hour; the running hour stays in RAM and is written once per hour. Gaps (server off) are spread evenly over the hours they span. Plugs without a counter are integrated from the power. |
+| Day view | **One panel per plug with its own scale** and a shared time axis (small multiples): in one chart a 100 W PC would press a 1 W standby flat onto the baseline. Month and year stay stacked columns, where the sum (energy, costs) matters. |
+| Standby per year | Estimated from the hours of the last 30 days in which the draw never rose above the standby threshold, scaled to a year. |
+| Price | One price per kWh for all plugs (Plugs → Consumption). |
+| Link | Plug → WOL device or a plain name, edited from both sides. A reservation without a WOL device as consumer is not implemented yet; a name covers it for now. |
+| Status from power | In the GUI (Online, Standby, No power, Starting or shutting down, Not responding after 5 minutes above the running threshold). `GET /api/status` includes the power per device. |
+| Wake methods, cut after sleep | Implemented as planned; "Power on" with the relay already on and the device at standby runs a short power cycle. |
+| Alerts | Welded contacts, error flags, temperature above 70 °C, relay wear above 80 %, plug unreachable for 5 minutes: once into the log when raised and when cleared, and as a notice in the Plugs tab. **Open:** the slow temperature rise over days. |
+| Rule 6 (no lock-out) | Consumer "This WOL-Server" (at most one plug) and "Never switch off" for the router or a switch: on and measuring yes, off and restart never (GUI, API, schedules). |
+| Securing a plug | Not in the plan, added after the first real plug: a new Shelly ships with an open access point of its own, Bluetooth RPC and Matter switched on and without a password. *Edit → Security* shows what is open, switches the chosen ways in off and sets a password (a random one unless one is given). Settings go as JSON-RPC (`POST /rpc`). The overview points out open plugs. |
+| Restart of a plug | Matter only goes off after a restart (`Sys.GetStatus` → `restart_required`). The dialog then shows "Waiting for a restart" and offers `Shelly.Reboot`, refused for locked plugs and where the output would stay off afterwards (power-on state off). |
+| Live view | Period "Hour": the power of the last 60 minutes in 5 s steps and the power right now. While the view is open every request reads the plugs anew; before that the readings of the background poll (once a minute) hold for up to 90 s. The single readings live in RAM only. |
+| Power-on state | The factory default of the Plug M Gen3 is `match_input`, which the API documentation does not define for a plug. It is shown as the plug's own setting and only changed when another one is chosen. |
+| Real hardware | The relay counter is `counts.switch_on` (also `on_time`, `on_above_thr` with firmware 2.2). Below about 1 W the plug reports 0 W and counts no energy, so a Pi Zero on its own plug mostly reads 0 W. |
+| API tokens | The plug and energy endpoints need a GUI session; tokens stay limited to devices. |

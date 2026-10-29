@@ -24,6 +24,7 @@ from .wol import normalize_mac
 SLEEP_METHODS = ("none", "ssh", "http", "sol")
 HTTP_METHODS = ("GET", "POST", "PUT")
 ACTIONS = ("wake", "sleep")
+PLUG_ACTIONS = ("power_on", "power_off", "power_cycle")
 
 _HOSTNAME = re.compile(r"^(?=.{1,253}$)[A-Za-z0-9](?:[A-Za-z0-9.\-_]*[A-Za-z0-9])?$")
 _SSH_USER = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9._@\\\-]{0,63}$")
@@ -122,17 +123,29 @@ def validate_device(data):
     return dev
 
 
-def validate_schedule(data, device_lookup):
+def validate_schedule(data, device_lookup, plug_lookup=lambda plug_id: None):
+    """A schedule switches either a device (wake, sleep) or a plug (power_on, power_off, power_cycle)."""
     if not isinstance(data, dict):
         raise ValidationError("JSON object expected")
-    device = device_lookup(data.get("device_id") or "")
-    if device is None:
-        raise ValidationError("Unknown device")
     action = data.get("action")
-    if action not in ACTIONS:
-        raise ValidationError("Action must be 'wake' or 'sleep'")
-    if action == "sleep" and device.get("sleep_method", "none") == "none":
-        raise ValidationError("No sleep method is configured for %s" % device["name"])
+    if data.get("plug_id"):
+        plug = plug_lookup(data["plug_id"])
+        if plug is None:
+            raise ValidationError("Unknown plug")
+        if action not in PLUG_ACTIONS:
+            raise ValidationError("Action for a plug must be 'power_on', 'power_off' or 'power_cycle'")
+        if plug.get("locked") and action != "power_on":
+            raise ValidationError("%s supplies the WOL-Server or the network: it is never switched off" % plug["name"])
+        target = {"plug_id": plug["id"], "force": bool(data.get("force"))}
+    else:
+        device = device_lookup(data.get("device_id") or "")
+        if device is None:
+            raise ValidationError("Unknown device")
+        if action not in ACTIONS:
+            raise ValidationError("Action must be 'wake' or 'sleep'")
+        if action == "sleep" and device.get("sleep_method", "none") == "none":
+            raise ValidationError("No sleep method is configured for %s" % device["name"])
+        target = {"device_id": device["id"]}
     time_str = _text(data, "time", 5, required=True, label="Time")
     if not _TIME.match(time_str):
         raise ValidationError("Enter the time in HH:MM format")
@@ -145,11 +158,10 @@ def validate_schedule(data, device_lookup):
         raise ValidationError("Invalid weekdays") from None
     if days[0] < 0 or days[-1] > 6:
         raise ValidationError("Weekdays must be between 0 (Mon) and 6 (Sun)")
-    return {
-        "device_id": device["id"],
+    return dict(target, **{
         "action": action,
         "time": time_str,
         "days": days,
         "enabled": bool(data.get("enabled", True)),
         "label": _text(data, "label", 80, label="Label"),
-    }
+    })

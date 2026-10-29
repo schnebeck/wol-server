@@ -26,6 +26,10 @@ Web-GUI, ohne Abhängigkeiten außer Python 3.
 - **Einrichtungs-Hotspot wie bei einer Appliance:** Findet der Pi kein bekanntes WLAN, öffnet er einen eigenen
   Hotspot mit Einrichtungsseite. WLAN wechseln geht ohne Imager, Tastatur oder SD-Karte.
 - **Status-LED:** Die grüne LED zeigt, ob die Einrichtung läuft, der Hotspot aktiv ist oder das Netz fehlt.
+- **Funksteckdosen (Shelly Gen2+, optional):** Verbraucher schalten und messen; Energie pro Stunde, Tag, Monat und
+  Jahr mit Kosten und Standby-Anteil; eine mit einem Gerät verknüpfte Steckdose weckt es über den Strom, schaltet
+  es nach dem Schlafen ab und zeigt, ob es wirklich läuft; Warnungen bei Übertemperatur, verschweißtem Relais u. a.;
+  Steckdosen werden aus der GUI abgesichert
 - **DHCP und DNS fürs Heimnetz (optional):** dnsmasq, verwaltet im Reiter *Netzwerk*. Jedes Gerät ist automatisch
   unter seinem Namen erreichbar; Reservierungen, eigene DNS-Einträge, unbekannte Geräte mit einem Klick freigeben,
   Import vom alten ISC-dhcpd, Verlauf mit Zurückholen.
@@ -35,7 +39,7 @@ Web-GUI, ohne Abhängigkeiten außer Python 3.
   Passwort-Login, CSRF-Schutz, gehärteter systemd-Dienst
 - **Fehlersuche per Kartenleser:** Einrichtungs-, Start- und Ablaufprotokolle liegen auf der Boot-Partition
 - **GUI auf Englisch und Deutsch:** kleiner Umschalter in der Kopfzeile, Vorgabe ist die Browsersprache
-- **Keine Abhängigkeiten** außer Python 3 (Standardbibliothek) – kein pip, kein Node, keine Datenbank, kein CDN
+- **Keine Abhängigkeiten** außer Python 3 (Standardbibliothek) – kein pip, kein Node, kein Datenbankserver (das Energielog nutzt SQLite aus der Standardbibliothek), kein CDN
 
 ```
  Handy unterwegs ──► OpenVPN-Server ◄──(tun0, ausgehend)── Pi Zero W ──(wlan0)──► WLAN-Router ──(LAN)──► PC / NAS
@@ -70,6 +74,8 @@ in zufälligen Abstürzen.
 | **Zeitpläne** pro Gerät, werktags oder täglich | **Netzwerk:** DHCP, DNS, Reservierungen und unbekannte Geräte auf einen Blick |
 | ![Reservierungen](docs/screenshots/de/network-reservations.png) | ![Einstellungen](docs/screenshots/de/network-settings.png) |
 | **Reservierungen** mit Hersteller, Status und Aufwecken direkt aus der Liste | **Einstellungen** für DHCP, DNS und Server, mit Prüfen vor dem Übernehmen |
+| ![Steckdosen](docs/screenshots/de/plugs.png) | ![Verbrauch](docs/screenshots/de/consumption.png) |
+| **Steckdosen:** Leistung, Energie, Temperatur, Schalten mit Sicherheitsprüfung | **Verbrauch** pro Stunde, Tag, Monat und Jahr, jede Steckdose mit eigener Skala |
 | ![System](docs/screenshots/de/system.png) | ![Dunkles Design](docs/screenshots/de/devices-dark.png) |
 | **System:** WLAN, VPN, Zugriff, HTTPS-Status | **Dunkles Design** folgt der Systemeinstellung |
 
@@ -327,6 +333,22 @@ echo "$USER ALL=(root) NOPASSWD: /usr/bin/systemctl suspend, /usr/bin/systemctl 
 
 Befehl in der GUI: `sudo systemctl suspend`.
 
+Als root lässt sich ein Schlüssel stattdessen an genau einen Befehl binden. Das Skript lehnt außerdem ab, solange
+ein Backup läuft:
+
+```bash
+# /usr/local/sbin/wol-sleep auf dem Ziel (chmod 755)
+#!/bin/sh
+pgrep -f 'rsync --server' >/dev/null && { echo 'backup running - not going to sleep'; exit 1; }
+systemctl suspend          # oder: systemctl poweroff, wenn die Firmware kein S3 kann
+
+# /root/.ssh/authorized_keys auf dem Ziel: nur vom Pi, nur dieser Befehl
+from="192.168.178.20",command="/usr/local/sbin/wol-sleep",no-port-forwarding,no-X11-forwarding,no-agent-forwarding,no-pty ssh-ed25519 AAAA… wol-server@wol
+```
+
+Der Befehl in der GUI spielt dann keine Rolle; trag den Pfad des Skripts ein, damit die GUI zeigt, was läuft.
+Eine Ablehnung erscheint in der GUI und im Protokoll.
+
 Windows: „Optionale Features“ → *OpenSSH-Server* installieren. Bei Administrator-Konten gehört der Schlüssel in
 `C:\ProgramData\ssh\administrators_authorized_keys`. Befehl: `shutdown /h` (Ruhezustand) oder
 `rundll32.exe powrprof.dll,SetSuspendState 0,1,0` (Standby, wenn der Ruhezustand deaktiviert ist).
@@ -470,12 +492,71 @@ Import, Sicherung und Verlauf erzeugen einen **Entwurf**. Die Leiste oben zeigt 
   dnsmasq-Dateien erzeugt. Eingespielt werden sie von `wol-dns-apply.service` (gestartet von `wol-dns-apply.path`).
   dnsmasq läuft als `wol-dns.service` mit eigener Konfiguration in `/etc/wol-dns/`.
 
-## 6. Bedienung
+## 6. Funksteckdosen (Reiter „Steckdosen“)
+
+Messende Funksteckdosen schalten einen Verbraucher und messen, was er zieht. Der WOL-Server spricht lokal mit
+ihnen, ohne Hersteller-Cloud, und fragt sie im Hintergrund einmal pro Minute ab, für das Energielog und die
+Warnungen. Unterstützt werden **Shelly-Steckdosen ab Generation 2** (Plus, Pro, Gen3, Gen4; getestet mit der Plug M
+Gen3); weitere Hersteller brauchen nur einen Treiber. Hintergrund und Entscheidungen:
+[docs/proposal-smart-plugs.md](docs/proposal-smart-plugs.md).
+
+**Einrichten:**
+1. Die Steckdose ins WLAN bringen (Shelly-App oder ihr eigener Access-Point) oder sie beim WOL-Server nach einer
+   Adresse fragen lassen: Im Modus „nur bekannte Geräte“ erscheint sie dann unter *Netzwerk → Übersicht* zur
+   Freigabe.
+2. *Steckdosen → Steckdose hinzufügen* (oder der Steckdosen-Knopf neben einer Reservierung), *Erkennen*, ein
+   vorhandenes Passwort eintragen.
+3. *Bearbeiten → Sicherheit* zeigt, was offen ist, und sichert die Steckdose in einem Schritt ab: Nach Wahl schaltet
+   es den eigenen Access-Point (bei einem neuen Shelly offen), Bluetooth, Matter und die Hersteller-Cloud ab und setzt
+   ein Passwort (ein zufälliges, wenn du keins einträgst; nur der WOL-Server braucht es, ein Reset der Steckdose
+   entfernt es). Matter geht erst nach einem Neustart der Steckdose aus: Der Dialog zeigt dann „Wartet auf
+   Neustart“ und bietet den Neustart an.
+4. Unter *Angeschlossen* die Steckdose mit einem Gerät verknüpfen (oder benennen, was an ihr hängt).
+
+**Sicherheitsregeln (für jeden Hersteller gleich):**
+- *Aus* und *Neustart* fragen nach, solange der Verbraucher mehr als seine Standby-Schwelle zieht.
+- *Neustart* (aus, nach 10 s wieder an) läuft auf der Steckdose selbst; sie schaltet also auch dann wieder ein,
+  wenn WLAN oder WOL-Server dazwischen ausfallen.
+- **Nie ausschalten:** Die Steckdose des WOL-Servers selbst (*Angeschlossen: Dieser WOL-Server*), des Routers oder
+  eines Switches wird eingeschaltet und gemessen, aber nie aus- oder neu gestartet, auch nicht per Zeitplan.
+- Ein Neustart der Steckdose wird abgelehnt, wo ihr Ausgang danach aus bliebe (Einstellung *Nach einem
+  Stromausfall*).
+
+**Mit einem Gerät verknüpft** (*Gerät bearbeiten → Steckdose*):
+- **Aufwecken per** *WOL*, *Strom an* (für Geräte, die bei Stromrückkehr starten, BIOS-Einstellung „AC power
+  loss: power on“) oder *Strom an, dann WOL*. Ist die Steckdose an und das Gerät im Standby, macht *Strom an*
+  einen kurzen Stromneustart.
+- **Nach „Schlafen“ den Strom abschalten:** Nach *Schlafen* schaltet die Steckdose ab, sobald die Leistung auf
+  Standby gefallen ist. Nur für einen Schlaf-Befehl, der das Gerät herunterfährt: Ein Gerät im Standby (Suspend to
+  RAM) verlöre seine ungesicherte Arbeit.
+- Die Gerätekarte zeigt die Leistung und öffnet von dort das Schalten der Steckdose; der Status unterscheidet
+  *Standby*, *Ohne Strom*, *Startet oder fährt herunter* und *Reagiert nicht* (zieht Strom, antwortet aber nicht auf
+  Ping).
+
+**Verbrauch:** *Stunde* (live, alle 5 s, solange die Ansicht offen ist, mit der Leistung jetzt), *Tag*
+(Leistungskurve, jede Steckdose mit eigener Skala), *Monat* und *Jahr* (gestapelte Säulen). Mit einem Preis pro kWh
+erscheinen Kosten; die Standby-Energie pro Jahr wird aus den letzten 30 Tagen geschätzt. CSV-Export für jeden
+Zeitraum.
+
+**Warnungen** (in der Übersicht und im Protokoll): von der Steckdose gemeldete Übertemperatur, Überlast, Über- und
+Unterspannung, Temperatur ab 70 °C, ein Relais, das aus ist, während Strom fließt (verschweißte Kontakte), 80 % der
+Nenn-Schaltspiele verbraucht, Steckdose 5 Minuten nicht erreichbar.
+
+**Hinweise:**
+- Unter etwa 1 W messen die Steckdosen schlecht; ein Shelly zeigt dann 0 W und zählt keine Energie. Ein Pi Zero an
+  seiner eigenen Steckdose zeigt deshalb meist 0 W.
+- Die Passwörter der Steckdosen bleiben auf dem Server (`plugs.json`, Modus 0600); die GUI bekommt sie nie zurück.
+- Das Energielog schont die SD-Karte: Die Werte der laufenden Stunde bleiben im RAM und werden einmal pro Stunde
+  geschrieben.
+- Die Steckdosen-Endpunkte brauchen eine GUI-Sitzung; API-Tokens sind auf Geräte beschränkt.
+
+## 7. Bedienung
 
 | Bereich | Funktion |
 |---|---|
-| **Geräte** | Karten mit Online-Status, nächster geplanter Aktion, Buttons *Aufwecken* / *Schlafen* |
-| **Zeitpläne** | Uhrzeit + Wochentage + Aktion; per Schalter pausierbar; Vorlagen „Werktags/Wochenende/Täglich“ |
+| **Geräte** | Karten mit Online-Status, nächster geplanter Aktion, Buttons *Aufwecken* / *Schlafen* (Aufwecken nur, wenn das Gerät nicht online ist, Schlafen nur, wenn es nicht aus ist); mit Steckdose auch deren Leistung und Schalter |
+| **Steckdosen** | Übersicht mit Leistung, Energie, Temperatur und Schalten; Verbrauch pro Stunde, Tag, Monat und Jahr (siehe [Funksteckdosen](#6-funksteckdosen-reiter-steckdosen)) |
+| **Zeitpläne** | Uhrzeit + Wochentage + Aktion (für Geräte und Steckdosen); per Schalter pausierbar; Vorlagen „Werktags/Wochenende/Täglich“ |
 | **Protokoll** | Die letzten 300 Aktionen mit Ergebnis (manuell / Zeitplan) |
 | **System** | WLAN (Status, gespeicherte Netze, hinzufügen, Hotspot-Passwort), Hostname, Uhrzeit, CPU-Temperatur, WLAN-Signal, VPN-Status, Interfaces, erlaubte Netze, SSH-Schlüssel, Passwort |
 
@@ -492,7 +573,7 @@ journalctl -u wol-wifi -f                    # WLAN-Verwaltung / Hotspot
 sudo systemctl restart wol-server            # nach Änderung der config.json
 ```
 
-## 7. Konfiguration
+## 8. Konfiguration
 
 `/etc/wol-server/config.json`:
 
@@ -505,7 +586,7 @@ sudo systemctl restart wol-server            # nach Änderung der config.json
 | `https_redirect` | `true` | HTTP auf HTTPS umleiten, sobald ein gültiges Zertifikat da ist (nicht im Hotspot) |
 | `tls_dir` | `/etc/wol-server/tls` | Zertifikat (`cert.pem`), Schlüssel (`key.pem`) und SSH-Zugang für den Abruf |
 | `cert_source` | `""` | SSH-Ziel, das Schlüssel und Zertifikat liefert, z. B. `"wolcert@10.1.1.3"` |
-| `data_dir` | `/var/lib/wol-server` | Geräte, Zeitpläne, Protokoll, Passwort-Hash, SSH-Schlüssel |
+| `data_dir` | `/var/lib/wol-server` | Geräte, Zeitpläne, Protokoll, Passwort-Hash, SSH-Schlüssel, Steckdosen und Energielog |
 | `allowed_networks` | `["auto"]` | Quellnetze mit Zugriff; `"auto"` = localhost, IPv6-Link-local und die Netze der eigenen Schnittstellen (WLAN, LAN, VPN), laufend aktualisiert; feste Netze lassen sich ergänzen |
 | `wol_interface` | `""` (automatisch) | Interface für Magic Packets, z. B. `"wlan0"`; automatisch heißt: das Interface der Default-Route, VPN-Interfaces ausgenommen |
 | `wifi_interface` | `"wlan0"` | WLAN-Interface für Client-Betrieb und Hotspot |
@@ -527,6 +608,8 @@ Dateien:
 /var/lib/wol-server/data.json    Geräte, Zeitpläne, Protokoll (atomar geschrieben)
 /var/lib/wol-server/auth.json    Passwort-Hash (PBKDF2) + Cookie-Secret, Modus 0600
 /var/lib/wol-server/.ssh/        SSH-Schlüssel und known_hosts für das Schlafenlegen
+/var/lib/wol-server/plugs.json   Steckdosen samt Passwörtern, Preis pro kWh, Modus 0600
+/var/lib/wol-server/energy.db    Energielog (SQLite, eine Zeile pro Steckdose und Stunde)
 /etc/wol-server/tls/             HTTPS: cert.pem, key.pem, fetch_key (Abruf), known_hosts (Webserver)
 /etc/openvpn/client/wol.conf     OpenVPN-Client (Dienst openvpn-client@wol)
 /etc/default/wol-wlan-watchdog   Einstellungen des WLAN-Watchdogs
@@ -562,7 +645,7 @@ Auf dem Pi: `cert_source` und `https_host` in `config.json` setzen, den Host-Sch
 Der Abruf übernimmt nur Zertifikate, die zum Schlüssel passen, auf `https_host` lauten und noch mindestens zwei Tage
 gelten. Damit die Umleitung funktioniert, muss der Name im Heimnetz auf den Pi zeigen (interner DNS).
 
-## 8. Technische Details
+## 9. Technische Details
 
 - **Zeitplaner:** Er wacht einmal pro Minute auf. Der Zero hat keine Echtzeituhr: Springt die Uhr nach dem Boot
   per NTP nach vorne, werden höchstens die letzten 10 Minuten nachgeholt. Rücksprünge und die doppelte Stunde
@@ -636,6 +719,12 @@ GET    /api/net/export              POST /api/net/restore {data}    GET  /api/ne
 POST   /api/net/history/<id>/restore                                POST /api/net/test {query}
 GET    /api/net/stats               GET  /api/net/logs/<queries|dhcp|service>
 POST   /api/net/probe               POST /api/net/restart           PUT  /api/net/static-ip {enabled}
+GET    /api/plugs[?live=0]          POST /api/plugs                 POST /api/plugs/probe {host, driver}
+PUT/DELETE /api/plugs/<id>          POST /api/plugs/<id>/<on|off|cycle> {confirm}
+GET/PUT /api/plugs/<id>/power-on-state {state}                      POST /api/plugs/<id>/restart
+GET    /api/plugs/<id>/security     POST /api/plugs/<id>/security {password, disable}
+PUT    /api/devices/<id>/plug {plug_id, wake_method, cut_after_sleep}
+GET    /api/energy?period=<hour|day|month|year>&date=YYYY-MM-DD     GET/PUT /api/energy/settings {price_kwh, currency}
 ```
 
 ## Lizenz
@@ -648,7 +737,7 @@ WOL-Server ist freie Software unter der GNU General Public License, Version 3 od
 Copyright (C) 2026 Thorsten Schnebeck. Produziert von Thorsten Schnebeck – die Idee, die Entscheidungen, das Testen.
 Geschrieben von Anthropic Claude Opus 5.5 – KI-generierter Inhalt.
 
-## 9. Entwicklung
+## 10. Entwicklung
 
 ```bash
 python3 -m wolserver -c config.dev.json      # http://localhost:8080, Daten in ./data
@@ -656,7 +745,22 @@ python3 -m unittest discover -s tests -t .   # Tests
 ./deploy/make-image.sh --image raspios.img.xz -o test.img   # Image aus vorhandenem OS-Image bauen
 ```
 
-## 10. Fehlersuche
+### Demo für Oberflächen-Tests
+
+```bash
+python3 tools/demo.py                        # http://127.0.0.1:8090, erfundene Beispieldaten
+node tools/screenshots.mjs                   # README-Screenshots (EN + DE) aus der laufenden Demo
+```
+
+Die Demo startet den echten Webserver und den echten Code des Netzwerkdienstes, mit Platzhaltern für
+systemctl, nmcli und journalctl. WLAN, VPN, Steckdosen, Ping, Magic Packets und SSH sind simuliert: Die Demo
+schickt nichts ins Netz und ändert nichts am System. Jeder Start beginnt mit frischen Daten (Beispiel-
+Reservierungen, Leases, unbekannte Geräte, Geräte, Steckdosen, Zeitpläne); alle Namen, Adressen und MACs sind
+erfunden. Ist dnsmasq installiert, beantwortet ein echter dnsmasq DNS auf 127.0.0.1:15353 (ohne DHCP, ohne
+root); `--no-dnsmasq` simuliert auch das. `screenshots.mjs` braucht Node 22 oder neuer und einen
+Chromium-basierten Browser (`CHROME=/pfad/zum/browser`, falls er nicht gefunden wird).
+
+## 11. Fehlersuche
 
 | Problem | Lösung |
 |---|---|

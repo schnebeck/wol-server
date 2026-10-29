@@ -1,0 +1,17 @@
+{
+ "id": 0,
+ "source": "HTTP_in",
+ "tag": null,
+ "output": true,
+ "apower": 92.4,
+ "voltage": 231.2,
+ "freq": 50.0,
+ "current": 0.412,
+ "pf": 0.97,
+ "aenergy": {"total": 15342.117, "by_minute": [1540.2, 1538.9, 1541.0], "minute_ts": 1793088000},
+ "ret_aenergy": {"total": 0.0, "by_minute": [0.0, 0.0, 0.0], "minute_ts": 1793088000},
+ "temperature": {"tC": 34.6, "tF": 94.3},
+ "counts": {"on_time": 81234, "on_time_rst_ts": 0, "switch_on": 312, "switch_on_rst_ts": 0, "on_above_thr": 0,
+            "on_above_thr_rst_ts": 0},
+ "errors": []
+}

@@ -1,0 +1,62 @@
+{
+ "ble": {
+  "enable": true,
+  "rpc": {
+   "enable": true
+  }
+ },
+ "cloud": {
+  "enable": false,
+  "server": "iot.shelly.cloud:6012/jrpc"
+ },
+ "matter": {
+  "enable": true
+ },
+ "mqtt": {
+  "enable": false,
+  "server": null
+ },
+ "switch:0": {
+  "id": 0,
+  "name": null,
+  "initial_state": "match_input",
+  "auto_on": false,
+  "auto_on_delay": 60.0,
+  "auto_off": false,
+  "auto_off_delay": 60.0,
+  "power_limit": 3000,
+  "voltage_limit": 280,
+  "autorecover_voltage_errors": false,
+  "current_limit": 13.0,
+  "reverse": false
+ },
+ "sys": {
+  "device": {
+   "name": null,
+   "mac": "A8032AD4E5F6",
+   "fw_id": "20251209-070625/geeb7eab",
+   "discoverable": true,
+   "eco_mode": false
+  }
+ },
+ "wifi": {
+  "ap": {
+   "ssid": "ShellyPlugMG3-A8032AD4E5F6",
+   "is_open": true,
+   "enable": true,
+   "range_extender": {
+    "enable": false
+   }
+  },
+  "sta": {
+   "ssid": "HomeNet",
+   "is_open": false,
+   "enable": true,
+   "ipv4mode": "dhcp"
+  }
+ },
+ "ws": {
+  "enable": false,
+  "server": null
+ }
+}
