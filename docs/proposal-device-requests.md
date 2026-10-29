@@ -1,6 +1,6 @@
 # Proposal: requests – several clients share one device
 
-As of: 2026-10-29 · Status: **implemented (branch `requests`)**
+As of: 2026-10-29 · Status: **implemented, released in v1.2.0**
 
 ## 1. Problem
 
