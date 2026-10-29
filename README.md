@@ -20,6 +20,8 @@ dependencies other than Python 3.
 - **Schedules:** wake or sleep per device at a given time on selected weekdays
 - **Online status** (ICMP ping or TCP probe; also detects Windows PCs behind an ICMP firewall)
 - **Log** of all manual and scheduled actions
+- **Shared devices:** clients request a device through the API (LAN or VPN) and send heartbeats; it sleeps only
+  when the last request is done, e.g. a backup server serving several backup clients
 - **OpenVPN client on the Pi:** The Pi is reachable over the VPN without port forwarding at home (even behind
   DS-Lite/CGNAT)
 - **Wi-Fi-only operation:** power save off, Wi-Fi watchdog, hardware watchdog; magic packets always go out on
@@ -596,6 +598,7 @@ Files:
 /var/lib/wol-server/.ssh/        SSH key and known_hosts for putting devices to sleep
 /var/lib/wol-server/plugs.json   plugs incl. their passwords, price per kWh, mode 0600
 /var/lib/wol-server/energy.db    energy log (SQLite, one row per plug and hour)
+/var/lib/wol-server/requests.json   open requests and remembered sleeps
 /etc/wol-server/tls/             HTTPS: cert.pem, key.pem, fetch_key (fetching), known_hosts (web server)
 /etc/openvpn/client/wol.conf     OpenVPN client (service openvpn-client@wol)
 /etc/default/wol-wlan-watchdog   settings of the Wi-Fi watchdog
@@ -660,8 +663,8 @@ All endpoints return JSON. Write requests from the browser require the header `X
 #### Scripts: API tokens
 
 For scripts, create a token under *System → API tokens for scripts*. It is shown only once and can be revoked
-there at any time. A token may only list devices, query their status and wake them or put them to sleep; it
-cannot change settings. The device can be given by ID or by name (case-insensitive). `?wait=SECONDS`
+there at any time. A token may only list devices, query their status, wake them, put them to sleep and request
+them (see below); it cannot change settings. The device can be given by ID or by name (case-insensitive). `?wait=SECONDS`
 (at most 300) keeps the answer back until the device answers (wake) or is gone (sleep); the device needs a
 host or IP address for this. The result: HTTP 200 when done, 504 on timeout. Each action appears in the log
 as `API: <token name>`.
@@ -678,6 +681,47 @@ rsync -a /home/ backup-server:/srv/backup/home/
 curl -fsS -X POST -H "$AUTH" "$WOL/api/devices/backup-server/sleep"
 ```
 
+#### Several clients: requests
+
+If several clients use one device, such as backup clients and a backup server, none of them should put it to
+sleep on its own: the first one done would cut off the others. Instead each client **requests** the device and
+the WOL-Server puts it to sleep only when the last request is done. Background: [docs/proposal-device-requests.md](docs/proposal-device-requests.md).
+
+```bash
+#!/bin/sh
+WOL=https://wol.home.arpa
+AUTH="Authorization: Bearer $(cat ~/.config/wol-token)"
+DEV=$WOL/api/devices/backup-server
+
+# Request: wakes the device if needed and answers once it is online (201), 504 on timeout
+ID=$(curl -fsS -X POST -H "$AUTH" -d '{"client": "laptop"}' "$DEV/requests?wait=300" | jq -r .id) || exit 1
+# Heartbeat every 5 minutes while the backup runs (a request without heartbeat expires after 15 minutes)
+( while sleep 300; do curl -fsS -X PUT -H "$AUTH" "$DEV/requests/$ID" >/dev/null || break; done ) &
+rsync -a /home/ backup-server:/srv/backup/home/; rc=$?
+kill $! 2>/dev/null
+# Done, and asking for sleep: it runs 2 minutes after the last open request, unless the device is requested again
+curl -fsS -X DELETE -H "$AUTH" "$DEV/requests/$ID?then=sleep"
+exit $rc
+```
+
+- `ttl` (seconds) sets how long a request lives without a heartbeat (default 900; `0` = until released). There is
+  no upper limit: as long as heartbeats come, a request lives for days, e.g. for a long job on the device itself.
+- `POST …/sleep?when=idle` asks for sleep without holding a request: at once if nothing is open, otherwise once
+  the last request is done (202). `DELETE …/sleep` takes that back.
+- While requests are open, a sleep schedule waits for the last one, *Sleep* and a plain `POST …/sleep` ask first
+  (409, `?force=1` puts the device to sleep anyway), and the device's plug is not switched off by a schedule.
+- The device card shows "In use: …"; *Details* lists every request (last heartbeat, expiry) and can end it. A
+  token can only renew and end its own requests; the GUI can end any.
+- Requests survive a restart of the WOL-Server; afterwards every request has one `ttl` for its next heartbeat.
+
+#### Over the VPN
+
+The API is reachable over the VPN: the allowlist (`auto`) contains the network of the tunnel. With HTTPS, the
+name in the certificate usually points publicly to the web server that obtains it (see
+[HTTPS](#https-lets-encrypt-via-a-web-server)). A client outside the home network therefore pins the name to the
+Pi's VPN address, with one line in `/etc/hosts` (`10.1.1.8  wol.home.arpa`) or per call with
+`curl --resolve wol.home.arpa:443:10.1.1.8 …`.
+
 #### Endpoints
 
 
@@ -685,6 +729,9 @@ curl -fsS -X POST -H "$AUTH" "$WOL/api/devices/backup-server/sleep"
 GET    /api/session                 POST /api/login {password}      POST /api/logout
 GET    /api/devices                 POST /api/devices               PUT/DELETE /api/devices/<id>
 POST   /api/devices/<id|name>/wake[?wait=s]  POST /api/devices/<id|name>/sleep[?wait=s]  GET /api/status
+POST   /api/devices/<id|name>/sleep?when=idle|force=1               DELETE /api/devices/<id|name>/sleep
+GET    /api/devices/<id|name>/requests                              POST /api/devices/<id|name>/requests[?wait=s] {client, ttl}
+PUT    /api/devices/<id|name>/requests/<rid>                        DELETE /api/devices/<id|name>/requests/<rid>[?then=sleep]
 GET    /api/tokens                  POST /api/tokens {name}         DELETE /api/tokens/<id>
 GET    /api/schedules               POST /api/schedules             PUT/DELETE /api/schedules/<id>
 GET    /api/events                  DELETE /api/events

@@ -1084,6 +1084,24 @@ echo "$USER ALL=(root) NOPASSWD: /usr/bin/systemctl suspend, /usr/bin/systemctl 
   </form>
 </dialog>
 
+<dialog id="requests-dialog" class="dialog">
+  <form method="dialog" class="dialog-body">
+    <header class="dialog-head">
+      <h2 id="requests-title">Requests</h2>
+      <button type="button" class="icon-btn" data-close aria-label="Close">×</button>
+    </header>
+    <div class="dialog-content">
+      <p class="hint small">Clients request the device through the API and send heartbeats while they work. The device sleeps only when no request is open any more.</p>
+      <div id="requests-list"></div>
+      <p class="notice requests-sleep" id="requests-sleep" hidden></p>
+    </div>
+    <footer class="dialog-foot">
+      <span class="spacer"></span>
+      <button type="button" class="btn ghost" data-close>Close</button>
+    </footer>
+  </form>
+</dialog>
+
 <dialog id="confirm-dialog" class="dialog small">
   <form method="dialog" class="dialog-body">
     <div class="dialog-content">

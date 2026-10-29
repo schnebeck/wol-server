@@ -20,6 +20,8 @@ Web-GUI, ohne Abhängigkeiten außer Python 3.
 - **Zeitpläne:** pro Gerät Aufwecken/Schlafen zu einer Uhrzeit an gewählten Wochentagen
 - **Online-Status** (ICMP-Ping bzw. TCP-Probe, erkennt auch Windows-PCs mit ICMP-Firewall)
 - **Protokoll** aller manuellen und geplanten Aktionen
+- **Geteilte Geräte:** Clients fordern ein Gerät über die API an (LAN oder VPN) und senden Lebenszeichen; es schläft
+  erst, wenn die letzte Anforderung erledigt ist, etwa ein Backup-Server für mehrere Backup-Clients
 - **OpenVPN-Client auf dem Pi:** Er ist über das VPN erreichbar, ohne Portfreigabe zu Hause (auch bei DS-Lite/CGNAT)
 - **Reiner WLAN-Betrieb:** Powersave aus, WLAN-Watchdog, Hardware-Watchdog; Magic Packets gehen immer ins WLAN,
   nie in den Tunnel
@@ -610,6 +612,7 @@ Dateien:
 /var/lib/wol-server/.ssh/        SSH-Schlüssel und known_hosts für das Schlafenlegen
 /var/lib/wol-server/plugs.json   Steckdosen samt Passwörtern, Preis pro kWh, Modus 0600
 /var/lib/wol-server/energy.db    Energielog (SQLite, eine Zeile pro Steckdose und Stunde)
+/var/lib/wol-server/requests.json   offene Anforderungen und vorgemerkte Schlafanträge
 /etc/wol-server/tls/             HTTPS: cert.pem, key.pem, fetch_key (Abruf), known_hosts (Webserver)
 /etc/openvpn/client/wol.conf     OpenVPN-Client (Dienst openvpn-client@wol)
 /etc/default/wol-wlan-watchdog   Einstellungen des WLAN-Watchdogs
@@ -674,8 +677,8 @@ Alle Endpunkte liefern JSON. Schreibende Anfragen aus dem Browser brauchen den H
 #### Scripte: API-Tokens
 
 Für Scripte unter *System → API-Tokens für Scripte* einen Token erzeugen. Er wird nur einmal angezeigt und lässt
-sich dort jederzeit widerrufen. Ein Token darf nur Geräte auflisten, ihren Status abfragen und sie aufwecken oder
-schlafen legen; Einstellungen kann er nicht ändern. Das Gerät lässt sich per ID oder per Name angeben (Groß- und
+sich dort jederzeit widerrufen. Ein Token darf nur Geräte auflisten, ihren Status abfragen, sie aufwecken, schlafen
+legen und anfordern (siehe unten); Einstellungen kann er nicht ändern. Das Gerät lässt sich per ID oder per Name angeben (Groß- und
 Kleinschreibung egal). `?wait=SEKUNDEN` (höchstens 300) hält die Antwort zurück, bis das Gerät antwortet (Wecken)
 bzw. weg ist (Schlafen); dafür braucht das Gerät einen Host oder eine IP. Ergebnis: HTTP 200, wenn erledigt, 504
 bei Zeitüberschreitung. Jede Aktion erscheint im Protokoll als `API: <Name des Tokens>`.
@@ -692,6 +695,51 @@ rsync -a /home/ backup-server:/srv/backup/home/
 curl -fsS -X POST -H "$AUTH" "$WOL/api/devices/backup-server/sleep"
 ```
 
+#### Mehrere Clients: Anforderungen
+
+Nutzen mehrere Clients ein Gerät, etwa Backup-Clients einen Backup-Server, sollte keiner es auf eigene Faust schlafen
+legen: Der erste, der fertig ist, würde die anderen abschneiden. Stattdessen **fordert** jeder Client das Gerät
+**an**, und der WOL-Server legt es erst schlafen, wenn die letzte Anforderung erledigt ist. Hintergrund:
+[docs/proposal-device-requests.md](docs/proposal-device-requests.md).
+
+```bash
+#!/bin/sh
+WOL=https://wol.home.arpa
+AUTH="Authorization: Bearer $(cat ~/.config/wol-token)"
+DEV=$WOL/api/devices/backup-server
+
+# Anfordern: weckt das Gerät bei Bedarf und antwortet, sobald es online ist (201), 504 bei Zeitüberschreitung
+ID=$(curl -fsS -X POST -H "$AUTH" -d '{"client": "laptop"}' "$DEV/requests?wait=300" | jq -r .id) || exit 1
+# Lebenszeichen alle 5 Minuten, solange das Backup läuft (ohne Lebenszeichen läuft eine Anforderung nach 15 Minuten ab)
+( while sleep 300; do curl -fsS -X PUT -H "$AUTH" "$DEV/requests/$ID" >/dev/null || break; done ) &
+rsync -a /home/ backup-server:/srv/backup/home/; rc=$?
+kill $! 2>/dev/null
+# Fertig und Schlafen beantragen: läuft 2 Minuten nach der letzten offenen Anforderung, außer das Gerät wird erneut angefordert
+curl -fsS -X DELETE -H "$AUTH" "$DEV/requests/$ID?then=sleep"
+exit $rc
+```
+
+- `ttl` (Sekunden) legt fest, wie lange eine Anforderung ohne Lebenszeichen lebt (Vorgabe 900; `0` = bis zur
+  Freigabe). Eine Obergrenze gibt es nicht: Solange Lebenszeichen kommen, lebt eine Anforderung tagelang, etwa für
+  eine lange Aufgabe auf dem Gerät selbst.
+- `POST …/sleep?when=idle` beantragt Schlafen, ohne selbst eine Anforderung zu halten: sofort, wenn nichts offen ist,
+  sonst nach der letzten Anforderung (202). `DELETE …/sleep` nimmt das zurück.
+- Solange Anforderungen offen sind, wartet ein Schlafen-Zeitplan auf die letzte, *Schlafen* und ein einfaches
+  `POST …/sleep` fragen nach (409, `?force=1` legt das Gerät trotzdem schlafen), und die Steckdose des Geräts wird
+  nicht per Zeitplan ausgeschaltet.
+- Die Gerätekarte zeigt „In Gebrauch: …“; *Details* listet jede Anforderung (letztes Lebenszeichen, Ablauf) und
+  kann sie beenden. Ein Token kann nur seine eigenen Anforderungen verlängern und beenden; die GUI jede.
+- Anforderungen überstehen einen Neustart des WOL-Servers; danach hat jede Anforderung eine `ttl` Zeit für ihr
+  nächstes Lebenszeichen.
+
+#### Über VPN
+
+Die API ist über das VPN erreichbar: Die Allowlist (`auto`) enthält das Netz des Tunnels. Bei HTTPS zeigt der Name
+im Zertifikat öffentlich meist auf den Webserver, der es besorgt (siehe
+[HTTPS](#https-lets-encrypt-über-einen-webserver)). Ein Client außerhalb des Heimnetzes legt den Namen deshalb auf
+die VPN-Adresse des Pi fest, mit einer Zeile in `/etc/hosts` (`10.1.1.8  wol.home.arpa`) oder pro Aufruf mit
+`curl --resolve wol.home.arpa:443:10.1.1.8 …`.
+
 #### Endpunkte
 
 
@@ -699,6 +747,9 @@ curl -fsS -X POST -H "$AUTH" "$WOL/api/devices/backup-server/sleep"
 GET    /api/session                 POST /api/login {password}      POST /api/logout
 GET    /api/devices                 POST /api/devices               PUT/DELETE /api/devices/<id>
 POST   /api/devices/<id|name>/wake[?wait=s]  POST /api/devices/<id|name>/sleep[?wait=s]  GET /api/status
+POST   /api/devices/<id|name>/sleep?when=idle|force=1               DELETE /api/devices/<id|name>/sleep
+GET    /api/devices/<id|name>/requests                              POST /api/devices/<id|name>/requests[?wait=s] {client, ttl}
+PUT    /api/devices/<id|name>/requests/<rid>                        DELETE /api/devices/<id|name>/requests/<rid>[?then=sleep]
 GET    /api/tokens                  POST /api/tokens {name}         DELETE /api/tokens/<id>
 GET    /api/schedules               POST /api/schedules             PUT/DELETE /api/schedules/<id>
 GET    /api/events                  DELETE /api/events
