@@ -27,6 +27,9 @@ dependencies other than Python 3.
 - **Appliance-style setup hotspot:** If the Pi finds no known Wi-Fi network, it opens its own hotspot with a setup
   page. Switching Wi-Fi networks works without Imager, keyboard or SD card.
 - **Status LED:** The green LED shows whether setup is running, the hotspot is active or the network is missing.
+- **Wireless plugs (Shelly Gen2+, optional):** switch and measure consumers; energy per hour, day, month and
+  year with costs and the standby share; a plug linked to a device wakes it by power, cuts it after sleep and
+  shows whether it really runs; alerts for overheating, welded relays and more; plugs are secured from the GUI
 - **DHCP and DNS for the home network (optional):** dnsmasq, managed in the *Network* tab. Every device is
   automatically reachable by its name; reservations, custom DNS records, approving unknown devices with one
   click, import from the old ISC dhcpd, history with restore.
@@ -36,7 +39,7 @@ dependencies other than Python 3.
   password login, CSRF protection, hardened systemd service
 - **Troubleshooting with a card reader:** Setup, boot and trace logs are written to the boot partition
 - **English and German GUI:** a small switcher in the header; the browser language is the default
-- **No dependencies** other than Python 3 (standard library): no pip, no Node, no database, no CDN
+- **No dependencies** other than Python 3 (standard library): no pip, no Node, no database server (the energy log uses SQLite from the standard library), no CDN
 
 ```
  Phone on the go ──► OpenVPN server ◄──(tun0, outbound)── Pi Zero W ──(wlan0)──► Wi-Fi router ──(LAN)──► PC / NAS
@@ -72,6 +75,8 @@ as random crashes.
 | **Schedules** per device, on weekdays or daily | **Network:** DHCP, DNS, reservations and unknown devices at a glance |
 | ![Reservations](docs/screenshots/network-reservations.png) | ![Settings](docs/screenshots/network-settings.png) |
 | **Reservations** with vendor, status and Wake directly from the list | **Settings** for DHCP, DNS and server, with Review before Apply |
+| ![Plugs](docs/screenshots/plugs.png) | ![Consumption](docs/screenshots/consumption.png) |
+| **Plugs:** power, energy, temperature, switching with safety checks | **Consumption** per hour, day, month and year, each plug on its own scale |
 | ![System](docs/screenshots/system.png) | ![Dark theme](docs/screenshots/devices-dark.png) |
 | **System:** Wi-Fi, VPN, access, HTTPS status | **Dark theme** follows the system setting |
 
@@ -325,6 +330,21 @@ echo "$USER ALL=(root) NOPASSWD: /usr/bin/systemctl suspend, /usr/bin/systemctl 
 
 Command in the GUI: `sudo systemctl suspend`.
 
+As root, a key can be tied to exactly one command instead. The script also refuses while a backup runs:
+
+```bash
+# /usr/local/sbin/wol-sleep on the target (chmod 755)
+#!/bin/sh
+pgrep -f 'rsync --server' >/dev/null && { echo 'backup running - not going to sleep'; exit 1; }
+systemctl suspend          # or: systemctl poweroff, if the firmware has no S3
+
+# /root/.ssh/authorized_keys on the target: only from the Pi, only this command
+from="192.168.178.20",command="/usr/local/sbin/wol-sleep",no-port-forwarding,no-X11-forwarding,no-agent-forwarding,no-pty ssh-ed25519 AAAA… wol-server@wol
+```
+
+The command in the GUI then does not matter; enter the script's path so the GUI shows what runs. A refusal
+appears in the GUI and in the log.
+
 Windows: install *OpenSSH Server* under "Optional features". For administrator accounts the key belongs in
 `C:\ProgramData\ssh\administrators_authorized_keys`. Command: `shutdown /h` (hibernate) or
 `rundll32.exe powrprof.dll,SetSuspendState 0,1,0` (standby, if hibernation is disabled).
@@ -467,12 +487,62 @@ into the draft until it is applied or discarded.
   dnsmasq files from it. They are deployed by `wol-dns-apply.service` (started by `wol-dns-apply.path`).
   dnsmasq runs as `wol-dns.service` with its own configuration in `/etc/wol-dns/`.
 
-## 6. Usage
+## 6. Wireless plugs ("Plugs" tab)
+
+Metering wireless plugs switch a consumer and measure what it draws. WOL-Server talks to them locally, without
+a vendor cloud, and polls them once a minute in the background for the energy log and the alerts. Supported are
+**Shelly plugs of generation 2 and later** (Plus, Pro, Gen3, Gen4; tested with the Plug M Gen3); further vendors
+only need a driver. Background and decisions: [docs/proposal-smart-plugs.md](docs/proposal-smart-plugs.md).
+
+**Setting up:**
+1. Put the plug on the Wi-Fi (Shelly app or the plug's own access point), or let it ask the WOL-Server for an
+   address: in "known devices only" mode it then appears under *Network → Overview* for approval.
+2. *Plugs → Add plug* (or the plug button next to a reservation), *Detect*, enter the password if the plug has one.
+3. *Edit → Security* shows what is open and secures the plug in one step: it switches off the plug's own
+   access point (open on a new Shelly), Bluetooth, Matter and the vendor cloud as chosen, and sets a password
+   (a random one unless you enter one; only the WOL-Server needs it, a reset of the plug removes it). Matter
+   only goes off after a restart of the plug: the dialog shows "Waiting for a restart" and offers the restart.
+4. Under *Plugged in*, link the plug to a device (or name what it supplies).
+
+**Safety rules (they apply to every vendor):**
+- *Off* and *Restart* ask first while the consumer draws more than its standby threshold.
+- *Restart* (off, on again after 10 s) runs on the plug itself, so it switches back on even if Wi-Fi or the
+  WOL-Server fail in between.
+- **Never switch off:** the plug of the WOL-Server itself (*Plugged in: This WOL-Server*), of the router or a
+  switch is switched on and measured, but never switched off or restarted, also not by a schedule.
+- A restart of the plug is refused where its output would stay off afterwards (setting *After a power outage*).
+
+**Linked to a device** (*Edit device → Plug*):
+- **Wake via** *WOL*, *Power on* (for devices that start when the power returns, BIOS setting "AC power
+  loss: power on") or *Power on, then WOL*. With the plug on and the device in standby, *Power on* runs a short
+  power cycle.
+- **Cut the power after "Sleep":** after *Sleep* the plug switches off once the draw has dropped to standby. Only
+  for a sleep command that shuts the device down: a device in suspend to RAM would lose its unsaved work.
+- The device card shows the power and opens the plug's switch from there; the status tells *Standby*, *No power*,
+  *Starting or shutting down* and *Not responding* (draws power, but no answer to ping) apart.
+
+**Consumption:** *Hour* (live, every 5 s while the view is open, with the power right now), *Day* (power curve,
+each plug on its own scale), *Month* and *Year* (stacked columns). With a price per kWh, costs are shown; the
+standby energy per year is estimated from the last 30 days. CSV export for every period.
+
+**Alerts** (in the overview and the log): overtemperature, overload, over- and undervoltage reported by the plug,
+temperature from 70 °C, a relay that is off while power flows (welded contacts), 80 % of the rated switching
+cycles used, plug unreachable for 5 minutes.
+
+**Notes:**
+- Plugs measure poorly below about 1 W; a Shelly then shows 0 W and counts no energy. A Pi Zero on its own plug
+  therefore mostly reads 0 W.
+- The plug passwords stay on the server (`plugs.json`, mode 0600); the GUI never gets them back.
+- The energy log is easy on the SD card: values of the running hour stay in RAM and are written once per hour.
+- The plug endpoints need a GUI session; API tokens are limited to devices.
+
+## 7. Usage
 
 | Section | Function |
 |---|---|
-| **Devices** | cards with online status, next scheduled action, *Wake* / *Sleep* buttons |
-| **Schedules** | time + weekdays + action; can be paused with a switch; presets "Weekdays/Weekend/Daily" |
+| **Devices** | cards with online status, next scheduled action, *Wake* / *Sleep* buttons (Wake only when the device is not online, Sleep only when it is not off); with a plug also its power and switch |
+| **Plugs** | overview with power, energy, temperature and switching; consumption per hour, day, month and year (see [Wireless plugs](#6-wireless-plugs-plugs-tab)) |
+| **Schedules** | time + weekdays + action (for devices and plugs); can be paused with a switch; presets "Weekdays/Weekend/Daily" |
 | **Log** | the last 300 actions with result (manual / schedule) |
 | **System** | Wi-Fi (status, saved networks, add, hotspot password), hostname, time, CPU temperature, Wi-Fi signal, VPN status, interfaces, allowed networks, SSH key, password |
 
@@ -489,7 +559,7 @@ journalctl -u wol-wifi -f                    # Wi-Fi management / hotspot
 sudo systemctl restart wol-server            # after changing config.json
 ```
 
-## 7. Configuration
+## 8. Configuration
 
 `/etc/wol-server/config.json`:
 
@@ -502,7 +572,7 @@ sudo systemctl restart wol-server            # after changing config.json
 | `https_redirect` | `true` | redirect HTTP to HTTPS as soon as a valid certificate is present (not in the hotspot) |
 | `tls_dir` | `/etc/wol-server/tls` | certificate (`cert.pem`), key (`key.pem`) and SSH access for fetching them |
 | `cert_source` | `""` | SSH target that supplies key and certificate, e.g. `"wolcert@10.1.1.3"` |
-| `data_dir` | `/var/lib/wol-server` | devices, schedules, log, password hash, SSH key |
+| `data_dir` | `/var/lib/wol-server` | devices, schedules, log, password hash, SSH key, plugs and energy log |
 | `allowed_networks` | `["auto"]` | source networks with access; `"auto"` = localhost, IPv6 link-local and the networks of the Pi's own interfaces (Wi-Fi, LAN, VPN), continuously updated; fixed networks can be added |
 | `wol_interface` | `""` (automatic) | interface for magic packets, e.g. `"wlan0"`; automatic means: the interface of the default route, VPN interfaces excluded |
 | `wifi_interface` | `"wlan0"` | Wi-Fi interface for client mode and hotspot |
@@ -524,6 +594,8 @@ Files:
 /var/lib/wol-server/data.json    devices, schedules, log (written atomically)
 /var/lib/wol-server/auth.json    password hash (PBKDF2) + cookie secret, mode 0600
 /var/lib/wol-server/.ssh/        SSH key and known_hosts for putting devices to sleep
+/var/lib/wol-server/plugs.json   plugs incl. their passwords, price per kWh, mode 0600
+/var/lib/wol-server/energy.db    energy log (SQLite, one row per plug and hour)
 /etc/wol-server/tls/             HTTPS: cert.pem, key.pem, fetch_key (fetching), known_hosts (web server)
 /etc/openvpn/client/wol.conf     OpenVPN client (service openvpn-client@wol)
 /etc/default/wol-wlan-watchdog   settings of the Wi-Fi watchdog
@@ -559,7 +631,7 @@ On the Pi: set `cert_source` and `https_host` in `config.json`, add the web serv
 The fetch only accepts certificates that match the key, are issued for `https_host` and are valid for at least two
 more days. For the redirect to work, the name must point to the Pi on the home network (internal DNS).
 
-## 8. Technical details
+## 9. Technical details
 
 - **Scheduler:** It wakes up once per minute. The Zero has no real-time clock: if the clock jumps forward via NTP
   after boot, at most the last 10 minutes are caught up. Backward jumps and the repeated hour at the DST change do
@@ -633,6 +705,12 @@ GET    /api/net/export              POST /api/net/restore {data}    GET  /api/ne
 POST   /api/net/history/<id>/restore                                POST /api/net/test {query}
 GET    /api/net/stats               GET  /api/net/logs/<queries|dhcp|service>
 POST   /api/net/probe               POST /api/net/restart           PUT  /api/net/static-ip {enabled}
+GET    /api/plugs[?live=0]          POST /api/plugs                 POST /api/plugs/probe {host, driver}
+PUT/DELETE /api/plugs/<id>          POST /api/plugs/<id>/<on|off|cycle> {confirm}
+GET/PUT /api/plugs/<id>/power-on-state {state}                      POST /api/plugs/<id>/restart
+GET    /api/plugs/<id>/security     POST /api/plugs/<id>/security {password, disable}
+PUT    /api/devices/<id>/plug {plug_id, wake_method, cut_after_sleep}
+GET    /api/energy?period=<hour|day|month|year>&date=YYYY-MM-DD     GET/PUT /api/energy/settings {price_kwh, currency}
 ```
 
 ## License
@@ -645,7 +723,7 @@ WOL-Server is free software under the GNU General Public License, version 3 or l
 Copyright (C) 2026 Thorsten Schnebeck. Produced by Thorsten Schnebeck - the idea, the decisions, the testing.
 Written by Anthropic Claude Opus 5.5 - AI generated content.
 
-## 9. Development
+## 10. Development
 
 ```bash
 python3 -m wolserver -c config.dev.json      # http://localhost:8080, data in ./data
@@ -668,7 +746,7 @@ a real dnsmasq answers DNS on 127.0.0.1:15353 (no DHCP, no root); `--no-dnsmasq`
 `screenshots.mjs` needs Node 22 or later and a Chromium-based browser (`CHROME=/path/to/browser` if it is not
 found).
 
-## 10. Troubleshooting
+## 11. Troubleshooting
 
 | Problem | Solution |
 |---|---|
