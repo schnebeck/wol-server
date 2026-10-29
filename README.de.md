@@ -734,8 +734,9 @@ Das Beispiel braucht `curl` und `jq`.
   `0` = bis zur Freigabe. Die Gesamtdauer ist nicht begrenzt: Solange Lebenszeichen kommen, lebt eine Anforderung
   tagelang, etwa für eine lange Aufgabe auf dem Gerät selbst.
 - Antworten:
-  - `POST …/requests`: 201 mit `id`, `client`, `ttl`, `expires` (Unix-Zeit, `null` bei `ttl` 0) und `online`.
-    Auch bei 502 und 504 bleibt die Anforderung offen.
+  - `POST …/requests`: 201 mit `id`, `client`, `ttl`, `expires` (Unix-Zeit, `null` bei `ttl` 0), `online` und
+    `woken` (`true`, wenn diese Anforderung das Gerät geweckt hat; ein Client kann Schlafen dann nur für ein Gerät
+    beantragen, das er selbst geweckt hat). Auch bei 502 und 504 bleibt die Anforderung offen.
   - `PUT …/requests/<id>`: 200 mit dem neuen `expires`; 404, wenn die Anforderung abgelaufen ist oder beendet wurde.
   - `DELETE …/requests/<id>`: 200 mit `sleep` (`"pending"` oder `null`), `waiting_for` (Clients, die das Gerät
     noch halten) und `sleep_at`.
