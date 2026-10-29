@@ -13,6 +13,6 @@
 # SPDX-FileContributor: Anthropic Claude Opus 5.5 (AI generated content)
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-"""WOL-Server - lean Wake-on-LAN manager for the Raspberry Pi Zero W."""
+"""WOL-Server - lean Wake-on-LAN manager that runs on a Raspberry Pi Zero W."""
 
 __version__ = "1.2.1"

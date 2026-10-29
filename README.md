@@ -1,8 +1,8 @@
-# WOL-Server for the Raspberry Pi Zero W
+# WOL-Server on the Raspberry Pi Zero W
 
 **English** · [Deutsch](README.de.md)
 
-> **WOL-Server** – the Low-Power Intranet Network Swiss Army Knife for the Raspberry Pi Zero W
+> **WOL-Server** – the Low-Power Intranet Network Swiss Army Knife on a Raspberry Pi Zero W
 
 **Producer:** Thorsten Schnebeck (author, copyright and responsibility) · **Code generator:** Claude (Anthropic)
 
