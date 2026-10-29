@@ -722,15 +722,17 @@ class App:
         then = (req.query.get("then") or [""])[0]
         if then not in ("", "sleep"):
             raise ApiError(400, "then: only \"sleep\" is known")
-        if then and device["sleep_method"] == "none":
-            raise ApiError(400, "No sleep method is configured for this device")
         self._own_request(req, device, request_id)
+        # Without a sleep method the request still ends: a refusal would leave it open until it expires
+        no_sleep = bool(then) and device["sleep_method"] == "none"
         try:
-            state = self.requests.release(device["id"], request_id, then_sleep=bool(then), source=self._source(req),
-                                          ended_by=None if req.token or then else "GUI")
+            state = self.requests.release(device["id"], request_id, then_sleep=bool(then) and not no_sleep,
+                                          source=self._source(req), ended_by=None if req.token or then else "GUI")
         except KeyError:
             raise ApiError(404, "Request not found - it has expired or was ended") from None
-        if state["sleep"] and state["waiting_for"]:
+        if no_sleep:
+            message = "Done; no sleep method is configured for this device"
+        elif state["sleep"] and state["waiting_for"]:
             message = "Done; sleep waits for %s" % ", ".join(state["waiting_for"])
         elif state["sleep"]:
             message = "Done; sleep in %d s unless the device is requested again" % self.requests.grace
@@ -1332,7 +1334,7 @@ class Handler(BaseHTTPRequestHandler):
                 if token is None:
                     raise ApiError(401, "Invalid API token")
                 if not token_ok:
-                    raise ApiError(403, "API tokens may only list devices, query the status and wake devices or put them to sleep")
+                    raise ApiError(403, "API tokens may only list devices, query the status, wake devices, put them to sleep and request them")
                 authenticated = True
             else:
                 if method != "GET" and self.headers.get(CSRF_HEADER) != CSRF_VALUE:

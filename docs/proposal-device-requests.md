@@ -57,7 +57,7 @@ the VPN.
 
 ```
 GET    /api/devices/<id|name>/requests                 open requests and a remembered sleep
-POST   /api/devices/<id|name>/requests[?wait=s]        {client, ttl}  -> 201 {id, …, online} · 504 timeout
+POST   /api/devices/<id|name>/requests[?wait=s]        {client, ttl}  -> 201 {id, …, online} · 502/504: stays open
 PUT    /api/devices/<id|name>/requests/<rid>           heartbeat -> 200 · 404 expired or unknown
 DELETE /api/devices/<id|name>/requests/<rid>[?then=sleep]
 POST   /api/devices/<id|name>/sleep?when=idle          -> 200 asleep · 202 remembered

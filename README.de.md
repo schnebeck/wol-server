@@ -708,22 +708,41 @@ WOL=https://wol.home.arpa
 AUTH="Authorization: Bearer $(cat ~/.config/wol-token)"
 DEV=$WOL/api/devices/backup-server
 
-# Anfordern: weckt das Gerät bei Bedarf und antwortet, sobald es online ist (201), 504 bei Zeitüberschreitung
-ID=$(curl -fsS -X POST -H "$AUTH" -d '{"client": "laptop"}' "$DEV/requests?wait=300" | jq -r .id) || exit 1
+# Anfordern: weckt das Gerät bei Bedarf und antwortet, sobald es online ist (201). Die Antwort enthält die ID der
+# Anforderung auch, wenn das Wecken scheitert (502) oder das Gerät nicht rechtzeitig hochkommt (504); dann beendet
+# das Script sie wieder.
+RES=$(curl -sS -X POST -H "$AUTH" -d '{"client": "laptop"}' "$DEV/requests?wait=300") || exit 1
+ID=$(printf '%s' "$RES" | jq -r '.id // empty')
+[ -n "$ID" ] || { printf '%s\n' "$RES" >&2; exit 1; }
+if [ "$(printf '%s' "$RES" | jq -r .online)" != true ]; then
+    curl -sS -X DELETE -H "$AUTH" "$DEV/requests/$ID" >/dev/null
+    printf '%s\n' "$RES" >&2; exit 1
+fi
 # Lebenszeichen alle 5 Minuten, solange das Backup läuft (ohne Lebenszeichen läuft eine Anforderung nach 15 Minuten ab)
-( while sleep 300; do curl -fsS -X PUT -H "$AUTH" "$DEV/requests/$ID" >/dev/null || break; done ) &
+( while sleep 300; do curl -fs -X PUT -H "$AUTH" "$DEV/requests/$ID" >/dev/null || break; done ) 2>/dev/null & HB=$!
 rsync -a /home/ backup-server:/srv/backup/home/; rc=$?
-kill $! 2>/dev/null
+pkill -P $HB  # beendet die Schleife: stoppt ihr sleep (bzw. curl)
 # Fertig und Schlafen beantragen: läuft 2 Minuten nach der letzten offenen Anforderung, außer das Gerät wird erneut angefordert
 curl -fsS -X DELETE -H "$AUTH" "$DEV/requests/$ID?then=sleep"
 exit $rc
 ```
 
-- `ttl` (Sekunden) legt fest, wie lange eine Anforderung ohne Lebenszeichen lebt (Vorgabe 900; `0` = bis zur
-  Freigabe). Eine Obergrenze gibt es nicht: Solange Lebenszeichen kommen, lebt eine Anforderung tagelang, etwa für
-  eine lange Aufgabe auf dem Gerät selbst.
-- `POST …/sleep?when=idle` beantragt Schlafen, ohne selbst eine Anforderung zu halten: sofort, wenn nichts offen ist,
-  sonst nach der letzten Anforderung (202). `DELETE …/sleep` nimmt das zurück.
+Das Beispiel braucht `curl` und `jq`.
+
+- `client` ist der Name auf der Gerätekarte und im Protokoll; mit einem Token ist der Name des Tokens die Vorgabe.
+- `ttl` (Sekunden) legt fest, wie lange eine Anforderung ohne Lebenszeichen lebt: 60 s bis 7 Tage, Vorgabe 900,
+  `0` = bis zur Freigabe. Die Gesamtdauer ist nicht begrenzt: Solange Lebenszeichen kommen, lebt eine Anforderung
+  tagelang, etwa für eine lange Aufgabe auf dem Gerät selbst.
+- Antworten:
+  - `POST …/requests`: 201 mit `id`, `client`, `ttl`, `expires` (Unix-Zeit, `null` bei `ttl` 0) und `online`.
+    Auch bei 502 und 504 bleibt die Anforderung offen.
+  - `PUT …/requests/<id>`: 200 mit dem neuen `expires`; 404, wenn die Anforderung abgelaufen ist oder beendet wurde.
+  - `DELETE …/requests/<id>`: 200 mit `sleep` (`"pending"` oder `null`), `waiting_for` (Clients, die das Gerät
+    noch halten) und `sleep_at`.
+  - `GET …/requests` listet die offenen Anforderungen und ein vorgemerktes Schlafen; `GET /api/status` enthält
+    sie für alle Geräte unter `requests`.
+- `POST …/sleep?when=idle` beantragt Schlafen, ohne selbst eine Anforderung zu halten: sofort, wenn nichts offen ist
+  (200), sonst 2 Minuten nach der letzten Anforderung (202). `DELETE …/sleep` nimmt das zurück.
 - Solange Anforderungen offen sind, wartet ein Schlafen-Zeitplan auf die letzte, *Schlafen* und ein einfaches
   `POST …/sleep` fragen nach (409, `?force=1` legt das Gerät trotzdem schlafen), und die Steckdose des Geräts wird
   nicht per Zeitplan ausgeschaltet.

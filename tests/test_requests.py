@@ -239,6 +239,16 @@ class RequestApiTest(unittest.TestCase):
         self.assertEqual(self.call("POST", "/api/devices/backup/sleep?when=later")[0], 400)
         self.assertEqual(self.call("GET", "/api/devices/nas/requests")[0], 404)
 
+        # then=sleep for a device without a sleep method still ends the request
+        self.app.store.update("devices", self.device["id"], dict(self.device, sleep_method="none"))
+        with mock.patch("wolserver.server.check_host", lambda host: True):
+            _, r = self.call("POST", "/api/devices/backup/requests", {})
+        self.assertEqual(r["client"], "aida")  # the token's name
+        status, res = self.call("DELETE", "/api/devices/backup/requests/%s?then=sleep" % r["id"])
+        self.assertEqual((status, res["sleep"]), (200, None))
+        self.assertIn("no sleep method", res["message"])
+        self.assertEqual(self.app.requests.clients(self.device["id"]), [])
+
     def test_a_schedule_waits_and_plugs_stay_on(self):
         req = self.app.requests.create(self.device, "ki-job", ttl=0)
         ok, message = self.app.run_scheduled(self.device, "sleep", "schedule")
