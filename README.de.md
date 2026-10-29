@@ -727,7 +727,8 @@ curl -fsS -X DELETE -H "$AUTH" "$DEV/requests/$ID?then=sleep"
 exit $rc
 ```
 
-Das Beispiel braucht `curl` und `jq`.
+Das Beispiel braucht `curl` und `jq`. [snapshot-backup](https://github.com/schnebeck/snapshot-backup) (ab 19.0)
+erledigt das alles selbst, mit `WOL_SERVER_URL`, `WOL_SERVER_TOKEN` und `WOL_DEVICES` in seiner Config.
 
 - `client` ist der Name auf der Gerätekarte und im Protokoll; mit einem Token ist der Name des Tokens die Vorgabe.
 - `ttl` (Sekunden) legt fest, wie lange eine Anforderung ohne Lebenszeichen lebt: 60 s bis 7 Tage, Vorgabe 900,
@@ -735,8 +736,9 @@ Das Beispiel braucht `curl` und `jq`.
   tagelang, etwa für eine lange Aufgabe auf dem Gerät selbst.
 - Antworten:
   - `POST …/requests`: 201 mit `id`, `client`, `ttl`, `expires` (Unix-Zeit, `null` bei `ttl` 0), `online` und
-    `woken` (`true`, wenn diese Anforderung das Gerät geweckt hat; ein Client kann Schlafen dann nur für ein Gerät
-    beantragen, das er selbst geweckt hat). Auch bei 502 und 504 bleibt die Anforderung offen.
+    `woken` (`true`, wenn das Gerät nicht antwortete und diese Anforderung es geweckt hat; ein Client kann Schlafen
+    dann nur für ein Gerät beantragen, das er selbst geweckt hat, und eins, das jemand eingeschaltet hat, bleibt an).
+    Auch bei 502 und 504 bleibt die Anforderung offen.
   - `PUT …/requests/<id>`: 200 mit dem neuen `expires`; 404, wenn die Anforderung abgelaufen ist oder beendet wurde.
   - `DELETE …/requests/<id>`: 200 mit `sleep` (`"pending"` oder `null`), `waiting_for` (Clients, die das Gerät
     noch halten) und `sleep_at`.

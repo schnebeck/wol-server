@@ -18,7 +18,8 @@ Clients talk only to the API. There is no script to distribute and `curl` is eno
 the VPN.
 
 1. **Request:** `POST /api/devices/<device>/requests {client, ttl}`. The device is woken if it does not
-   answer; with `?wait=s` the answer comes once it is online.
+   answer; with `?wait=s` the answer comes once it is online. `woken` in the answer says whether this request
+   woke it, so a client can ask for sleep only for a device it woke itself.
 2. **Heartbeat:** `PUT …/requests/<id>`, every few minutes. It extends the request by its `ttl` (default 15
    minutes).
    - Without heartbeats the request expires, so a crashed client does not keep the device awake forever.
@@ -57,7 +58,7 @@ the VPN.
 
 ```
 GET    /api/devices/<id|name>/requests                 open requests and a remembered sleep
-POST   /api/devices/<id|name>/requests[?wait=s]        {client, ttl}  -> 201 {id, …, online} · 502/504: stays open
+POST   /api/devices/<id|name>/requests[?wait=s]        {client, ttl}  -> 201 {id, …, online, woken} · 502/504: stays open
 PUT    /api/devices/<id|name>/requests/<rid>           heartbeat -> 200 · 404 expired or unknown
 DELETE /api/devices/<id|name>/requests/<rid>[?then=sleep]
 POST   /api/devices/<id|name>/sleep?when=idle          -> 200 asleep · 202 remembered
