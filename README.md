@@ -711,7 +711,8 @@ curl -fsS -X DELETE -H "$AUTH" "$DEV/requests/$ID?then=sleep"
 exit $rc
 ```
 
-The example needs `curl` and `jq`.
+The example needs `curl` and `jq`. [snapshot-backup](https://github.com/schnebeck/snapshot-backup) (19.0 or
+later) does all of this by itself with `WOL_SERVER_URL`, `WOL_SERVER_TOKEN` and `WOL_DEVICES` in its config.
 
 - `client` is the name shown on the device card and in the log; with a token it defaults to the token's name.
 - `ttl` (seconds) sets how long a request lives without a heartbeat: 60 s to 7 days, default 900, `0` = until
@@ -719,7 +720,8 @@ The example needs `curl` and `jq`.
   job on the device itself.
 - Answers:
   - `POST …/requests`: 201 with `id`, `client`, `ttl`, `expires` (Unix time, `null` for `ttl` 0), `online` and
-    `woken` (`true` if this request woke the device; a client can then ask for sleep only for a device it woke).
+    `woken` (`true` if the device did not answer and this request woke it; a client can then ask for sleep
+    only for a device it woke, and one that someone switched on stays on).
     The request also stays open on 502 and 504.
   - `PUT …/requests/<id>`: 200 with the new `expires`; 404 if the request has expired or was ended.
   - `DELETE …/requests/<id>`: 200 with `sleep` (`"pending"` or `null`), `waiting_for` (clients still holding
