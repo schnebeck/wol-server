@@ -17,7 +17,8 @@
 
 Python's urllib only knows digest authentication with MD5 and SHA-1; Shelly devices require
 SHA-256 (RFC 7616). This client does both and keeps the last challenge per host, so an authenticated
-request usually needs a single round trip.
+request usually needs a single round trip. In place of the password it also takes the key derived from it
+(digest_key), so the WOL-Server does not have to keep the password itself.
 """
 
 import hashlib
@@ -41,14 +42,32 @@ def parse_challenge(header):
     return {k.lower(): quoted or plain for k, quoted, plain in _PARAM.findall(header[7:])}
 
 
-def digest_response(challenge, method, uri, user, password, nc, cnonce):
-    """Value of the Authorization header for a digest challenge (RFC 7616)."""
+def _hash(challenge):
     algorithm = (challenge.get("algorithm") or "MD5").upper()
     if algorithm not in _HASHES:
         raise PlugAuthError("Unsupported authentication method: %s" % algorithm)
-    h = lambda text: _HASHES[algorithm](text.encode("utf-8")).hexdigest()  # noqa: E731
+    return algorithm, lambda text: _HASHES[algorithm](text.encode("utf-8")).hexdigest()
+
+
+def digest_key(challenge, user, password):
+    """The key that stands in for the password: HA1 of RFC 7616, the value the plug keeps itself. It is bound
+    to the realm, so it works for this one plug only and does not give the password away."""
+    algorithm, h = _hash(challenge)
+    realm = challenge.get("realm", "")
+    return {"realm": realm, "algorithm": algorithm, "ha1": h("%s:%s:%s" % (user, realm, password))}
+
+
+def digest_response(challenge, method, uri, user, password, nc, cnonce):
+    """Value of the Authorization header for a digest challenge (RFC 7616). password is the password or
+    the key from digest_key()."""
+    algorithm, h = _hash(challenge)
     realm, nonce = challenge.get("realm", ""), challenge.get("nonce", "")
-    ha1 = h("%s:%s:%s" % (user, realm, password))
+    if isinstance(password, dict):
+        if (password.get("realm"), password.get("algorithm")) != (realm, algorithm):
+            raise PlugAuthError("The stored key does not fit the plug (reset or replaced?) - enter the password again")
+        ha1 = password["ha1"]
+    else:
+        ha1 = h("%s:%s:%s" % (user, realm, password))
     ha2 = h("%s:%s" % (method, uri))
     qop = "auth" if "auth" in (challenge.get("qop") or "").split(",") else None
     if qop:
@@ -69,6 +88,12 @@ class HttpClient:
         self.timeout = timeout
         self._challenges = {}  # host -> [challenge, nc]
         self._lock = threading.Lock()
+
+    def digest_key(self, host, user, password):
+        """digest_key() for the last challenge of host, or None if host has not asked for a password yet."""
+        with self._lock:
+            entry = self._challenges.get(host)
+        return digest_key(entry[0], user, password) if entry else None
 
     def get_json(self, url, user=None, password=None):
         return self._json("GET", url, None, user, password)

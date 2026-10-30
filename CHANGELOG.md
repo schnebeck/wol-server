@@ -3,6 +3,13 @@
 What changed in which version. The version is also shown in the GUI (*System → Info*) and by
 `wol-server --version`.
 
+## Unreleased
+
+- **Plug passwords:** `plugs.json` no longer keeps the password of a Shelly. After the first successful login the
+  server stores only the digest key derived from it (HA1, which the plug keeps itself). The key works for that one
+  plug only, so the file does not give away a password that may be in use elsewhere. Plugs saved with their password
+  are switched over at the next reading. A plug that has been reset or replaced asks for the password again.
+
 ## 1.2.1 – 2026-10-29
 
 - **Requests:** the answer to `POST /api/devices/<device>/requests` says in `woken` whether this

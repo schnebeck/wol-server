@@ -15,8 +15,9 @@
 
 """The core of the plug support. It talks to every plug through the driver interface, so the safety
 rules, the alerts and the energy log apply to every vendor alike. Plugs are stored in plugs.json
-(mode 0600: it holds the passwords of the plugs, which never leave the server), the energy values in
-energy.db."""
+(mode 0600: it holds the credentials of the plugs, which never leave the server), the energy values in
+energy.db. Where the driver can derive a key from a password (digest: HA1), plugs.json keeps only the key: it
+works for that one plug and does not give away a password that may be in use elsewhere."""
 
 import copy
 import json
@@ -130,9 +131,9 @@ class PlugManager:
 
     @staticmethod
     def public(plug):
-        """Plug for the GUI: without the password."""
-        out = {k: v for k, v in plug.items() if k != "password"}
-        out["has_password"] = bool(plug.get("password"))
+        """Plug for the GUI: without password or key."""
+        out = {k: v for k, v in plug.items() if k not in ("password", "key")}
+        out["has_password"] = bool(plug.get("password") or plug.get("key"))
         return out
 
     def get(self, plug_id):
@@ -187,8 +188,10 @@ class PlugManager:
             raise PlugError("Password is invalid or too long")
         if password:
             plug["password"] = password
+            plug.pop("key", None)
         elif data.get("clear_password"):
             plug["password"] = ""
+            plug.pop("key", None)
         else:
             plug.setdefault("password", "")
         mac = data.get("mac")
@@ -254,7 +257,28 @@ class PlugManager:
                     raise PlugError("This device is already plugged into %s" % other["name"])
 
     def _driver(self, plug):
-        return get_driver(plug["driver"])(plug["host"], plug.get("channel", 0), plug.get("password", ""), self.http)
+        return get_driver(plug["driver"])(plug["host"], plug.get("channel", 0), plug.get("password", ""), self.http,
+                                          key=plug.get("key"))
+
+    @staticmethod
+    def _password_to_key(plug, driver):
+        """After a successful call: replaces the password in plug by the key the driver derives from it."""
+        key = driver.make_key() if plug.get("password") else None
+        if key:
+            plug.update(password="", key=key)
+        return bool(key)
+
+    def _keep_key(self, plug_id, driver):
+        """Stores the key in place of the password the driver used, unless the plug changed meanwhile."""
+        with self._lock:
+            try:
+                plug = self._find(plug_id)
+            except KeyError:
+                return
+            if plug.get("password") != driver.password or not self._password_to_key(plug, driver):
+                return
+            self._save()
+        log.info("Plug %s: password replaced by a key that only works for this plug", plug["name"])
 
     # -- detection, add, change, delete --
 
@@ -278,7 +302,9 @@ class PlugManager:
             data["name"] = info["name"] or host
         plug = self._validate(data)
         plug.update(model=info["model"], firmware=info["firmware"])
-        status = self._driver(plug).status()  # checks the password before saving
+        driver = self._driver(plug)
+        status = driver.status()  # checks the password before saving
+        self._password_to_key(plug, driver)
         with self._lock:
             if plug.get("mac") and any(p.get("mac") == plug["mac"] and p.get("channel", 0) == plug["channel"]
                                        for p in self._plugs):
@@ -303,7 +329,9 @@ class PlugManager:
             plug = self._validate(data, old)
             self._check_unique_consumer(plug)
             if plug["host"] != old["host"] or plug["password"] != old.get("password"):
-                self._driver(plug).status()  # new address or password: check before saving
+                driver = self._driver(plug)
+                driver.status()  # new address or password: check before saving
+                self._password_to_key(plug, driver)
             self._plugs[self._plugs.index(old)] = plug
             self._save()
             self._live.pop(plug_id, None)
@@ -365,10 +393,13 @@ class PlugManager:
     # -- live values --
 
     def _fetch(self, plug):
+        driver = self._driver(plug)
         try:
-            result = {"status": self._driver(plug).status().to_dict(), "error": None}
+            result = {"status": driver.status().to_dict(), "error": None}
         except PlugError as e:
             result = {"status": None, "error": str(e), "unreachable": isinstance(e, PlugUnreachable)}
+        if result["status"] and plug.get("password"):
+            self._keep_key(plug["id"], driver)  # plugs stored with their password before keys existed
         with self._lock:
             if not any(p["id"] == plug["id"] for p in self._plugs):
                 return result  # deleted in the meantime
@@ -526,7 +557,11 @@ class PlugManager:
         with self._lock:
             plug = self._find(plug_id)
             if any(plug.get(k) != v for k, v in fields.items()):
-                plug.update(fields)
+                for k, v in fields.items():
+                    if v is None:
+                        plug.pop(k, None)
+                    else:
+                        plug[k] = v
                 self._save()
 
     def security(self, plug_id):
@@ -546,13 +581,16 @@ class PlugManager:
             raise PlugError("Password: 8 to 128 characters")
         if not isinstance(disable, (list, tuple)) or any(e not in EXPOSURES for e in disable):
             raise PlugError("Unknown setting")
-        new_password = password or (None if plug.get("password") else secrets.token_urlsafe(12))
+        known = plug.get("password") or plug.get("key")
+        new_password = password or (None if known else secrets.token_urlsafe(12))
         driver = self._driver(plug)
         try:
             result = driver.secure(new_password, list(disable))
         finally:
             if driver.password != plug.get("password"):  # set on the plug: keep it even if a later step failed
-                self._set_fields(plug_id, password=driver.password)
+                fields = {"password": driver.password, "key": None}
+                self._password_to_key(fields, driver)
+                self._set_fields(plug_id, **fields)
                 self._live.pop(plug_id, None)
         state = self.security(plug_id)
         done = (["password set"] if new_password else []) + [EXPOSURE_TEXTS[e] for e in disable]

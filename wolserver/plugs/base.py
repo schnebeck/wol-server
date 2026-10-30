@@ -90,13 +90,20 @@ class PlugDriver:
     label = ""  # shown in the GUI
     capabilities = frozenset()
 
-    def __init__(self, host, channel=0, password="", http=None):
+    def __init__(self, host, channel=0, password="", http=None, key=None):
         from .http import HttpClient  # noqa: PLC0415 - avoids a cycle for drivers without HTTP
 
         self.host = host
         self.channel = channel
         self.password = password
+        self.key = key  # stored in place of the password, see make_key()
         self.http = http or HttpClient()
+
+    def make_key(self):
+        """The key derived from the password after a successful call, kept in place of the password: it works
+        for this plug only (with digest authentication: HA1, as the plug keeps it). None if the driver cannot
+        derive one; then the password itself is stored."""
+        return None
 
     @classmethod
     def probe(cls, host, http=None):
