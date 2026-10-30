@@ -25,6 +25,9 @@ What changed in which version. The version is also shown in the GUI (*System →
   The plug card's restart button is "Power cycle", as in the device's power menu.
 - **"Consumer" instead of "Plugged in":** the field names what hangs on the plug - a device, a coffee machine, the
   WOL-Server - so it is called that, on the plug card, in the consumption tables and in the plug dialog.
+- **"Rechner" in the German GUI:** what the WOL-Server wakes and puts to sleep is called "Rechner" now (tab, dialog,
+  schedules, requests, API tokens, messages); "Gerät" stays for anything in the network (DHCP, reservations,
+  unknown devices) and for what hangs on a plug. README.de follows. The English GUI and the API keep "devices".
 
 ## 1.2.1 – 2026-10-29
 
