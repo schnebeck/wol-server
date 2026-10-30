@@ -335,21 +335,24 @@ echo "$USER ALL=(root) NOPASSWD: /usr/bin/systemctl suspend, /usr/bin/systemctl 
 
 Befehl in der GUI: `sudo systemctl suspend`.
 
-Als root lässt sich ein Schlüssel stattdessen an genau einen Befehl binden. Das Skript lehnt außerdem ab, solange
-ein Backup läuft:
+Als root lässt sich ein Schlüssel stattdessen an genau einen Befehl binden. [deploy/wol-sleep.sh](deploy/wol-sleep.sh)
+ist so ein Befehl: Es legt den Rechner schlafen (`suspend`, oder `poweroff` für Firmware ohne S3), verweigert,
+solange Arbeit mit einer Sperre angemeldet ist, ein bestimmter Dienst läuft oder jemand an einer entsperrten Sitzung
+arbeitet, und hält den Rechner bei `hold` wach (siehe *Wach halten, solange angefordert*). Die drei Einstellungen
+stehen oben im Skript.
 
 ```bash
-# /usr/local/sbin/wol-sleep auf dem Ziel (chmod 755)
-#!/bin/sh
-pgrep -f 'rsync --server' >/dev/null && { echo 'backup running - not going to sleep'; exit 1; }
-systemctl suspend          # oder: systemctl poweroff, wenn die Firmware kein S3 kann
+# auf dem Ziel, als root
+install -m 755 wol-sleep.sh /usr/local/sbin/wol-sleep
 
 # /root/.ssh/authorized_keys auf dem Ziel: nur vom Pi, nur dieser Befehl
 from="192.168.178.20",command="/usr/local/sbin/wol-sleep",no-port-forwarding,no-X11-forwarding,no-agent-forwarding,no-pty ssh-ed25519 AAAA… wol-server@wol
 ```
 
 Der Befehl in der GUI spielt dann keine Rolle; trag den Pfad des Skripts ein, damit die GUI zeigt, was läuft.
-Eine Ablehnung erscheint in der GUI und im Protokoll.
+Eine Ablehnung erscheint in der GUI und im Protokoll. Ablehnungen am Zustand des Rechners prüfen (Sperren,
+Dienste, Sitzungen), nie an Text auf Befehlszeilen: `pgrep -f rsync` trifft auch die Shell eines Admins, die es
+nur erwähnt.
 
 Windows: „Optionale Features“ → *OpenSSH-Server* installieren. Bei Administrator-Konten gehört der Schlüssel in
 `C:\ProgramData\ssh\administrators_authorized_keys`. Befehl: `shutdown /h` (Ruhezustand) oder
@@ -797,8 +800,9 @@ der WOL-Server zuerst los. Ein abgerissener Halt (der Rechner hat neu gestartet)
 versucht; die Rechnerkarte zeigt „auf dem Rechner gehalten“.
 
 Ist der Schlüssel des WOL-Servers an einen erzwungenen Befehl gebunden, wie es ein Schlüssel nur zum Schlafenlegen
-sein sollte, kommt der gesendete Befehl in `SSH_ORIGINAL_COMMAND` an. Dieses Skript **zuerst** erweitern – eines,
-das `hold` nicht kennt, legt den Rechner stattdessen schlafen – und als Befehl zum Halten `hold` eintragen:
+sein sollte, kommt der gesendete Befehl in `SSH_ORIGINAL_COMMAND` an. [deploy/wol-sleep.sh](deploy/wol-sleep.sh)
+kennt `hold` schon; ein eigenes Skript **zuerst** erweitern – eines, das `hold` nicht kennt, legt den Rechner
+stattdessen schlafen – und als Befehl zum Halten `hold` eintragen:
 
 ```sh
 case "$SSH_ORIGINAL_COMMAND" in

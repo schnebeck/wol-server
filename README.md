@@ -332,20 +332,22 @@ echo "$USER ALL=(root) NOPASSWD: /usr/bin/systemctl suspend, /usr/bin/systemctl 
 
 Command in the GUI: `sudo systemctl suspend`.
 
-As root, a key can be tied to exactly one command instead. The script also refuses while a backup runs:
+As root, a key can be tied to exactly one command instead. [deploy/wol-sleep.sh](deploy/wol-sleep.sh) is such a
+command: it puts the machine to sleep (`suspend`, or `poweroff` for firmware without S3), refuses while work is
+announced with an inhibitor, while a given service runs or while someone works at an unlocked session, and holds the
+machine awake on `hold` (see *Keep awake while requested*). The three settings are at the top of the script.
 
 ```bash
-# /usr/local/sbin/wol-sleep on the target (chmod 755)
-#!/bin/sh
-pgrep -f 'rsync --server' >/dev/null && { echo 'backup running - not going to sleep'; exit 1; }
-systemctl suspend          # or: systemctl poweroff, if the firmware has no S3
+# on the target, as root
+install -m 755 wol-sleep.sh /usr/local/sbin/wol-sleep
 
 # /root/.ssh/authorized_keys on the target: only from the Pi, only this command
 from="192.168.178.20",command="/usr/local/sbin/wol-sleep",no-port-forwarding,no-X11-forwarding,no-agent-forwarding,no-pty ssh-ed25519 AAAA… wol-server@wol
 ```
 
 The command in the GUI then does not matter; enter the script's path so the GUI shows what runs. A refusal
-appears in the GUI and in the log.
+appears in the GUI and in the log. Check refusals by the state of the machine (inhibitors, units, sessions),
+never by text on command lines: `pgrep -f rsync` also matches an administrator's shell that only mentions it.
 
 Windows: install *OpenSSH Server* under "Optional features". For administrator accounts the key belongs in
 `C:\ProgramData\ssh\administrators_authorized_keys`. Command: `shutdown /h` (hibernate) or
@@ -774,8 +776,9 @@ stops or the network breaks, so no device stays awake for good. Before every sle
 broken hold (the device rebooted) is tried again once a minute; the device card says "held on the device".
 
 If the WOL-Server's key is bound to a forced command, as a sleep-only key should be, the command sent arrives in
-`SSH_ORIGINAL_COMMAND`. Extend that script **before** switching the hold on - one that does not know `hold` puts
-the device to sleep instead - and set the device's hold command to `hold`:
+`SSH_ORIGINAL_COMMAND`. [deploy/wol-sleep.sh](deploy/wol-sleep.sh) knows `hold` already; extend an own script
+**before** switching the hold on - one that does not know `hold` puts the device to sleep instead - and set the
+device's hold command to `hold`:
 
 ```sh
 case "$SSH_ORIGINAL_COMMAND" in
