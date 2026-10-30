@@ -350,7 +350,9 @@ from="192.168.178.20",command="/usr/local/sbin/wol-sleep",no-port-forwarding,no-
 ```
 
 Der Befehl in der GUI spielt dann keine Rolle; trag den Pfad des Skripts ein, damit die GUI zeigt, was läuft.
-Eine Ablehnung erscheint in der GUI und im Protokoll. Ablehnungen am Zustand des Rechners prüfen (Sperren,
+Eine Ablehnung erscheint in der GUI und im Protokoll. Ein Rechner, der weder auf Ping noch auf die TCP-Proben
+antwortet, ist schon aus oder schläft: Der WOL-Server schickt dann keinen Schlafbefehl und vermerkt „Bereits aus
+oder im Ruhezustand“ – beim Knopf, bei Zeitplänen und bei Anforderungen gleichermaßen. Ablehnungen am Zustand des Rechners prüfen (Sperren,
 Dienste, Sitzungen), nie an Text auf Befehlszeilen: `pgrep -f rsync` trifft auch die Shell eines Admins, die es
 nur erwähnt.
 

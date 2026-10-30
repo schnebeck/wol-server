@@ -39,6 +39,9 @@ What changed in which version. The version is also shown in the GUI (*System →
 - **deploy/wol-sleep.sh:** a ready forced command for the WOL-Server's key on a target: sleep (suspend or poweroff),
   refuse on inhibitors, a busy service or an unlocked session, and `hold`. It replaces the README's short example,
   which checked `pgrep -f 'rsync --server'` - text on command lines, which also matches a shell that mentions it.
+- **Sleep for a device that is off already:** it answers neither ping nor the TCP probes, so the WOL-Server sends no
+  sleep command and logs "Already off or asleep - nothing to do" as done. Before, it tried SSH anyway and logged an
+  error ("No route to host"), and after a request it even retried the sleep of a device that was off.
 
 ## 1.2.1 – 2026-10-29
 

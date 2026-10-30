@@ -351,7 +351,12 @@ class App:
             else:
                 # The WOL-Server's own inhibitor would make the device refuse (e.g. wol-sleep): let go first
                 self.holds.release(device["id"])
-                ok, message = power.sleep_device(device, self.identity, source_ip=source_ip)
+                if device.get("host") and not check_host(device["host"]):
+                    # Asleep or off already (a person, its own power management, an earlier try): that is the
+                    # wanted state, not an SSH error to retry - and no sleep command for a device that cannot hear it
+                    ok, message = True, "Already off or asleep - nothing to do"
+                else:
+                    ok, message = power.sleep_device(device, self.identity, source_ip=source_ip)
                 plug = self.plugs.for_device(device["id"])
                 if ok and plug and plug.get("cut_after_sleep"):
                     threading.Thread(target=self._cut_after_sleep, args=(device, plug["id"], source),

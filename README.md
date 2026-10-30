@@ -346,7 +346,9 @@ from="192.168.178.20",command="/usr/local/sbin/wol-sleep",no-port-forwarding,no-
 ```
 
 The command in the GUI then does not matter; enter the script's path so the GUI shows what runs. A refusal
-appears in the GUI and in the log. Check refusals by the state of the machine (inhibitors, units, sessions),
+appears in the GUI and in the log. A device that answers neither ping nor the TCP probes is asleep or off already:
+the WOL-Server sends no sleep command then and logs "Already off or asleep" - for the button, schedules and
+requests alike. Check refusals by the state of the machine (inhibitors, units, sessions),
 never by text on command lines: `pgrep -f rsync` also matches an administrator's shell that only mentions it.
 
 Windows: install *OpenSSH Server* under "Optional features". For administrator accounts the key belongs in
