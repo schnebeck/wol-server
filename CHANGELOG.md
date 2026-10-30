@@ -9,6 +9,9 @@ What changed in which version. The version is also shown in the GUI (*System →
   server stores only the digest key derived from it (HA1, which the plug keeps itself). The key works for that one
   plug only, so the file does not give away a password that may be in use elsewhere. Plugs saved with their password
   are switched over at the next reading. A plug that has been reset or replaced asks for the password again.
+- **Consumption charts:** the power curves get a time grid. Faint bands alternate every hour (every 5 minutes
+  in the last hour), and every time on the axis has a gridline and a tick. The month chart shades the weekends,
+  and its last day label no longer crowds the one before it.
 
 ## 1.2.1 – 2026-10-29
 

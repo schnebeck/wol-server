@@ -40,6 +40,7 @@
   --series-1: #2a78d6; --series-2: #eb6834; --series-3: #1baf7a; --series-4: #eda100;
   --series-5: #e87ba4; --series-6: #008300; --series-7: #6250d6; --series-8: #e34948;
   --grid: #ebe9e3;
+  --band: #f7f6f2;
   --axis: #c9c6bd;
   color-scheme: light;
 }
@@ -66,6 +67,7 @@
     --series-1: #3987e5; --series-2: #d95926; --series-3: #199e70; --series-4: #c98500;
     --series-5: #d55181; --series-6: #008300; --series-7: #9085e9; --series-8: #e66767;
     --grid: #262b28;
+    --band: #222724;
     --axis: #3a403c;
     color-scheme: dark;
   }
@@ -319,6 +321,7 @@ details.menu > summary .icon:last-child { width: 14px; height: 14px; }
 .key { display: inline-block; flex: none; background: var(--k); }
 .key.line { width: 14px; height: 2px; border-radius: 1px; }
 .key.box { width: 10px; height: 10px; border-radius: 3px; }
+.key.band { --k: var(--band); box-shadow: inset 0 0 0 1px var(--border); }
 td .key.box { margin-right: 8px; vertical-align: -1px; }
 .key.s1 { --k: var(--series-1); } .key.s2 { --k: var(--series-2); } .key.s3 { --k: var(--series-3); } .key.s4 { --k: var(--series-4); }
 .key.s5 { --k: var(--series-5); } .key.s6 { --k: var(--series-6); } .key.s7 { --k: var(--series-7); } .key.s8 { --k: var(--series-8); }
@@ -327,6 +330,9 @@ td .key.box { margin-right: 8px; vertical-align: -1px; }
 .chart-svg { display: block; width: 100%; height: auto; overflow: visible; touch-action: pan-y; }
 .chart-svg .grid line { stroke: var(--grid); stroke-width: 1; shape-rendering: crispEdges; }
 .chart-svg .grid line.baseline { stroke: var(--axis); }
+.chart-svg .time-grid line { stroke: var(--grid); stroke-width: 1; shape-rendering: crispEdges; }
+.chart-svg .time-grid line.tick-mark { stroke: var(--axis); }
+.chart-svg .band { fill: var(--band); shape-rendering: crispEdges; }
 .chart-svg text { font: 11px var(--font); fill: var(--muted); font-variant-numeric: tabular-nums; }
 .chart-svg text.value { fill: var(--text); font-weight: 600; }
 .chart-svg .line { fill: none; stroke: var(--c); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
