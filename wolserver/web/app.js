@@ -46,6 +46,8 @@ const state = {
   plugSettings: { price_kwh: null, currency: "€" },
   power: {},
   requests: {},
+  holds: {},
+  conflicts: {},
 };
 
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -305,6 +307,8 @@ async function refreshStatus() {
     state.status = data.status;
     state.power = data.power || {};
     state.requests = data.requests || {};
+    state.holds = data.holds || {};
+    state.conflicts = data.conflicts || {};
     const online = Object.values(data.status).filter((s) => s === true).length;
     $("#status-line").textContent =
       t("{0} of {1} online · checked {2}", online, state.devices.length, new Date(data.checked * 1000).toLocaleTimeString(I18N.locale));
@@ -390,6 +394,8 @@ function deviceCard(d) {
     el("p", { class: next ? "next" : "next muted" }, icon("clock"),
       next ? el("span", {}, el("strong", {}, ACTIONS[next.action]), " ", fmtNext(next.next_run)) : t("No active schedule")),
     requestsLine(d),
+    // What the server found contradictory in the state shown here (also in its log)
+    (state.conflicts[d.id] || []).map((message) => el("p", { class: "plug-warn" }, icon("alert"), " ", tr(message))),
     // Wake only what is not online, sleep only what is not known to be off (ping status, not the guess)
     el("div", { class: "card-actions" },
       el("button", {
@@ -408,10 +414,13 @@ function requestsLine(d) {
   const r = state.requests && state.requests[d.id];
   if (!r) return null;
   const clients = r.requests.map((q) => q.client);
+  const hold = state.holds && state.holds[d.id];
+  const holdText = !hold ? "" : ` · ${{ held: t("held on the device"), waiting: t("hold waits for the device"),
+    failed: t("hold failed"), asleep: t("asleep, woken again") }[hold.state] || ""}`;
   const text = clients.length
-    ? t("In use: {0}", clients.join(", ")) + (r.sleep ? ` · ${t("sleep requested")}` : "")
+    ? t("In use: {0}", clients.join(", ")) + holdText + (r.sleep ? ` · ${t("sleep requested")}` : "")
     : t("Sleep requested by {0}", tr(r.sleep.by));
-  return el("p", { class: "next in-use" }, icon("users"), el("span", {}, text),
+  return el("p", { class: "next in-use", title: hold && hold.error ? tr(hold.error) : "" }, icon("users"), el("span", {}, text),
     el("button", { type: "button", class: "linkish", onclick: () => openRequestsDialog(d) }, t("Details")));
 }
 
@@ -540,6 +549,9 @@ function openDeviceDialog(device = null, prefill = {}) {
   }
   form.elements.ssh_port.value = d.ssh_port || 22;
   form.elements.ssh_command.value = d.ssh_command || "sudo systemctl suspend";
+  form.elements.hold.checked = Boolean(d.hold);
+  form.elements.hold_command.value = d.hold_command || DEFAULT_HOLD_COMMAND;
+  $("#hold-command-field").hidden = !d.hold;
   setSleepMethod(d.sleep_method || "none");
   $("#device-dialog-title").textContent = device ? t("Edit device") : t("New device");
   $("#delete-device").hidden = !device;
@@ -548,6 +560,9 @@ function openDeviceDialog(device = null, prefill = {}) {
   updateDeviceNetHint();
   if (!state.plugDrivers) loadPlugs(false).then(() => editingDevice === device && fillDevicePlug(device)).catch(() => {});
 }
+
+// Keep awake while requested (hold.py): as models.DEFAULT_HOLD_COMMAND
+const DEFAULT_HOLD_COMMAND = 'systemd-inhibit --what=sleep:idle --who=WOL-Server --why="Requested via the WOL-Server" --mode=block cat';
 
 const WAKE_HINTS = {
   wol: t("Magic packet only, as without a plug."),
@@ -616,6 +631,8 @@ async function onDeviceSubmit(event) {
   const data = Object.fromEntries(new FormData(form).entries());
   data.wol_port = Number(data.wol_port) || 9;
   data.ssh_port = Number(data.ssh_port) || 22;
+  // Only with SSH: the hold uses the same access (the server refuses it otherwise)
+  data.hold = data.sleep_method === "ssh" && form.elements.hold.checked;
   const plugLink = {
     plug_id: data.plug_id || null, wake_method: data.wake_method || "wol", cut_after_sleep: Boolean(form.elements.cut_after_sleep.checked),
   };
@@ -3481,6 +3498,7 @@ function bind() {
   $("#device-form").addEventListener("submit", onDeviceSubmit);
   $("#delete-device").addEventListener("click", onDeviceDelete);
   $("#sleep-method").addEventListener("change", (e) => setSleepMethod(e.target.value));
+  $("#device-form").elements.hold.addEventListener("change", (e) => { $("#hold-command-field").hidden = !e.target.checked; });
   for (const btn of $$("[data-cmd]")) {
     btn.addEventListener("click", () => { $("#device-form").elements.ssh_command.value = btn.dataset.cmd; });
   }

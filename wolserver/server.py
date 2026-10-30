@@ -33,6 +33,7 @@ from urllib.parse import parse_qs, unquote, urlsplit
 
 from . import __version__, dnsclient, models, netinfo, plugs, power, wifi, wol
 from .devrequests import DeviceRequests, RequestError
+from .hold import DeviceHolds
 from .auth import ApiTokens, Auth, LoginLimiter
 from .scheduler import Scheduler, next_run
 from .status import StatusMonitor, check_host
@@ -189,6 +190,10 @@ class App:
                                        sleep=lambda device, source: self.run_action(device, "sleep", source),
                                        device_lookup=lambda device_id: self.store.get("devices", device_id),
                                        on_event=self.store.add_event)
+        self.holds = DeviceHolds(self.identity, device_lookup=lambda device_id: self.store.get("devices", device_id),
+                                 requested=self.requests.open_clients, online=self._answers,
+                                 wake=lambda device, source: self.run_action(device, "wake", source))
+        self._conflicts = {}  # device id -> {key: {message, since, logged}}: contradictions in the shown state
         self.scheduler = Scheduler(self.store, self.run_scheduled, run_plug=self.run_plug_action)
         self.started = time.time()
         self._static_cache = {}
@@ -303,12 +308,18 @@ class App:
         self.scheduler.start()
         self.plugs.start()
         self.requests.start()
+        self.holds.start()
 
     def stop(self):
+        self.holds.stop()
         self.requests.stop()
         self.scheduler.stop()
         self.status.shutdown()
         self.plugs.shutdown()
+
+    def _answers(self, device):
+        """Ping status of a device (cached briefly), None without a host."""
+        return self.status.get([device]).get(device["id"]) if device.get("host") else None
 
     # -- Actions (used by API and scheduler) --
 
@@ -338,6 +349,8 @@ class App:
                     else:
                         ok, message = True, "Magic packet sent to %s" % device["mac"]
             else:
+                # The WOL-Server's own inhibitor would make the device refuse (e.g. wol-sleep): let go first
+                self.holds.release(device["id"])
                 ok, message = power.sleep_device(device, self.identity, source_ip=source_ip)
                 plug = self.plugs.for_device(device["id"])
                 if ok and plug and plug.get("cut_after_sleep"):
@@ -595,6 +608,7 @@ class App:
             raise ApiError(404, "Device not found")
         self.plugs.unlink_device(item_id, device["name"])
         self.requests.forget_device(item_id)
+        self.holds.release(item_id)
         self.status.invalidate(item_id)
         return 200, {"ok": True}
 
@@ -672,7 +686,7 @@ class App:
 
     def api_requests(self, req, item_id):
         device = self._device_by_ref(item_id)
-        return 200, dict(self.requests.get(device["id"]), device=device["name"])
+        return 200, dict(self.requests.get(device["id"]), device=device["name"], hold=self.holds.state(device["id"]))
 
     def api_request_create(self, req, item_id):
         device = self._device_by_ref(item_id)
@@ -683,6 +697,7 @@ class App:
             request = self.requests.create(device, client, req.body.get("ttl"), source)
         except RequestError as e:
             raise ApiError(400, str(e)) from None
+        self.holds.nudge()
         result = {"ok": True, "device": device["name"], **request}
         # Wake only what does not answer (a request for a running device sends nothing)
         online = check_host(device["host"]) if device.get("host") else None
@@ -732,6 +747,7 @@ class App:
                                           source=self._source(req), ended_by=None if req.token or then else "GUI")
         except KeyError:
             raise ApiError(404, "Request not found - it has expired or was ended") from None
+        self.holds.nudge()
         if no_sleep:
             message = "Done; no sleep method is configured for this device"
         elif state["sleep"] and state["waiting_for"]:
@@ -775,8 +791,56 @@ class App:
 
     def api_status(self, req):
         devices = self.store.list("devices")
-        return 200, {"status": self.status.get(devices), "power": self._device_power(devices),
-                     "requests": self.requests.snapshot([d["id"] for d in devices]), "checked": time.time()}
+        status = self.status.get(devices)
+        power_ = self._device_power(devices)
+        requests = self.requests.snapshot([d["id"] for d in devices])
+        holds = {d["id"]: h for d in devices if (h := self.holds.state(d["id"]))}
+        conflicts = self._check_conflicts(devices, status, power_, requests)
+        return 200, {"status": status, "power": power_, "requests": requests, "holds": holds, "conflicts": conflicts,
+                     "checked": time.time()}
+
+    CONFLICT_SECONDS = 30  # a contradiction counts once it lasts this long (ping and power are not read at once)
+    BOOT_SECONDS = 300  # a freshly requested device may take this long to answer
+
+    def _check_conflicts(self, devices, status, power_, requests):
+        """Contradictions in what the GUI is about to show, as {device id: [message, ...]}. Each one goes into the
+        log (journal, RAM) once when it has lasted CONFLICT_SECONDS and once when it is gone - not with every
+        refresh."""
+        now = time.time()
+        found = {}
+        for dev in devices:
+            answers, p = status.get(dev["id"]), power_.get(dev["id"]) or {}
+            measured = p.get("reachable") and p.get("on") is not None
+            open_ = (requests.get(dev["id"]) or {}).get("requests") or []
+            current = {}
+            if answers is False and open_ and all(now - r["created"] > self.BOOT_SECONDS for r in open_):
+                current["asleep_requested"] = "Asleep although %s requested it" % ", ".join(r["client"] for r in open_)
+            if answers is True and measured and not p["on"]:
+                current["online_without_power"] = "Answers although its plug is off - is it plugged in elsewhere?"
+            elif (answers is True and measured and p.get("power_w") and p.get("standby_w") is not None
+                  and p["power_w"] < p["standby_w"]):
+                current["online_at_standby"] = "Online at standby power (%s W) - check the standby threshold" % (
+                    plugs.manager._fmt_w(p["power_w"]))
+            before = self._conflicts.get(dev["id"], {})
+            kept = {}
+            for key, message in current.items():
+                entry = before.get(key) or {"since": now, "logged": False}
+                entry["message"] = message
+                if not entry["logged"] and now - entry["since"] >= self.CONFLICT_SECONDS:
+                    log.warning("Contradiction: %s: %s", dev["name"], message)
+                    entry["logged"] = True
+                kept[key] = entry
+            for key, entry in before.items():
+                if key not in current and entry["logged"]:
+                    log.info("Contradiction gone: %s: %s", dev["name"], entry["message"])
+            if kept:
+                self._conflicts[dev["id"]] = kept
+                shown = [e["message"] for e in kept.values() if e["logged"]]
+                if shown:
+                    found[dev["id"]] = shown
+            else:
+                self._conflicts.pop(dev["id"], None)
+        return found
 
     def _device_power(self, devices):
         """Live values of the plugs the devices are plugged into: {device id: {...}}."""

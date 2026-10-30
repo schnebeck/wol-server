@@ -23,6 +23,9 @@ from .wol import normalize_mac
 
 SLEEP_METHODS = ("none", "ssh", "http", "sol")
 HTTP_METHODS = ("GET", "POST", "PUT")
+# Keep awake while requested: runs on the device over SSH for as long as the connection stays open (see hold.py)
+DEFAULT_HOLD_COMMAND = ('systemd-inhibit --what=sleep:idle --who=WOL-Server --why="Requested via the WOL-Server" '
+                        "--mode=block cat")
 ACTIONS = ("wake", "sleep")
 PLUG_ACTIONS = ("power_on", "power_off", "power_cycle")
 
@@ -100,6 +103,8 @@ def validate_device(data):
     dev["ssh_user"] = _text(data, "ssh_user", 64, label="SSH user")
     dev["ssh_port"] = _int(data, "ssh_port", 22, 1, 65535, "SSH port")
     dev["ssh_command"] = _text(data, "ssh_command", 500, label="SSH command")
+    dev["hold"] = bool(data.get("hold"))
+    dev["hold_command"] = _text(data, "hold_command", 500, label="Hold command") or DEFAULT_HOLD_COMMAND
     dev["http_method"] = (data.get("http_method") or "POST").upper()
     if dev["http_method"] not in HTTP_METHODS:
         raise ValidationError("HTTP method must be GET, POST or PUT")
@@ -116,6 +121,8 @@ def validate_device(data):
             raise ValidationError("Invalid SSH user name")
         if not dev["ssh_command"]:
             raise ValidationError("SSH command must not be empty")
+    elif dev["hold"]:
+        raise ValidationError("Keeping awake needs the SSH sleep method: it uses the same access")
     elif method == "http":
         parts = urlsplit(dev["http_url"])
         if parts.scheme not in ("http", "https") or not parts.netloc:

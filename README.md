@@ -759,6 +759,38 @@ that is switched off) and ignore the `delay` ones that desktops and NetworkManag
 time. [snapshot-backup](https://github.com/schnebeck/snapshot-backup) does both: requests on the
 WOL-Server, inhibitors on the backup server (19.5 and later).
 
+#### Keep awake while requested
+
+A request binds the WOL-Server, not the device: its own power management (a desktop's idle timer, logind) may
+still put it to sleep. For a device with the SSH sleep method, *Keep awake while requested* closes that gap. While a
+request is open and the device answers, the WOL-Server holds an inhibitor on it over SSH:
+
+```sh
+systemd-inhibit --what=sleep:idle --who=WOL-Server --why="Requested via the WOL-Server" --mode=block cat
+```
+
+It holds for as long as the connection is open and goes when the last request is done - or when the WOL-Server
+stops or the network breaks, so no device stays awake for good. Before every sleep the WOL-Server lets go first. A
+broken hold (the device rebooted) is tried again once a minute; the device card says "held on the device".
+
+If the WOL-Server's key is bound to a forced command, as a sleep-only key should be, the command sent arrives in
+`SSH_ORIGINAL_COMMAND`. Extend that script **before** switching the hold on - one that does not know `hold` puts
+the device to sleep instead - and set the device's hold command to `hold`:
+
+```sh
+case "$SSH_ORIGINAL_COMMAND" in
+    hold) exec systemd-inhibit --what=sleep:idle --who=WOL-Server --why="Requested via the WOL-Server" \
+                  --mode=block cat ;;
+esac
+# ... the sleep part as before
+```
+
+The WOL-Server also checks what it shows for contradictions and says so on the card and in its log (journal,
+RAM), once when one appears and once when it is gone: a requested device that is asleep (more than 5 minutes
+after the request; with the hold switched on it is woken again, up to three times, 5 minutes apart), a device
+that answers although its plug is off, and one that answers at standby power. `GET /api/status` reports them
+under `conflicts`, and the state of each hold under `holds`.
+
 #### Over the VPN
 
 The API is reachable over the VPN: the allowlist (`auto`) contains the network of the tunnel. With HTTPS, the

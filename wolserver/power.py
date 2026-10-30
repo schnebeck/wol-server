@@ -76,24 +76,31 @@ def sleep_device(device, identity, source_ip=None):
     return False, "No sleep method configured"
 
 
-def _sleep_ssh(device, identity):
+def ssh_command(device, identity, remote, alive_interval=3, alive_count=2):
+    """ssh argv for a command on the device with the WOL-Server's key, or (None, reason)."""
     ssh = shutil.which("ssh")
     if not ssh:
-        return False, "ssh client not installed"
+        return None, "ssh client not installed"
     if not os.path.exists(identity.key):
-        return False, "SSH key missing (%s)" % identity.key
-    cmd = [
+        return None, "SSH key missing (%s)" % identity.key
+    return [
         ssh, "-i", identity.key, "-p", str(device["ssh_port"]), "-l", device["ssh_user"],
         "-o", "BatchMode=yes",
         "-o", "IdentitiesOnly=yes",
         "-o", "ConnectTimeout=6",
-        "-o", "ServerAliveInterval=3",
-        "-o", "ServerAliveCountMax=2",
+        "-o", "ServerAliveInterval=%d" % alive_interval,
+        "-o", "ServerAliveCountMax=%d" % alive_count,
         "-o", "StrictHostKeyChecking=accept-new",
         "-o", "UserKnownHostsFile=" + identity.known_hosts,
         "-o", "LogLevel=ERROR",
-        "--", device["host"], device["ssh_command"],
-    ]
+        "--", device["host"], remote,
+    ], None
+
+
+def _sleep_ssh(device, identity):
+    cmd, reason = ssh_command(device, identity, device["ssh_command"])
+    if cmd is None:
+        return False, reason
     try:
         res = subprocess.run(
             cmd, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=SSH_TIMEOUT

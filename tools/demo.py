@@ -154,6 +154,8 @@ def sim_power(sim, ts, rng, relay=True):
 
 wol.send_magic_packet = fake_magic_packet
 power.sleep_device = fake_sleep
+# Keep awake while requested: a local process stands in for the SSH connection, it waits for its input to close
+power.ssh_command = lambda device, identity, remote, *a: ([sys.executable, "-c", "import sys; sys.stdin.read()"], None)
 
 SAMPLE_DHCPD = """
 option domain-name "oldnet.local";

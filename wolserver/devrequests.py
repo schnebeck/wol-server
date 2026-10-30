@@ -136,6 +136,14 @@ class DeviceRequests:
             return {"requests": [self._public(r) for r in self._open(device_id)],
                     "sleep": {k: entry[k] for k in ("since", "by", "at")} if entry else None}
 
+    def open_clients(self):
+        """{device id: [client, ...]} of every device with an open request (for the hold)."""
+        with self._lock:
+            out = {}
+            for req in sorted(self._requests.values(), key=lambda r: r["created"]):
+                out.setdefault(req["device_id"], []).append(req["client"])
+            return out
+
     def snapshot(self, device_ids):
         """For the status of the GUI: only devices with requests or a remembered sleep."""
         with self._lock:
