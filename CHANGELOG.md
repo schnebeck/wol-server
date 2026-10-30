@@ -12,6 +12,9 @@ What changed in which version. The version is also shown in the GUI (*System →
 - **Consumption charts:** the power curves get a time grid. Faint bands alternate every hour (every 5 minutes
   in the last hour), and every time on the axis has a gridline and a tick. The month chart shades the weekends,
   and its last day label no longer crowds the one before it.
+- **Plug card:** "On" meant only the relay. For a plug with a device behind it the card now also names the
+  device's state, as on the device card ("On · Standby", in gray while the device sleeps). Below about 1 W a Shelly
+  reads 0 W although current flows; the card shows "< 1 W" then instead of a 0 that looks like no power.
 
 ## 1.2.1 – 2026-10-29
 

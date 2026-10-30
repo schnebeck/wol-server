@@ -907,7 +907,19 @@ function plugCard(p) {
   const live = p.live || {};
   const st = live.status;
   const cls = !st ? "unknown" : st.on ? "online" : "offline";
-  const label = !st ? (live.unreachable ? t("Not reachable") : t("Error")) : st.on ? t("On") : t("Off");
+  let label = !st ? (live.unreachable ? t("Not reachable") : t("Error")) : st.on ? t("On") : t("Off");
+  // "On" is the relay. Behind it a device may be asleep: say so, from ping and power as on its own card,
+  // or from the power alone while its status is not known yet.
+  // The dot stays the relay's; the label takes the device's color.
+  let labelCls = cls;
+  const device = st && st.on && (p.consumer || {}).kind === "device" ? deviceById(p.consumer.id) : null;
+  if (device) {
+    const [deviceCls, deviceLabel] = deviceState(device);
+    if (deviceCls !== "unknown") [labelCls, label] = [deviceCls, `${t("On")} · ${deviceLabel}`];
+    else if (st.power_w != null && st.power_w <= p.standby_w) [labelCls, label] = ["offline", `${t("On")} · ${t("Standby")}`];
+  }
+  // Below about 1 W a Shelly reads 0 W although current flows: "< 1" instead of a 0 that looks like no power
+  const below = st && st.on && st.power_w === 0 && st.current_a > 0;
   const consumer = p.consumer_name;
   const energy = p.energy;
   const meta = st ? [
@@ -930,9 +942,9 @@ function plugCard(p) {
       el("span", { class: `dot ${cls}`, "aria-hidden": "true" }),
       el("div", { class: "card-title" },
         el("h3", {}, p.name),
-        el("span", { class: `status-label ${cls}` }, label)),
+        el("span", { class: `status-label ${labelCls}` }, label)),
       el("button", { class: "icon-btn", type: "button", title: t("Edit"), "aria-label": t("Edit {0}", p.name), onclick: () => openPlugDialog(p) }, icon("edit"))),
-    st ? el("div", { class: "plug-power" }, el("strong", {}, fmtWatt(st.power_w)), el("span", {}, "W")) : null,
+    st ? el("div", { class: "plug-power" }, el("strong", {}, below ? "< 1" : fmtWatt(st.power_w)), el("span", {}, "W")) : null,
     (p.alerts || []).filter((a) => a.key !== "unreachable").map((a) => el("p", { class: "plug-error" }, icon("alert"), " ", tr(a.message))),
     !st && live.error ? el("p", { class: "plug-error" }, tr(live.error)) : null,
     securityWarning(p),
