@@ -42,6 +42,8 @@ What changed in which version. The version is also shown in the GUI (*System →
 - **Sleep for a device that is off already:** it answers neither ping nor the TCP probes, so the WOL-Server sends no
   sleep command and logs "Already off or asleep - nothing to do" as done. Before, it tried SSH anyway and logged an
   error ("No route to host"), and after a request it even retried the sleep of a device that was off.
+- **Device card wording:** "In use: snapshot-backup:laptop is running" (German "Aktive Nutzung: … läuft") while the
+  hold stands; "held on the device" moved into the tooltip.
 
 ## 1.2.1 – 2026-10-29
 

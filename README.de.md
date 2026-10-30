@@ -758,7 +758,7 @@ erledigt das alles selbst, mit `WOL_SERVER_URL`, `WOL_SERVER_TOKEN` und `WOL_DEV
 - Solange Anforderungen offen sind, wartet ein Schlafen-Zeitplan auf die letzte, *Schlafen* und ein einfaches
   `POST …/sleep` fragen nach (409, `?force=1` legt den Rechner trotzdem schlafen), und die Steckdose des Rechners wird
   nicht per Zeitplan ausgeschaltet.
-- Die Rechnerkarte zeigt „In Gebrauch: …“; *Details* listet jede Anforderung (letztes Lebenszeichen, Ablauf) und
+- Die Rechnerkarte zeigt „Aktive Nutzung: …“; *Details* listet jede Anforderung (letztes Lebenszeichen, Ablauf) und
   kann sie beenden. Ein Token kann nur seine eigenen Anforderungen verlängern und beenden; die GUI jede.
 - Anforderungen überstehen einen Neustart des WOL-Servers; danach hat jede Anforderung eine `ttl` Zeit für ihr
   nächstes Lebenszeichen.
@@ -799,7 +799,7 @@ systemd-inhibit --what=sleep:idle --who=WOL-Server --why="Requested via the WOL-
 Sie hält, solange die Verbindung offen ist, und fällt weg, wenn die letzte Anforderung erledigt ist – oder wenn
 der WOL-Server stoppt oder das Netz reißt; kein Rechner bleibt so für immer wach. Vor jedem Schlafenlegen lässt
 der WOL-Server zuerst los. Ein abgerissener Halt (der Rechner hat neu gestartet) wird einmal pro Minute neu
-versucht; die Rechnerkarte zeigt „auf dem Rechner gehalten“.
+versucht; die Rechnerkarte zeigt dann „Aktive Nutzung: … läuft“.
 
 Ist der Schlüssel des WOL-Servers an einen erzwungenen Befehl gebunden, wie es ein Schlüssel nur zum Schlafenlegen
 sein sollte, kommt der gesendete Befehl in `SSH_ORIGINAL_COMMAND` an. [deploy/wol-sleep.sh](deploy/wol-sleep.sh)

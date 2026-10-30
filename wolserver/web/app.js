@@ -415,12 +415,16 @@ function requestsLine(d) {
   if (!r) return null;
   const clients = r.requests.map((q) => q.client);
   const hold = state.holds && state.holds[d.id];
-  const holdText = !hold ? "" : ` · ${{ held: t("held on the device"), waiting: t("hold waits for the device"),
-    failed: t("hold failed"), asleep: t("asleep, woken again") }[hold.state] || ""}`;
+  // Held on the device: the clients' work runs. Otherwise the hold's state, if there is one
+  const running = hold && hold.state === "held";
+  const who = running ? t(clients.length > 1 ? "{0} are running" : "{0} is running", clients.join(", ")) : clients.join(", ");
+  const holdText = !hold || running ? "" : ` · ${{ waiting: t("hold waits for the device"), failed: t("hold failed"),
+    asleep: t("asleep, woken again") }[hold.state] || ""}`;
   const text = clients.length
-    ? t("In use: {0}", clients.join(", ")) + holdText + (r.sleep ? ` · ${t("sleep requested")}` : "")
+    ? t("In use: {0}", who) + holdText + (r.sleep ? ` · ${t("sleep requested")}` : "")
     : t("Sleep requested by {0}", tr(r.sleep.by));
-  return el("p", { class: "next in-use", title: hold && hold.error ? tr(hold.error) : "" }, icon("users"), el("span", {}, text),
+  return el("p", { class: "next in-use", title: hold ? (hold.error ? tr(hold.error) : running ? t("held on the device") : "") : "" },
+    icon("users"), el("span", {}, text),
     el("button", { type: "button", class: "linkish", onclick: () => openRequestsDialog(d) }, t("Details")));
 }
 
