@@ -252,7 +252,8 @@ pre code { background: none; border: 0; padding: 0; }
 .plug-power strong { font-size: 1.6rem; font-weight: 650; letter-spacing: -0.01em; }
 .plug-power span { color: var(--muted); font-size: 0.88rem; }
 .card.plug.off .plug-power strong, .card.plug.unknown .plug-power strong { color: var(--muted); }
-.plug .card-actions { grid-template-columns: 1fr 1fr 1fr; }
+.plug .card-actions { display: flex; flex-wrap: wrap; }
+.plug .card-actions .btn { flex: 1 1 auto; }
 .plug-error { margin: 0; font-size: 0.86rem; color: var(--danger); }
 .icon-btn.plug-link { color: var(--wake); }
 
