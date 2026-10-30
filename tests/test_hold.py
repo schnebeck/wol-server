@@ -193,9 +193,21 @@ class AppTest(unittest.TestCase):
     def test_the_hold_is_released_before_the_device_is_put_to_sleep(self):
         order = []
         with mock.patch.object(self.app.holds, "release", lambda device_id: order.append("release")), \
+                mock.patch("wolserver.server.check_host", lambda host: True), \
                 mock.patch("wolserver.server.power.sleep_device", lambda *a, **kw: order.append("sleep") or (True, "ok")):
             self.app.run_action(self.device, "sleep", "manual")
         self.assertEqual(order, ["release", "sleep"])
+
+    def test_a_device_that_does_not_answer_is_not_sent_to_sleep(self):
+        # Asleep or off already: the wanted state, not an SSH error ("No route to host") in the log
+        sent = []
+        with mock.patch("wolserver.server.check_host", lambda host: False), \
+                mock.patch("wolserver.server.power.sleep_device", lambda *a, **kw: sent.append(1) or (False, "no route")):
+            ok, message = self.app.run_action(self.device, "sleep", "manual")
+        self.assertEqual((ok, message, sent), (True, "Already off or asleep - nothing to do", []))
+        event = self.app.store.list_events(1)[0]
+        self.assertEqual((event["action"], event["ok"], event["message"]),
+                         ("sleep", True, "Already off or asleep - nothing to do"))
 
     def test_contradictions_are_shown_and_logged_once(self):
         self.app.CONFLICT_SECONDS = 0
