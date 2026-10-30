@@ -12,15 +12,15 @@ aus dem Intranet und über VPN – und übernimmt auf Wunsch DHCP und DNS für d
 Web-GUI, ohne Abhängigkeiten außer Python 3.
 
 <p align="center">
-  <img src="docs/screenshots/de/devices.png" alt="Geräteübersicht mit Online-Status, Aufwecken und Schlafen legen" width="88%">
+  <img src="docs/screenshots/de/devices.png" alt="Rechnerübersicht mit Online-Status, Aufwecken und Schlafen legen" width="88%">
 </p>
 
-- **Geräte verwalten:** Name, MAC, Host/IP, Broadcast-Adresse, WOL-Port, Schlaf-Methode
+- **Rechner verwalten:** Name, MAC, Host/IP, Broadcast-Adresse, WOL-Port, Schlaf-Methode
 - **Aufwecken** per Magic Packet, **Schlafen legen** per SSH-Befehl, HTTP-Aufruf oder Sleep-on-LAN
-- **Zeitpläne:** pro Gerät Aufwecken/Schlafen zu einer Uhrzeit an gewählten Wochentagen
+- **Zeitpläne:** pro Rechner Aufwecken/Schlafen zu einer Uhrzeit an gewählten Wochentagen
 - **Online-Status** (ICMP-Ping bzw. TCP-Probe, erkennt auch Windows-PCs mit ICMP-Firewall)
 - **Protokoll** aller manuellen und geplanten Aktionen
-- **Geteilte Geräte:** Clients fordern ein Gerät über die API an (LAN oder VPN) und senden Lebenszeichen; es schläft
+- **Geteilte Rechner:** Clients fordern einen Rechner über die API an (LAN oder VPN) und senden Lebenszeichen; er schläft
   erst, wenn die letzte Anforderung erledigt ist, etwa ein Backup-Server für mehrere Backup-Clients
 - **OpenVPN-Client auf dem Pi:** Er ist über das VPN erreichbar, ohne Portfreigabe zu Hause (auch bei DS-Lite/CGNAT)
 - **Reiner WLAN-Betrieb:** Powersave aus, WLAN-Watchdog, Hardware-Watchdog; Magic Packets gehen immer ins WLAN,
@@ -29,8 +29,8 @@ Web-GUI, ohne Abhängigkeiten außer Python 3.
   Hotspot mit Einrichtungsseite. WLAN wechseln geht ohne Imager, Tastatur oder SD-Karte.
 - **Status-LED:** Die grüne LED zeigt, ob die Einrichtung läuft, der Hotspot aktiv ist oder das Netz fehlt.
 - **Funksteckdosen (Shelly Gen2+, optional):** Verbraucher schalten und messen; Energie pro Stunde, Tag, Monat und
-  Jahr mit Kosten und Standby-Anteil; eine mit einem Gerät verknüpfte Steckdose weckt es über den Strom, schaltet
-  es nach dem Schlafen ab und zeigt, ob es wirklich läuft; Warnungen bei Übertemperatur, verschweißtem Relais u. a.;
+  Jahr mit Kosten und Standby-Anteil; eine mit einem Rechner verknüpfte Steckdose weckt ihn über den Strom, schaltet
+  ihn nach dem Schlafen ab und zeigt, ob er wirklich läuft; Warnungen bei Übertemperatur, verschweißtem Relais u. a.;
   Steckdosen werden aus der GUI abgesichert
 - **DHCP und DNS fürs Heimnetz (optional):** dnsmasq, verwaltet im Reiter *Netzwerk*. Jedes Gerät ist automatisch
   unter seinem Namen erreichbar; Reservierungen, eigene DNS-Einträge, unbekannte Geräte mit einem Klick freigeben,
@@ -73,7 +73,7 @@ in zufälligen Abstürzen.
 | | |
 |---|---|
 | ![Zeitpläne](docs/screenshots/de/schedules.png) | ![Netzwerk: Übersicht](docs/screenshots/de/network-overview.png) |
-| **Zeitpläne** pro Gerät, werktags oder täglich | **Netzwerk:** DHCP, DNS, Reservierungen und unbekannte Geräte auf einen Blick |
+| **Zeitpläne** pro Rechner, werktags oder täglich | **Netzwerk:** DHCP, DNS, Reservierungen und unbekannte Geräte auf einen Blick |
 | ![Reservierungen](docs/screenshots/de/network-reservations.png) | ![Einstellungen](docs/screenshots/de/network-settings.png) |
 | **Reservierungen** mit Hersteller, Status und Aufwecken direkt aus der Liste | **Einstellungen** für DHCP, DNS und Server, mit Prüfen vor dem Übernehmen |
 | ![Steckdosen](docs/screenshots/de/plugs.png) | ![Verbrauch](docs/screenshots/de/consumption.png) |
@@ -306,7 +306,7 @@ lassen sich einzelne Maßnahmen überspringen.
   - Erweitert: „Wake on Magic Packet“ = Aktiviert
   - Zum Aufwecken aus dem *ausgeschalteten* Zustand den **Schnellstart deaktivieren**
     (Energieoptionen → „Auswahl der Netzschaltertasten“)
-- Das Zielgerät sollte **per Kabel** angeschlossen sein, denn WOL über WLAN unterstützen nur wenige Geräte.
+- Der Zielrechner sollte **per Kabel** angeschlossen sein, denn WOL über WLAN unterstützen nur wenige Geräte.
 
 **Der Pi im WLAN:** Der Router bzw. Access Point reicht den Broadcast aus dem WLAN ins Kabelnetz weiter. Dafür
 gilt:
@@ -468,8 +468,8 @@ Import, Sicherung und Verlauf erzeugen einen **Entwurf**. Die Leiste oben zeigt 
 | Bereich | Inhalt |
 |---|---|
 | Übersicht | Status, Hinweise (z. B. „ein weiterer DHCP-Server antwortet“), **unbekannte Geräte** mit *Freigeben* (Name und nächste freie IP vorbelegt, sofort wirksam) oder *Ignorieren* |
-| Reservierungen | MAC → IP → Name, Kommentar, aktiv/inaktiv, eigene Lease-Zeit; Suche, Filter, Hersteller, „zuletzt gesehen“; WOL-Geräte direkt wecken |
-| Leases | aktive Vergaben mit Restlaufzeit; *Reservieren*, *Als WOL-Gerät*, *Freigeben* |
+| Reservierungen | MAC → IP → Name, Kommentar, aktiv/inaktiv, eigene Lease-Zeit; Suche, Filter, Hersteller, „zuletzt gesehen“; Rechner direkt wecken |
+| Leases | aktive Vergaben mit Restlaufzeit; *Reservieren*, *Als Rechner anlegen*, *Freigeben* |
 | DNS | Testabfrage, Cache-Statistik, eigene Einträge (Name → IP, Alias, MX, SRV, TXT), Abfrageprotokoll |
 | Einstellungen | DHCP (Modus „nur bekannte Geräte“ oder Adressbereich, Lease-Zeit, Gateway, DNS, NTP, Suchdomänen), DNS (Domäne, Upstream, bedingte Weiterleitungen), Server (feste Adresse setzen), Netzwerkstart (PXE) |
 | Werkzeuge | Import aus `dhcpd.conf` mit Vorschau, Sicherung als JSON, Suche nach anderen DHCP-Servern, dnsmasq neu starten, Verlauf mit Zurückholen, DHCP-/Dienstprotokoll, ignorierte Geräte |
@@ -513,7 +513,7 @@ Gen3); weitere Hersteller brauchen nur einen Treiber. Hintergrund und Entscheidu
    ein Passwort (ein zufälliges, wenn du keins einträgst; nur der WOL-Server braucht es, ein Reset der Steckdose
    entfernt es). Matter geht erst nach einem Neustart der Steckdose aus: Der Dialog zeigt dann „Wartet auf
    Neustart“ und bietet den Neustart an.
-4. Unter *Angeschlossen* die Steckdose mit einem Gerät verknüpfen (oder benennen, was an ihr hängt).
+4. Unter *Verbraucher* die Steckdose mit einem Rechner verknüpfen (oder benennen, was an ihr hängt).
 
 **Sicherheitsregeln (für jeden Hersteller gleich):**
 - *Aus* und *Neustart* fragen nach, solange der Verbraucher mehr als seine Standby-Schwelle zieht.
@@ -524,14 +524,14 @@ Gen3); weitere Hersteller brauchen nur einen Treiber. Hintergrund und Entscheidu
 - Ein Neustart der Steckdose wird abgelehnt, wo ihr Ausgang danach aus bliebe (Einstellung *Nach einem
   Stromausfall*).
 
-**Mit einem Gerät verknüpft** (*Gerät bearbeiten → Steckdose*):
-- **Aufwecken per** *WOL*, *Strom an* (für Geräte, die bei Stromrückkehr starten, BIOS-Einstellung „AC power
-  loss: power on“) oder *Strom an, dann WOL*. Ist die Steckdose an und das Gerät im Standby, macht *Strom an*
+**Mit einem Rechner verknüpft** (*Rechner bearbeiten → Steckdose*):
+- **Aufwecken per** *WOL*, *Strom an* (für Rechner, die bei Stromrückkehr starten, BIOS-Einstellung „AC power
+  loss: power on“) oder *Strom an, dann WOL*. Ist die Steckdose an und der Rechner im Standby, macht *Strom an*
   einen kurzen Stromneustart.
 - **Nach „Schlafen“ den Strom abschalten:** Nach *Schlafen* schaltet die Steckdose ab, sobald die Leistung auf
-  Standby gefallen ist. Nur für einen Schlaf-Befehl, der das Gerät herunterfährt: Ein Gerät im Standby (Suspend to
+  Standby gefallen ist. Nur für einen Schlaf-Befehl, der den Rechner herunterfährt: Ein Rechner im Standby (Suspend to
   RAM) verlöre seine ungesicherte Arbeit.
-- Die Gerätekarte zeigt die Leistung und öffnet von dort das Schalten der Steckdose; der Status unterscheidet
+- Die Rechnerkarte zeigt die Leistung und öffnet von dort das Schalten der Steckdose; der Status unterscheidet
   *Standby*, *Ohne Strom*, *Startet oder fährt herunter* und *Reagiert nicht* (zieht Strom, antwortet aber nicht auf
   Ping).
 
@@ -554,15 +554,15 @@ Nenn-Schaltspiele verbraucht, Steckdose 5 Minuten nicht erreichbar.
   Steckdosen, die noch mit Passwort gespeichert sind, stellt der Server von selbst um.
 - Das Energielog schont die SD-Karte: Die Werte der laufenden Stunde bleiben im RAM und werden einmal pro Stunde
   geschrieben.
-- Die Steckdosen-Endpunkte brauchen eine GUI-Sitzung; API-Tokens sind auf Geräte beschränkt.
+- Die Steckdosen-Endpunkte brauchen eine GUI-Sitzung; API-Tokens sind auf Rechner beschränkt.
 
 ## 7. Bedienung
 
 | Bereich | Funktion |
 |---|---|
-| **Geräte** | Karten mit Online-Status, nächster geplanter Aktion, Buttons *Aufwecken* / *Schlafen* (Aufwecken nur, wenn das Gerät nicht online ist, Schlafen nur, wenn es nicht aus ist); mit Steckdose auch deren Leistung und Schalter |
+| **Rechner** | Karten mit Online-Status, nächster geplanter Aktion, Buttons *Aufwecken* / *Schlafen* (Aufwecken nur, wenn der Rechner nicht online ist, Schlafen nur, wenn er nicht aus ist); mit Steckdose auch deren Leistung und Schalter |
 | **Steckdosen** | Übersicht mit Leistung, Energie, Temperatur und Schalten; Verbrauch pro Stunde, Tag, Monat und Jahr (siehe [Funksteckdosen](#6-funksteckdosen-reiter-steckdosen)) |
-| **Zeitpläne** | Uhrzeit + Wochentage + Aktion (für Geräte und Steckdosen); per Schalter pausierbar; Vorlagen „Werktags/Wochenende/Täglich“ |
+| **Zeitpläne** | Uhrzeit + Wochentage + Aktion (für Rechner und Steckdosen); per Schalter pausierbar; Vorlagen „Werktags/Wochenende/Täglich“ |
 | **Protokoll** | Die letzten 300 Aktionen mit Ergebnis (manuell / Zeitplan) |
 | **System** | WLAN (Status, gespeicherte Netze, hinzufügen, Hotspot-Passwort), Hostname, Uhrzeit, CPU-Temperatur, WLAN-Signal, VPN-Status, Interfaces, erlaubte Netze, SSH-Schlüssel, Passwort |
 
@@ -592,7 +592,7 @@ sudo systemctl restart wol-server            # nach Änderung der config.json
 | `https_redirect` | `true` | HTTP auf HTTPS umleiten, sobald ein gültiges Zertifikat da ist (nicht im Hotspot) |
 | `tls_dir` | `/etc/wol-server/tls` | Zertifikat (`cert.pem`), Schlüssel (`key.pem`) und SSH-Zugang für den Abruf |
 | `cert_source` | `""` | SSH-Ziel, das Schlüssel und Zertifikat liefert, z. B. `"wolcert@10.1.1.3"` |
-| `data_dir` | `/var/lib/wol-server` | Geräte, Zeitpläne, Protokoll, Passwort-Hash, SSH-Schlüssel, Steckdosen und Energielog |
+| `data_dir` | `/var/lib/wol-server` | Rechner, Zeitpläne, Protokoll, Passwort-Hash, SSH-Schlüssel, Steckdosen und Energielog |
 | `allowed_networks` | `["auto"]` | Quellnetze mit Zugriff; `"auto"` = localhost, IPv6-Link-local und die Netze der eigenen Schnittstellen (WLAN, LAN, VPN), laufend aktualisiert; feste Netze lassen sich ergänzen |
 | `wol_interface` | `""` (automatisch) | Interface für Magic Packets, z. B. `"wlan0"`; automatisch heißt: das Interface der Default-Route, VPN-Interfaces ausgenommen |
 | `wifi_interface` | `"wlan0"` | WLAN-Interface für Client-Betrieb und Hotspot |
@@ -611,7 +611,7 @@ Dateien:
 ```
 /opt/wol-server/wolserver/       Programm (Python-Paket inkl. web/)
 /etc/wol-server/config.json      Konfiguration
-/var/lib/wol-server/data.json    Geräte, Zeitpläne, Protokoll (atomar geschrieben)
+/var/lib/wol-server/data.json    Rechner, Zeitpläne, Protokoll (atomar geschrieben)
 /var/lib/wol-server/auth.json    Passwort-Hash (PBKDF2) + Cookie-Secret, Modus 0600
 /var/lib/wol-server/.ssh/        SSH-Schlüssel und known_hosts für das Schlafenlegen
 /var/lib/wol-server/plugs.json   Steckdosen samt Schlüsseln (oder Passwörtern), Preis pro kWh, Modus 0600
@@ -662,8 +662,8 @@ gelten. Damit die Umleitung funktioniert, muss der Name im Heimnetz auf den Pi z
   Server den Socket an die Adresse des WLAN/LAN-Interfaces. Linux schickt einen Limited Broadcast dann über
   genau dieses Interface. Das Protokoll zeigt, über welches Interface gesendet wurde.
 - **Online-Prüfung:** ICMP-Echo über unprivilegierte Sockets (dafür setzt `install.sh`
-  `net.ipv4.ping_group_range`). Antwortet das Gerät nicht, folgen TCP-Probes auf 22/445/3389/80/443/139. Auch
-  ein „Connection refused“ bedeutet: Das Gerät ist an.
+  `net.ipv4.ping_group_range`). Antwortet der Rechner nicht, folgen TCP-Probes auf 22/445/3389/80/443/139. Auch
+  ein „Connection refused“ bedeutet: Der Rechner ist an.
 - **Sicherheit:**
   - Netz-Allowlist
   - PBKDF2-Passwort-Hash und HMAC-signierte, `HttpOnly`/`SameSite=Strict`-Cookies
@@ -681,10 +681,10 @@ Alle Endpunkte liefern JSON. Schreibende Anfragen aus dem Browser brauchen den H
 #### Scripte: API-Tokens
 
 Für Scripte unter *System → API-Tokens für Scripte* einen Token erzeugen. Er wird nur einmal angezeigt und lässt
-sich dort jederzeit widerrufen. Ein Token darf nur Geräte auflisten, ihren Status abfragen, sie aufwecken, schlafen
-legen und anfordern (siehe unten); Einstellungen kann er nicht ändern. Das Gerät lässt sich per ID oder per Name angeben (Groß- und
-Kleinschreibung egal). `?wait=SEKUNDEN` (höchstens 300) hält die Antwort zurück, bis das Gerät antwortet (Wecken)
-bzw. weg ist (Schlafen); dafür braucht das Gerät einen Host oder eine IP. Ergebnis: HTTP 200, wenn erledigt, 504
+sich dort jederzeit widerrufen. Ein Token darf nur Rechner auflisten, ihren Status abfragen, sie aufwecken, schlafen
+legen und anfordern (siehe unten); Einstellungen kann er nicht ändern. Der Rechner lässt sich per ID oder per Name angeben (Groß- und
+Kleinschreibung egal). `?wait=SEKUNDEN` (höchstens 300) hält die Antwort zurück, bis der Rechner antwortet (Wecken)
+bzw. weg ist (Schlafen); dafür braucht der Rechner einen Host oder eine IP. Ergebnis: HTTP 200, wenn erledigt, 504
 bei Zeitüberschreitung. Jede Aktion erscheint im Protokoll als `API: <Name des Tokens>`.
 
 Beispiel: Ein Backup-Script weckt zuerst den Backup-Server und legt ihn danach wieder schlafen.
@@ -701,9 +701,9 @@ curl -fsS -X POST -H "$AUTH" "$WOL/api/devices/backup-server/sleep"
 
 #### Mehrere Clients: Anforderungen
 
-Nutzen mehrere Clients ein Gerät, etwa Backup-Clients einen Backup-Server, sollte keiner es auf eigene Faust schlafen
-legen: Der erste, der fertig ist, würde die anderen abschneiden. Stattdessen **fordert** jeder Client das Gerät
-**an**, und der WOL-Server legt es erst schlafen, wenn die letzte Anforderung erledigt ist. Hintergrund:
+Nutzen mehrere Clients einen Rechner, etwa Backup-Clients einen Backup-Server, sollte keiner ihn auf eigene Faust schlafen
+legen: Der erste, der fertig ist, würde die anderen abschneiden. Stattdessen **fordert** jeder Client den Rechner
+**an**, und der WOL-Server legt ihn erst schlafen, wenn die letzte Anforderung erledigt ist. Hintergrund:
 [docs/proposal-device-requests.md](docs/proposal-device-requests.md).
 
 ```bash
@@ -712,8 +712,8 @@ WOL=https://wol.home.arpa
 AUTH="Authorization: Bearer $(cat ~/.config/wol-token)"
 DEV=$WOL/api/devices/backup-server
 
-# Anfordern: weckt das Gerät bei Bedarf und antwortet, sobald es online ist (201). Die Antwort enthält die ID der
-# Anforderung auch, wenn das Wecken scheitert (502) oder das Gerät nicht rechtzeitig hochkommt (504); dann beendet
+# Anfordern: weckt den Rechner bei Bedarf und antwortet, sobald er online ist (201). Die Antwort enthält die ID der
+# Anforderung auch, wenn das Wecken scheitert (502) oder der Rechner nicht rechtzeitig hochkommt (504); dann beendet
 # das Script sie wieder.
 RES=$(curl -sS -X POST -H "$AUTH" -d '{"client": "laptop"}' "$DEV/requests?wait=300") || exit 1
 ID=$(printf '%s' "$RES" | jq -r '.id // empty')
@@ -726,7 +726,7 @@ fi
 ( while sleep 300; do curl -fs -X PUT -H "$AUTH" "$DEV/requests/$ID" >/dev/null || break; done ) 2>/dev/null & HB=$!
 rsync -a /home/ backup-server:/srv/backup/home/; rc=$?
 pkill -P $HB  # beendet die Schleife: stoppt ihr sleep (bzw. curl)
-# Fertig und Schlafen beantragen: läuft 2 Minuten nach der letzten offenen Anforderung, außer das Gerät wird erneut angefordert
+# Fertig und Schlafen beantragen: läuft 2 Minuten nach der letzten offenen Anforderung, außer der Rechner wird erneut angefordert
 curl -fsS -X DELETE -H "$AUTH" "$DEV/requests/$ID?then=sleep"
 exit $rc
 ```
@@ -734,33 +734,33 @@ exit $rc
 Das Beispiel braucht `curl` und `jq`. [snapshot-backup](https://github.com/schnebeck/snapshot-backup) (ab 19.0)
 erledigt das alles selbst, mit `WOL_SERVER_URL`, `WOL_SERVER_TOKEN` und `WOL_DEVICES` in seiner Config.
 
-- `client` ist der Name auf der Gerätekarte und im Protokoll; mit einem Token ist der Name des Tokens die Vorgabe.
+- `client` ist der Name auf der Rechnerkarte und im Protokoll; mit einem Token ist der Name des Tokens die Vorgabe.
 - `ttl` (Sekunden) legt fest, wie lange eine Anforderung ohne Lebenszeichen lebt: 60 s bis 7 Tage, Vorgabe 900,
   `0` = bis zur Freigabe. Die Gesamtdauer ist nicht begrenzt: Solange Lebenszeichen kommen, lebt eine Anforderung
-  tagelang, etwa für eine lange Aufgabe auf dem Gerät selbst.
+  tagelang, etwa für eine lange Aufgabe auf dem Rechner selbst.
 - Antworten:
   - `POST …/requests`: 201 mit `id`, `client`, `ttl`, `expires` (Unix-Zeit, `null` bei `ttl` 0), `online` und
-    `woken` (`true`, wenn das Gerät nicht antwortete und diese Anforderung es geweckt hat; ein Client kann Schlafen
-    dann nur für ein Gerät beantragen, das er selbst geweckt hat, und eins, das jemand eingeschaltet hat, bleibt an).
+    `woken` (`true`, wenn der Rechner nicht antwortete und diese Anforderung ihn geweckt hat; ein Client kann Schlafen
+    dann nur für einen Rechner beantragen, den er selbst geweckt hat, und einer, den jemand eingeschaltet hat, bleibt an).
     Auch bei 502 und 504 bleibt die Anforderung offen.
   - `PUT …/requests/<id>`: 200 mit dem neuen `expires`; 404, wenn die Anforderung abgelaufen ist oder beendet wurde.
-  - `DELETE …/requests/<id>`: 200 mit `sleep` (`"pending"` oder `null`), `waiting_for` (Clients, die das Gerät
+  - `DELETE …/requests/<id>`: 200 mit `sleep` (`"pending"` oder `null`), `waiting_for` (Clients, die den Rechner
     noch halten) und `sleep_at`.
   - `GET …/requests` listet die offenen Anforderungen und ein vorgemerktes Schlafen; `GET /api/status` enthält
-    sie für alle Geräte unter `requests`.
+    sie für alle Rechner unter `requests`.
 - `POST …/sleep?when=idle` beantragt Schlafen, ohne selbst eine Anforderung zu halten: sofort, wenn nichts offen ist
   (200), sonst 2 Minuten nach der letzten Anforderung (202). `DELETE …/sleep` nimmt das zurück.
 - Solange Anforderungen offen sind, wartet ein Schlafen-Zeitplan auf die letzte, *Schlafen* und ein einfaches
-  `POST …/sleep` fragen nach (409, `?force=1` legt das Gerät trotzdem schlafen), und die Steckdose des Geräts wird
+  `POST …/sleep` fragen nach (409, `?force=1` legt den Rechner trotzdem schlafen), und die Steckdose des Rechners wird
   nicht per Zeitplan ausgeschaltet.
-- Die Gerätekarte zeigt „In Gebrauch: …“; *Details* listet jede Anforderung (letztes Lebenszeichen, Ablauf) und
+- Die Rechnerkarte zeigt „In Gebrauch: …“; *Details* listet jede Anforderung (letztes Lebenszeichen, Ablauf) und
   kann sie beenden. Ein Token kann nur seine eigenen Anforderungen verlängern und beenden; die GUI jede.
 - Anforderungen überstehen einen Neustart des WOL-Servers; danach hat jede Anforderung eine `ttl` Zeit für ihr
   nächstes Lebenszeichen.
 
 #### Andere Aufgaben
 
-Anforderungen sind nicht an Backups gebunden: Jede Aufgabe, die ein Gerät eine Weile braucht, kann
+Anforderungen sind nicht an Backups gebunden: Jede Aufgabe, die einen Rechner eine Weile braucht, kann
 es halten – ein zentrales Update, eine lange Berechnung, eine Kopie. Mit eigenem Token und einem
 `client`-Namen, der sagt, was sie ist:
 
@@ -770,12 +770,12 @@ ssh root@aida 'systemd-inhibit --what=shutdown:sleep --who=updates --why="apt fu
 curl -fsS -X DELETE -H "$AUTH" "$WOL/api/devices/aida/requests/$ID"
 ```
 
-Die Anforderung hält den WOL-Server davon ab, das Gerät schlafen zu legen, auch in den Pausen
-zwischen den Schritten einer Aufgabe. Auf dem Gerät selbst meldet `systemd-inhibit` die Arbeit beim
+Die Anforderung hält den WOL-Server davon ab, den Rechner schlafen zu legen, auch in den Pausen
+zwischen den Schritten einer Aufgabe. Auf dem Rechner selbst meldet `systemd-inhibit` die Arbeit beim
 System an: Ein Schlafbefehl, der Sperren beachtet – etwa der erzwungene Befehl, den der Schlüssel des
 WOL-Servers ausführt –, kann dann verweigern und die Aufgabe nennen, auch wenn *Schlafen* erzwungen
 wird oder die Aufgabe keine Anforderung hält. Ein solcher Befehl sollte bei jeder Sperre im Modus
-`block` für `sleep` verweigern (bzw. `shutdown` bei einem Gerät, das ausgeschaltet wird) und die
+`block` für `sleep` verweigern (bzw. `shutdown` bei einem Rechner, der ausgeschaltet wird) und die
 `delay`-Sperren übergehen, die Desktop und NetworkManager ständig halten.
 [snapshot-backup](https://github.com/schnebeck/snapshot-backup) macht beides: Anforderungen beim
 WOL-Server, Sperren auf dem Backup-Server (ab 19.5).
@@ -858,7 +858,7 @@ node tools/screenshots.mjs                   # README-Screenshots (EN + DE) aus 
 Die Demo startet den echten Webserver und den echten Code des Netzwerkdienstes, mit Platzhaltern für
 systemctl, nmcli und journalctl. WLAN, VPN, Steckdosen, Ping, Magic Packets und SSH sind simuliert: Die Demo
 schickt nichts ins Netz und ändert nichts am System. Jeder Start beginnt mit frischen Daten (Beispiel-
-Reservierungen, Leases, unbekannte Geräte, Geräte, Steckdosen, Zeitpläne); alle Namen, Adressen und MACs sind
+Reservierungen, Leases, unbekannte Geräte, Rechner, Steckdosen, Zeitpläne); alle Namen, Adressen und MACs sind
 erfunden. Ist dnsmasq installiert, beantwortet ein echter dnsmasq DNS auf 127.0.0.1:15353 (ohne DHCP, ohne
 root); `--no-dnsmasq` simuliert auch das. `screenshots.mjs` braucht Node 22 oder neuer und einen
 Chromium-basierten Browser (`CHROME=/pfad/zum/browser`, falls er nicht gefunden wird).
@@ -869,7 +869,7 @@ Chromium-basierten Browser (`CHROME=/pfad/zum/browser`, falls er nicht gefunden 
 |---|---|
 | GUI nicht erreichbar | `systemctl status wol-server`, `journalctl -u wol-server -e`; `.local`-Namen brauchen mDNS, sonst die IP nutzen |
 | `403 Zugriff nur aus dem lokalen Netz` | Das Client-Netz fehlt in `allowed_networks` (die eigene Adresse steht im Log) |
-| Gerät wacht nicht auf | BIOS/NIC-Einstellungen prüfen, Broadcast-Adresse des Netzes eintragen, Gerät per Kabel anschließen, Windows-Schnellstart aus |
+| Rechner wacht nicht auf | BIOS/NIC-Einstellungen prüfen, Broadcast-Adresse des Netzes eintragen, Rechner per Kabel anschließen, Windows-Schnellstart aus |
 | Status immer „Offline“ | Host/IP prüfen; Firewall blockt ICMP *und* droppt TCP: z. B. ICMP-Echo in der Windows-Firewall erlauben |
 | SSH: `Permission denied (publickey)` | Schlüssel aus *System* in die richtige `authorized_keys` eintragen |
 | SSH: `sudo: a password is required` | sudoers-Regel aus Abschnitt 3 anlegen |
