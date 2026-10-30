@@ -775,7 +775,7 @@ systemd-inhibit --what=sleep:idle --who=WOL-Server --why="Requested via the WOL-
 
 It holds for as long as the connection is open and goes when the last request is done - or when the WOL-Server
 stops or the network breaks, so no device stays awake for good. Before every sleep the WOL-Server lets go first. A
-broken hold (the device rebooted) is tried again once a minute; the device card says "held on the device".
+broken hold (the device rebooted) is tried again once a minute; the device card then says "In use: … is running".
 
 If the WOL-Server's key is bound to a forced command, as a sleep-only key should be, the command sent arrives in
 `SSH_ORIGINAL_COMMAND`. [deploy/wol-sleep.sh](deploy/wol-sleep.sh) knows `hold` already; extend an own script
