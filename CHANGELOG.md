@@ -36,6 +36,9 @@ What changed in which version. The version is also shown in the GUI (*System →
   answers although its plug is off, one that answers at standby power - and says so on the device card and in its
   log (journal, RAM), once when it appears and once when it is gone. With the hold on, a requested device that
   fell asleep is woken again, up to three times.
+- **deploy/wol-sleep.sh:** a ready forced command for the WOL-Server's key on a target: sleep (suspend or poweroff),
+  refuse on inhibitors, a busy service or an unlocked session, and `hold`. It replaces the README's short example,
+  which checked `pgrep -f 'rsync --server'` - text on command lines, which also matches a shell that mentions it.
 
 ## 1.2.1 – 2026-10-29
 
