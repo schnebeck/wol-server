@@ -28,6 +28,14 @@ What changed in which version. The version is also shown in the GUI (*System →
 - **"Rechner" in the German GUI:** what the WOL-Server wakes and puts to sleep is called "Rechner" now (tab, dialog,
   schedules, requests, API tokens, messages); "Gerät" stays for anything in the network (DHCP, reservations,
   unknown devices) and for what hangs on a plug. README.de follows. The English GUI and the API keep "devices".
+- **Keep awake while requested:** a request binds the WOL-Server, not the device, whose own power management may
+  still put it to sleep. With the new switch (sleep method SSH) the WOL-Server holds an inhibitor on the device
+  over SSH while it is requested and lets go before every sleep; a forced command needs a `hold` case first.
+  See docs/proposal-device-hold.md.
+- **Contradictions:** the WOL-Server checks the state it shows - a requested device that is asleep, one that
+  answers although its plug is off, one that answers at standby power - and says so on the device card and in its
+  log (journal, RAM), once when it appears and once when it is gone. With the hold on, a requested device that
+  fell asleep is woken again, up to three times.
 
 ## 1.2.1 – 2026-10-29
 

@@ -761,7 +761,7 @@ erledigt das alles selbst, mit `WOL_SERVER_URL`, `WOL_SERVER_TOKEN` und `WOL_DEV
 #### Andere Aufgaben
 
 Anforderungen sind nicht an Backups gebunden: Jede Aufgabe, die einen Rechner eine Weile braucht, kann
-es halten – ein zentrales Update, eine lange Berechnung, eine Kopie. Mit eigenem Token und einem
+ihn halten – ein zentrales Update, eine lange Berechnung, eine Kopie. Mit eigenem Token und einem
 `client`-Namen, der sagt, was sie ist:
 
 ```bash
@@ -779,6 +779,41 @@ wird oder die Aufgabe keine Anforderung hält. Ein solcher Befehl sollte bei jed
 `delay`-Sperren übergehen, die Desktop und NetworkManager ständig halten.
 [snapshot-backup](https://github.com/schnebeck/snapshot-backup) macht beides: Anforderungen beim
 WOL-Server, Sperren auf dem Backup-Server (ab 19.5).
+
+#### Wach halten, solange angefordert
+
+Eine Anforderung bindet den WOL-Server, nicht den Rechner: Seine eigene Energieverwaltung (der Leerlauf-Timer
+eines Desktops, logind) kann ihn trotzdem schlafen legen. Für einen Rechner mit der Schlaf-Methode SSH schließt
+*Wach halten, solange angefordert* diese Lücke. Solange eine Anforderung offen ist und der Rechner antwortet,
+hält der WOL-Server per SSH eine Sperre auf ihm:
+
+```sh
+systemd-inhibit --what=sleep:idle --who=WOL-Server --why="Requested via the WOL-Server" --mode=block cat
+```
+
+Sie hält, solange die Verbindung offen ist, und fällt weg, wenn die letzte Anforderung erledigt ist – oder wenn
+der WOL-Server stoppt oder das Netz reißt; kein Rechner bleibt so für immer wach. Vor jedem Schlafenlegen lässt
+der WOL-Server zuerst los. Ein abgerissener Halt (der Rechner hat neu gestartet) wird einmal pro Minute neu
+versucht; die Rechnerkarte zeigt „auf dem Rechner gehalten“.
+
+Ist der Schlüssel des WOL-Servers an einen erzwungenen Befehl gebunden, wie es ein Schlüssel nur zum Schlafenlegen
+sein sollte, kommt der gesendete Befehl in `SSH_ORIGINAL_COMMAND` an. Dieses Skript **zuerst** erweitern – eines,
+das `hold` nicht kennt, legt den Rechner stattdessen schlafen – und als Befehl zum Halten `hold` eintragen:
+
+```sh
+case "$SSH_ORIGINAL_COMMAND" in
+    hold) exec systemd-inhibit --what=sleep:idle --who=WOL-Server --why="Requested via the WOL-Server" \
+                  --mode=block cat ;;
+esac
+# ... danach wie bisher das Schlafenlegen
+```
+
+Der WOL-Server prüft außerdem, was er anzeigt, auf Widersprüche und meldet sie auf der Karte und in seinem
+Protokoll (Journal, RAM), einmal beim Auftreten und einmal beim Verschwinden: ein angeforderter Rechner, der
+schläft (mehr als 5 Minuten nach der Anforderung; mit eingeschaltetem Halt wird er wieder geweckt, bis zu dreimal
+im Abstand von 5 Minuten), ein Rechner, der antwortet, obwohl seine Steckdose aus ist, und einer, der bei
+Standby-Leistung antwortet. `GET /api/status` liefert sie unter `conflicts`, den Zustand jedes Halts unter
+`holds`.
 
 #### Über VPN
 

@@ -611,6 +611,15 @@ echo "$USER ALL=(root) NOPASSWD: /usr/bin/systemctl suspend, /usr/bin/systemctl 
             <button type="button" class="chip-btn" data-cmd="shutdown /s /t 0">Windows off</button>
           </div>
           <p class="hint small" data-i18n>The public SSH key of the WOL-Server is shown under <em>System</em>.</p>
+          <label class="check">
+            <input type="checkbox" name="hold">
+            <span>Keep awake while requested <small class="muted">While a client requests the device, the WOL-Server holds an inhibitor on it over SSH, so that its own power management does not put it to sleep. Needs systemd-inhibit on the device. A key bound to a forced command: extend that script for "hold" first - one that does not know it puts the device to sleep instead.</small></span>
+          </label>
+          <label class="field span2" id="hold-command-field" hidden>
+            <span>Hold command</span>
+            <input name="hold_command" class="mono" spellcheck="false">
+            <small class="muted">Runs on the device for as long as it is held; ends when its input closes.</small>
+          </label>
         </div>
 
         <div class="method-panel" data-method="http" hidden>
