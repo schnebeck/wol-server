@@ -23,6 +23,8 @@ What changed in which version. The version is also shown in the GUI (*System →
 - **Clear words for the plug:** its state reads "Power on" / "Power off" instead of "On" / "Off" (next to
   "Plugged in" it was not clear what was on), on the plug card, its buttons and the power badge of the device card.
   The plug card's restart button is "Power cycle", as in the device's power menu.
+- **"Consumer" instead of "Plugged in":** the field names what hangs on the plug - a device, a coffee machine, the
+  WOL-Server - so it is called that, on the plug card, in the consumption tables and in the plug dialog.
 
 ## 1.2.1 – 2026-10-29
 

@@ -555,7 +555,7 @@ const WAKE_HINTS = {
   power_wol: t("Switches the plug on if it is off, waits 15 s for the network card and sends the magic packet."),
 };
 
-// The plug of a device: chosen in the device dialog, the same link as "Plugged in" in the plug dialog
+// The plug of a device: chosen in the device dialog, the same link as "Consumer" in the plug dialog
 function fillDevicePlug(device) {
   const form = $("#device-form");
   const linked = device ? state.plugs.find((p) => p.consumer && p.consumer.kind === "device" && p.consumer.id === device.id) : null;
@@ -927,7 +927,7 @@ function plugCard(p) {
   const consumer = p.consumer_name;
   const energy = p.energy;
   const meta = st ? [
-    [t("Plugged in"), consumer || "–"],
+    [t("Consumer"), consumer || "–"],
     [t("Today"), energy ? fmtKwh(energy.day) : "–"],
     [t("This month"), energy ? fmtKwh(energy.month) : "–"],
     [t("Voltage"), st.voltage_v == null ? "–" : `${Math.round(st.voltage_v)} V`],
@@ -935,7 +935,7 @@ function plugCard(p) {
     [t("Temperature"), st.temperature_c == null ? "–" : `${Math.round(st.temperature_c)} °C`],
     [t("Energy counter"), fmtKwh(st.energy_wh)],
     [t("Switch cycles"), st.switch_count == null ? "–" : st.switch_count.toLocaleString(I18N.locale)],
-  ] : [[t("Plugged in"), consumer || "–"], [t("Address"), p.host]];
+  ] : [[t("Consumer"), consumer || "–"], [t("Address"), p.host]];
   const standby = energy && energy.standby_year;
   if (st && standby != null) {
     const cost = costOf(standby);
@@ -1500,7 +1500,7 @@ function drawLive(data, series) {
       headValue: (sr) => (sr.now == null ? null : `${fmtWatt(sr.now)} W`),
     });
   }
-  const head = [t("Plug"), t("Plugged in"), t("Now"), t("Average"), t("Peak")];
+  const head = [t("Plug"), t("Consumer"), t("Now"), t("Average"), t("Peak")];
   const cell = (v) => el("td", { class: "num" }, v == null ? "–" : `${fmtWatt(v)} W`);
   const row = (sr) => [el("td", {}, el("span", { class: `key line s${sr.slot}`, "aria-hidden": "true" }), sr.name),
     el("td", { class: "hide-sm" }, sr.consumer || "–"), cell(sr.now), cell(sr.avg), cell(sr.peak)];
@@ -1752,7 +1752,7 @@ function drawBars(chart, data, series, period) {
 
 function drawEnergyTable(series, total, period) {
   const price = state.plugSettings.price_kwh;
-  const head = [t("Plug"), t("Plugged in"), t("Energy"), t("Share"), price != null && t("Costs"), t("Standby per year")].filter(Boolean);
+  const head = [t("Plug"), t("Consumer"), t("Energy"), t("Share"), price != null && t("Costs"), t("Standby per year")].filter(Boolean);
   const row = (sr) => [
     el("td", {}, el("span", { class: `key box s${sr.slot}`, "aria-hidden": "true" }), sr.name),
     el("td", { class: "hide-sm" }, sr.consumer || "–"),
