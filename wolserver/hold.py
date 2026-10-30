@@ -60,7 +60,9 @@ class DeviceHolds:
     # -- state for the GUI --
 
     def state(self, device_id):
-        """None, or {state: held|waiting|failed|asleep, since, error} of a device with an open request."""
+        """None, or {state, since, error} of a device with an open request. state: held (the inhibitor stands),
+        waiting (the device does not answer yet), failed (the hold command did not hold), waking (it fell asleep
+        although requested and was woken again), asleep (it keeps falling asleep; no more wakes)."""
         with self._lock:
             h = self._holds.get(device_id)
             if not h:
@@ -147,7 +149,7 @@ class DeviceHolds:
             h["silent"] += 1
         elif answers:
             h["silent"], h["seen"] = 0, True
-            if h["state"] == "asleep":
+            if h["state"] in ("asleep", "waking"):
                 log.info("Hold %s: answers again", device["name"])
                 h.update(state="waiting", error=None)
         booting = not h["seen"] and self.clock() - h["wanted"] < BOOT_SECONDS  # woken by the request, still starting
@@ -160,20 +162,22 @@ class DeviceHolds:
     def _asleep(self, device, h, clients):
         """Requested, but it does not answer: the contradiction the hold is there for. Wake it again."""
         self._close(h)
-        if h["state"] != "asleep":
+        if h["state"] not in ("asleep", "waking"):
             log.warning("Contradiction: %s does not answer although %s requested it", device["name"], ", ".join(clients))
-            h.update(state="asleep", error=None, wakes=0)
-        if h["wakes"] >= REWAKE_TRIES:
-            return
+            h.update(state="waking", error=None, wakes=0, woken=None)
+        if h["state"] == "asleep":
+            return  # given up
         if h["woken"] is not None and self.clock() - h["woken"] < REWAKE_EVERY:
+            return  # woken, give it time to start
+        if h["wakes"] >= REWAKE_TRIES:
+            log.warning("Hold %s: given up after %d wakes - it falls asleep again and again", device["name"], h["wakes"])
+            h["state"] = "asleep"
             return
         h["woken"] = self.clock()
         h["wakes"] += 1
         ok, message = self.wake(device, "hold")
         (log.info if ok else log.warning)("Hold %s: woken again (%d/%d): %s", device["name"], h["wakes"], REWAKE_TRIES,
                                           message)
-        if h["wakes"] >= REWAKE_TRIES:
-            log.warning("Hold %s: given up after %d wakes - it falls asleep again and again", device["name"], h["wakes"])
 
     def start(self):
         if self._thread is None:

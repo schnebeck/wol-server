@@ -153,7 +153,7 @@ class DeviceHoldsTest(unittest.TestCase):
         with self.assertLogs("wolserver", "WARNING") as logs:
             self.holds.tick()
         self.assertIn("Contradiction: backup does not answer although laptop-backup requested it", logs.output[0])
-        self.assertEqual((self.woken, self.holds.state("d1")["state"]), (["hold"], "asleep"))
+        self.assertEqual((self.woken, self.holds.state("d1")["state"]), (["hold"], "waking"))
         self.holds.tick()
         self.assertEqual(len(self.woken), 1)  # not again before REWAKE_EVERY
         with self.assertLogs("wolserver", "WARNING") as logs:
@@ -162,6 +162,7 @@ class DeviceHoldsTest(unittest.TestCase):
                 self.holds.tick()
         self.assertEqual(len(self.woken), hold.REWAKE_TRIES)  # then it gives up
         self.assertIn("given up after 3 wakes", logs.output[-1])
+        self.assertEqual(self.holds.state("d1")["state"], "asleep")
         self.answers = True
         self.clock.now += hold.RETRY
         self.holds.tick()

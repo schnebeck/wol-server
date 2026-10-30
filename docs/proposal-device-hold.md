@@ -59,8 +59,12 @@ it. No device stays awake forever because of a WOL-Server that is gone.
 ## 5. GUI and API
 
 - Device dialog, sleep method SSH: switch **Keep awake while requested (SSH)** and the hold command, prefilled.
-- Device card: the request line says whether the hold stands ("held on the device") or why not.
-- `GET /api/status` and `GET …/requests` report `hold`: `null`, or `{state: "held"|"waiting"|"failed", since, error}`.
+- Device card: the request line says what is with the device, in one look for every state: "In use: "laptop-backup" ·
+  running on "backup"" (held), "… · waiting for "backup"" (it does not answer yet), "… · keeping "backup" awake
+  failed" (the reason in the tooltip), "… · "backup" is being woken" (it fell asleep and was woken again), "… ·
+  "backup" fell asleep" (it keeps falling asleep; no more wakes).
+- `GET /api/status` and `GET …/requests` report `hold`: `null`, or `{state, since, error}` with `state` one of
+  `held`, `waiting`, `failed`, `waking`, `asleep`.
 
 ## 6. Cost
 

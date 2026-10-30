@@ -799,7 +799,8 @@ systemd-inhibit --what=sleep:idle --who=WOL-Server --why="Requested via the WOL-
 Sie hält, solange die Verbindung offen ist, und fällt weg, wenn die letzte Anforderung erledigt ist – oder wenn
 der WOL-Server stoppt oder das Netz reißt; kein Rechner bleibt so für immer wach. Vor jedem Schlafenlegen lässt
 der WOL-Server zuerst los. Ein abgerissener Halt (der Rechner hat neu gestartet) wird einmal pro Minute neu
-versucht; die Rechnerkarte zeigt dann „Aktive Nutzung: … läuft“.
+versucht. Die Rechnerkarte zeigt den Zustand, etwa „Aktive Nutzung: „laptop-backup“ · läuft auf Rechner
+„backup““, „… · wartet auf Rechner „backup““ oder „… · Rechner „backup“ wird geweckt“.
 
 Ist der Schlüssel des WOL-Servers an einen erzwungenen Befehl gebunden, wie es ein Schlüssel nur zum Schlafenlegen
 sein sollte, kommt der gesendete Befehl in `SSH_ORIGINAL_COMMAND` an. [deploy/wol-sleep.sh](deploy/wol-sleep.sh)
