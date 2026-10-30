@@ -20,6 +20,9 @@ What changed in which version. The version is also shown in the GUI (*System →
 - **Waking through a switched-off plug:** with the wake method "Wake-on-LAN" (the default) a wake sent only the magic
   packet, which reaches nothing without power. If the plug is off, the WOL-Server now switches it on first and sends
   the packet once the network card has power, as "Power on, then WOL" always did.
+- **Clear words for the plug:** its state reads "Power on" / "Power off" instead of "On" / "Off" (next to
+  "Plugged in" it was not clear what was on), on the plug card, its buttons and the power badge of the device card.
+  The plug card's restart button is "Power cycle", as in the device's power menu.
 
 ## 1.2.1 – 2026-10-29
 

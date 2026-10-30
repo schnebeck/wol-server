@@ -490,7 +490,7 @@ function powerMenu(plug, power) {
       plugAction(plug, action, e.currentTarget.closest("details").querySelector("summary"));
     },
   }, label);
-  const value = power.reachable ? (power.on ? `${fmtWatt(power.power_w)} W` : t("off")) : "–";
+  const value = power.reachable ? (power.on ? `${fmtWatt(power.power_w)} W` : t("Power off")) : "–";
   return el("details", { class: "menu power-menu" },
     el("summary", { class: "power-badge", title: t("Plug {0}", plug.name), "aria-label": `${t("Power")}: ${t("Plug {0}", plug.name)}, ${value}` },
       icon("bolt"), value, icon("chevron")),
@@ -909,7 +909,8 @@ function plugCard(p) {
   const live = p.live || {};
   const st = live.status;
   const cls = !st ? "unknown" : st.on ? "online" : "offline";
-  let label = !st ? (live.unreachable ? t("Not reachable") : t("Error")) : st.on ? t("On") : t("Off");
+  // "Power on/off", not "On/Off": the relay, which a device behind it may sleep through
+  let label = !st ? (live.unreachable ? t("Not reachable") : t("Error")) : st.on ? t("Power on") : t("Power off");
   // "On" is the relay. Behind it a device may be asleep: say so, from ping and power as on its own card,
   // or from the power alone while its status is not known yet.
   // The dot stays the relay's; the label takes the device's color.
@@ -918,8 +919,8 @@ function plugCard(p) {
   const deviceCls = device ? deviceState(device)[0] : null;
   if (device && st && st.on) {
     const deviceLabel = deviceState(device)[1];
-    if (deviceCls !== "unknown") [labelCls, label] = [deviceCls, `${t("On")} · ${deviceLabel}`];
-    else if (st.power_w != null && st.power_w <= p.standby_w) [labelCls, label] = ["offline", `${t("On")} · ${t("Standby")}`];
+    if (deviceCls !== "unknown") [labelCls, label] = [deviceCls, `${t("Power on")} · ${deviceLabel}`];
+    else if (st.power_w != null && st.power_w <= p.standby_w) [labelCls, label] = ["offline", `${t("Power on")} · ${t("Standby")}`];
   }
   // Below about 1 W a Shelly reads 0 W although current flows: "< 1" instead of a 0 that looks like no power
   const below = st && st.on && st.power_w === 0 && st.current_a > 0;
@@ -961,9 +962,9 @@ function plugCard(p) {
           class: "btn wake", type: "button", disabled: deviceCls === "online", title: deviceCls === "online" ? t("Already online") : "",
           onclick: (e) => deviceAction(device, "wake", e.currentTarget).then(refreshPlugsSoon),
         }, icon("power"), t("Wake"))
-        : el("button", { class: "btn wake", type: "button", disabled: !st || st.on, onclick: (e) => plugAction(p, "on", e.currentTarget) }, icon("power"), t("On")),
-      el("button", { class: "btn", type: "button", disabled: !st || !st.on || p.locked, onclick: (e) => plugAction(p, "off", e.currentTarget) }, t("Off")),
-      el("button", { class: "btn", type: "button", disabled: !st || !st.on || p.locked, title: t("Off, on again after 10 s - runs on the plug itself"), onclick: (e) => plugAction(p, "cycle", e.currentTarget) }, icon("undo"), t("Restart"))));
+        : el("button", { class: "btn wake", type: "button", disabled: !st || st.on, onclick: (e) => plugAction(p, "on", e.currentTarget) }, icon("power"), t("Power on")),
+      el("button", { class: "btn", type: "button", disabled: !st || !st.on || p.locked, onclick: (e) => plugAction(p, "off", e.currentTarget) }, t("Power off")),
+      el("button", { class: "btn", type: "button", disabled: !st || !st.on || p.locked, title: t("Off, on again after 10 s - runs on the plug itself"), onclick: (e) => plugAction(p, "cycle", e.currentTarget) }, icon("undo"), t("Power cycle"))));
 }
 
 const EXPOSURE_TEXTS = {
