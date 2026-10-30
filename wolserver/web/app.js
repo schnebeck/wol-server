@@ -1400,7 +1400,8 @@ function drawEnergy() {
 
   const legend = $("#energy-legend");
   legend.replaceChildren(...(series.length > 1 && period !== "day" ? series.map((sr) => el("span", { class: "legend-item" },
-    el("span", { class: `key ${period === "day" ? "line" : "box"} s${sr.slot}`, "aria-hidden": "true" }), sr.name)) : []));
+    el("span", { class: `key ${period === "day" ? "line" : "box"} s${sr.slot}`, "aria-hidden": "true" }), sr.name)) : []),
+  ...(period === "month" ? [el("span", { class: "legend-item" }, el("span", { class: "key box band", "aria-hidden": "true" }), t("Weekend"))] : []));
   $("#energy-chart-title").textContent = period === "day"
     ? (series.length === 1 ? t("Power of {0} in W", series[0].name) : t("Power in W, each plug on its own scale"))
     : (series.length === 1 ? t("Energy of {0} in kWh", series[0].name) : t("Energy in kWh"));
@@ -1455,6 +1456,11 @@ function drawLive(data, series) {
         for (let ts = Math.ceil(start / every) * every; ts <= start + (n - 1) * step; ts += every) out.push([(ts - start) / step, fmtTime(ts)]);
         return out;
       },
+      bands: () => {
+        const out = [];
+        for (let ts = Math.floor(start / 600) * 600 + 300; ts < start + n * step; ts += 600) out.push([(ts - start) / step, (ts + 300 - start) / step]);
+        return out;
+      },
       time: (i) => fmtTime(start + i * step, true),
       headValue: (sr) => (sr.now == null ? null : `${fmtWatt(sr.now)} W`),
     });
@@ -1491,6 +1497,25 @@ function chartFrame(chart, max, fmtTick, opts = {}) {
   }
   root.append(grid);
   return { root, width, height, m, plotW, plotH, y, ticks };
+}
+
+// Time grid behind a curve: faint alternating bands (hours, or 5 minutes in the last hour) to read a time off,
+// a vertical hairline at every labeled time, and a short tick under the baseline where a label stands.
+// bands: shaded [from, to] in curve positions; marks: positions of the labels.
+function timeGrid(frame, x, n, bands, marks, ticks) {
+  const { m, plotH, root } = frame;
+  const bottom = m.top + plotH;
+  const g = svg("g", { class: "time-grid" });
+  for (const [from, to] of bands) {
+    const a = Math.max(0, from), b = Math.min(n - 1, to);
+    if (b > a) g.append(svg("rect", { class: "band", x: x(a), y: m.top, width: x(b) - x(a), height: plotH }));
+  }
+  for (const pos of marks) if (pos > 0 && pos < n - 1) g.append(svg("line", { x1: x(pos), x2: x(pos), y1: m.top, y2: bottom }));
+  if (ticks) for (const pos of marks) {
+    const xi = x(Math.min(n - 1, pos));
+    g.append(svg("line", { class: "tick-mark", x1: xi, x2: xi, y1: bottom, y2: bottom + 4 }));
+  }
+  root.insertBefore(g, root.firstChild);
 }
 
 // Hover and keyboard: every position of the x-axis shows all series. targets: the SVGs that react
@@ -1551,6 +1576,11 @@ function drawCurve(chart, data, series, opts = {}) {
   const tickSets = groups.map((g) => niceTicks(Math.max(...g.map(maxOf)), multiple ? 3 : 4));
   const left = 10 + Math.max(...tickSets.flat().map((v) => fmtTick(v).length)) * 7;
   const narrow = chart.clientWidth < 520;
+  const axis = opts.axis ? opts.axis(narrow)
+    : (narrow ? [0, 6, 12, 18, 24] : [0, 3, 6, 9, 12, 15, 18, 21, 24]).map((h) => [(h * 3600) / step, `${String(h).padStart(2, "0")}:00`]);
+  // every other hour of the day shaded (01-02, 03-04, ...)
+  const bands = opts.bands ? opts.bands()
+    : Array.from({ length: 12 }, (_, k) => [((2 * k + 1) * 3600) / step, ((2 * k + 2) * 3600) / step]);
   const panels = groups.map((group, k) => {
     const last = k === groups.length - 1;
     const frame = chartFrame(chart, Math.max(...group.map(maxOf)), fmtTick, multiple
@@ -1558,12 +1588,11 @@ function drawCurve(chart, data, series, opts = {}) {
       : { left });
     const { m, plotW, y, root } = frame;
     const x = (i) => m.left + (i / (n - 1)) * plotW;
+    timeGrid(frame, x, n, bands, axis.map(([pos]) => pos), last);
     if (last) {
-      const axis = opts.axis ? opts.axis(narrow)
-        : (narrow ? [0, 6, 12, 18, 24] : [0, 3, 6, 9, 12, 15, 18, 21, 24]).map((h) => [(h * 3600) / step, `${String(h).padStart(2, "0")}:00`]);
       for (const [pos, text] of axis) {
         const i = Math.min(n - 1, pos);
-        const label = svg("text", { x: x(i), y: frame.height - 8, "text-anchor": i <= 0 ? "start" : i >= n - 1 ? "end" : "middle", class: "tick" });
+        const label = svg("text", { x: x(i), y: frame.height - 6, "text-anchor": i <= 0 ? "start" : i >= n - 1 ? "end" : "middle", class: "tick" });
         label.textContent = text;
         root.append(label);
       }
@@ -1626,9 +1655,17 @@ function drawBars(chart, data, series, period) {
   const band = plotW / n;
   const barW = Math.max(3, Math.min(24, band - 4));
   const cx = (i) => m.left + band * (i + 0.5);
+  if (period === "month") { // weekends shaded behind the columns
+    const g = svg("g", { class: "time-grid" });
+    data.buckets.forEach((b, i) => {
+      const day = new Date(`${data.date.slice(0, 8)}${b}T12:00:00`).getDay();
+      if (day === 0 || day === 6) g.append(svg("rect", { class: "band", x: m.left + band * i, y: m.top, width: band, height: frame.plotH }));
+    });
+    root.insertBefore(g, root.firstChild);
+  }
   const every = Math.ceil(n / Math.max(1, Math.floor(plotW / 34)));
   data.buckets.forEach((_, i) => {
-    if (i % every && i !== n - 1) return;
+    if (i !== n - 1 && (i % every || n - 1 - i < every)) return; // the last label keeps its neighbor at a distance
     const label = svg("text", { x: cx(i), y: frame.height - 8, "text-anchor": "middle", class: "tick" });
     label.textContent = bucketLabel(period, data, i);
     root.append(label);
