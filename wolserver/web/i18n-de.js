@@ -530,7 +530,6 @@ window.I18N_DE = {
  "Plug {0}": "Steckdose {0}",
  "Plug {0} not reachable ({1})": "Steckdose {0} nicht erreichbar ({1})",
  "Plug {0}: {1}": "Steckdose {0}: {1}",
- "Plugged in": "Angeschlossen",
  "Plugged into": "Steckt in",
  "Plugs": "Steckdosen",
  "Power": "Strom",
