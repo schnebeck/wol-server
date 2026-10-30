@@ -361,21 +361,22 @@ class App:
     def _power_wake(self, device, source):
         """Wake method of the device's plug. (ok, message) if done, (None, None) if WOL has to follow."""
         plug = self.plugs.for_device(device["id"])
-        method = plug.get("wake_method", "wol") if plug else "wol"
-        if method == "wol":
+        if not plug:
             return None, None
+        method = plug.get("wake_method", "wol")
         try:
             live = self.plugs.live(plug["id"], max_age=0)
             st = live["status"]
             if st is None:
                 raise plugs.PlugError(live["error"])
             if not st["on"]:
-                self.plugs.switch(plug["id"], "on", source=source, log_event=method == "power_wol")
+                # Without power no wake method works: with "wol" too the power comes first, then the packet
+                self.plugs.switch(plug["id"], "on", source=source, log_event=method != "power")
                 if method == "power":
                     return True, "Power switched on via %s" % plug["name"]
                 time.sleep(self.POWER_WOL_DELAY)
                 return None, None
-            if method == "power_wol":
+            if method in ("wol", "power_wol"):
                 return None, None
             if st.get("power_w") is not None and st["power_w"] <= plug.get("standby_w", 0):
                 # Relay on, device off: it starts when the power returns
@@ -384,7 +385,7 @@ class App:
             return True, "Power is already on: %s draws %s W" % (device["name"],
                                                                  plugs.manager._fmt_w(st["power_w"] or 0))
         except plugs.PlugError as e:
-            if method == "power_wol":
+            if method in ("wol", "power_wol"):
                 log.warning("Wake %s: plug %s: %s - sending the magic packet anyway", device["name"], plug["name"], e)
                 return None, None
             return False, "Plug %s: %s" % (plug["name"], e)

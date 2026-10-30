@@ -15,6 +15,11 @@ What changed in which version. The version is also shown in the GUI (*System →
 - **Plug card:** "On" meant only the relay. For a plug with a device behind it the card now also names the
   device's state, as on the device card ("On · Standby", in gray while the device sleeps). Below about 1 W a Shelly
   reads 0 W although current flows; the card shows "< 1 W" then instead of a 0 that looks like no power.
+- **Wake from the plug card:** a plug with a device behind it offers *Wake* instead of *On*, active while the device
+  is not online - asleep behind a plug that is on, or without power. It wakes the device as its own card does.
+- **Waking through a switched-off plug:** with the wake method "Wake-on-LAN" (the default) a wake sent only the magic
+  packet, which reaches nothing without power. If the plug is off, the WOL-Server now switches it on first and sends
+  the packet once the network card has power, as "Power on, then WOL" always did.
 
 ## 1.2.1 – 2026-10-29
 

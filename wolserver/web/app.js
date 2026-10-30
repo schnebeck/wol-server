@@ -272,6 +272,7 @@ async function refreshView() {
     } else {
       await Promise.all([loadPlugs(), loadSchedules(), loadDevices()]);
       renderPlugs();
+      if (plugsNeedStatus()) refreshStatus();
     }
   } else if (state.view === "events") {
     await renderEvents();
@@ -308,6 +309,7 @@ async function refreshStatus() {
     $("#status-line").textContent =
       t("{0} of {1} online · checked {2}", online, state.devices.length, new Date(data.checked * 1000).toLocaleTimeString(I18N.locale));
     renderDevices();
+    if (plugsOverviewShown()) renderPlugs(); // the plug cards name the state of their devices
   } catch (e) {
     if (e.status !== 401) $("#status-line").textContent = e.message;
   } finally {
@@ -912,9 +914,10 @@ function plugCard(p) {
   // or from the power alone while its status is not known yet.
   // The dot stays the relay's; the label takes the device's color.
   let labelCls = cls;
-  const device = st && st.on && (p.consumer || {}).kind === "device" ? deviceById(p.consumer.id) : null;
-  if (device) {
-    const [deviceCls, deviceLabel] = deviceState(device);
+  const device = (p.consumer || {}).kind === "device" ? deviceById(p.consumer.id) : null;
+  const deviceCls = device ? deviceState(device)[0] : null;
+  if (device && st && st.on) {
+    const deviceLabel = deviceState(device)[1];
     if (deviceCls !== "unknown") [labelCls, label] = [deviceCls, `${t("On")} · ${deviceLabel}`];
     else if (st.power_w != null && st.power_w <= p.standby_w) [labelCls, label] = ["offline", `${t("On")} · ${t("Standby")}`];
   }
@@ -952,7 +955,13 @@ function plugCard(p) {
     plugNextLine(p),
     p.locked ? el("p", { class: "next muted" }, icon("lock"), t("Never switched off: supplies the WOL-Server or the network")) : null,
     el("div", { class: "card-actions" },
-      el("button", { class: "btn wake", type: "button", disabled: !st || st.on, onclick: (e) => plugAction(p, "on", e.currentTarget) }, icon("power"), t("On")),
+      // A device behind the plug is woken, not only powered: its wake method switches the power on if needed
+      device
+        ? el("button", {
+          class: "btn wake", type: "button", disabled: deviceCls === "online", title: deviceCls === "online" ? t("Already online") : "",
+          onclick: (e) => deviceAction(device, "wake", e.currentTarget).then(refreshPlugsSoon),
+        }, icon("power"), t("Wake"))
+        : el("button", { class: "btn wake", type: "button", disabled: !st || st.on, onclick: (e) => plugAction(p, "on", e.currentTarget) }, icon("power"), t("On")),
       el("button", { class: "btn", type: "button", disabled: !st || !st.on || p.locked, onclick: (e) => plugAction(p, "off", e.currentTarget) }, t("Off")),
       el("button", { class: "btn", type: "button", disabled: !st || !st.on || p.locked, title: t("Off, on again after 10 s - runs on the plug itself"), onclick: (e) => plugAction(p, "cycle", e.currentTarget) }, icon("undo"), t("Restart"))));
 }
@@ -1007,6 +1016,19 @@ async function plugAction(plug, action, button, confirm = false) {
 }
 
 let plugsBusy = false;
+
+const plugsOverviewShown = () => state.view === "plugs" && plugView.sub === "overview";
+// The plug cards show and wake the devices behind them: they need the device status as the device list does
+const plugsNeedStatus = () => plugsOverviewShown() && state.plugs.some((p) => (p.consumer || {}).kind === "device");
+
+// After a wake from a plug card: power and status change while the device starts (10-60 s)
+function refreshPlugsSoon() {
+  for (const delay of [3000, 15000, 40000]) {
+    setTimeout(() => {
+      if (plugsOverviewShown()) refreshPlugs().then(refreshStatus);
+    }, delay);
+  }
+}
 
 async function refreshPlugs() {
   if (plugsBusy) return;
@@ -3545,7 +3567,7 @@ function bind() {
   // Poll the status only while the page is visible; this saves load on the Pi.
   setInterval(() => {
     if (document.visibilityState !== "visible" || $("#app").hidden) return;
-    if (state.view === "devices") refreshStatus();
+    if (state.view === "devices" || plugsNeedStatus()) refreshStatus();
     // Show new entries (e.g. from schedules) while the log is open
     if (state.view === "events") renderEvents().catch(() => {});
     // Network: refresh the overview (unknown devices); watchNetJob() watches running jobs

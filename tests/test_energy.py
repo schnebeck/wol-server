@@ -276,6 +276,23 @@ class LinkedDeviceTest(unittest.TestCase):
         events = [e["action"] for e in self.call("GET", "/api/events")[1]["events"]]
         self.assertEqual(events[:2], ["wake", "power_on"])
 
+    def test_wake_by_wol_switches_the_power_on_first(self):
+        # Wake method "wol" (the default): with the relay on only the magic packet goes out ...
+        self.link()
+        status, res = self.call("POST", "/api/devices/%s/wake" % self.device["id"])
+        self.assertEqual((status, len(self.sent), self.dev.switch_count), (200, 1, 0))
+        # ... with the relay off the packet would reach nothing: power first, then the packet
+        self.dev.on = False
+        with mock.patch("wolserver.server.App.POWER_WOL_DELAY", 0):
+            status, res = self.call("POST", "/api/devices/%s/wake" % self.device["id"])
+        self.assertEqual((status, self.dev.on, len(self.sent)), (200, True, 2))
+        events = [e["action"] for e in self.call("GET", "/api/events")[1]["events"]]
+        self.assertEqual(events[:2], ["wake", "power_on"])
+        # A plug that does not answer does not stop the packet
+        fake.FakePlug.devices = {}
+        status, res = self.call("POST", "/api/devices/%s/wake" % self.device["id"])
+        self.assertEqual((status, len(self.sent)), (200, 3))
+
     def test_cut_after_sleep(self):
         self.link(cut_after_sleep=True)
         self.app.CUT_INTERVAL = 0.01
