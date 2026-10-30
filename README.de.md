@@ -548,6 +548,10 @@ Nenn-Schaltspiele verbraucht, Steckdose 5 Minuten nicht erreichbar.
 - Unter etwa 1 W messen die Steckdosen schlecht; ein Shelly zeigt dann 0 W und zählt keine Energie. Ein Pi Zero an
   seiner eigenen Steckdose zeigt deshalb meist 0 W.
 - Die Passwörter der Steckdosen bleiben auf dem Server (`plugs.json`, Modus 0600); die GUI bekommt sie nie zurück.
+  Bei einem Shelly behält der Server nicht einmal das Passwort: Nach der ersten erfolgreichen Anmeldung speichert er
+  nur den daraus abgeleiteten Digest-Schlüssel (HA1, den Wert, den auch die Steckdose selbst speichert). Er gilt
+  nur für diese eine Steckdose, die Datei verrät also kein Passwort, das vielleicht auch anderswo verwendet wird.
+  Steckdosen, die noch mit Passwort gespeichert sind, stellt der Server von selbst um.
 - Das Energielog schont die SD-Karte: Die Werte der laufenden Stunde bleiben im RAM und werden einmal pro Stunde
   geschrieben.
 - Die Steckdosen-Endpunkte brauchen eine GUI-Sitzung; API-Tokens sind auf Geräte beschränkt.
@@ -610,7 +614,7 @@ Dateien:
 /var/lib/wol-server/data.json    Geräte, Zeitpläne, Protokoll (atomar geschrieben)
 /var/lib/wol-server/auth.json    Passwort-Hash (PBKDF2) + Cookie-Secret, Modus 0600
 /var/lib/wol-server/.ssh/        SSH-Schlüssel und known_hosts für das Schlafenlegen
-/var/lib/wol-server/plugs.json   Steckdosen samt Passwörtern, Preis pro kWh, Modus 0600
+/var/lib/wol-server/plugs.json   Steckdosen samt Schlüsseln (oder Passwörtern), Preis pro kWh, Modus 0600
 /var/lib/wol-server/energy.db    Energielog (SQLite, eine Zeile pro Steckdose und Stunde)
 /var/lib/wol-server/requests.json   offene Anforderungen und vorgemerkte Schlafanträge
 /etc/wol-server/tls/             HTTPS: cert.pem, key.pem, fetch_key (Abruf), known_hosts (Webserver)

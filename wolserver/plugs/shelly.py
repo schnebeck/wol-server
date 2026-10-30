@@ -58,6 +58,9 @@ class ShellyGen2(PlugDriver):
     capabilities = frozenset(CAPABILITIES)
     USER = "admin"
 
+    def make_key(self):
+        return self.http.digest_key(self.host, self.USER, self.password) if self.password else None
+
     @classmethod
     def probe(cls, host, http=None):
         data = (http or HttpClient()).get_json("http://%s/shelly" % host)
@@ -70,7 +73,7 @@ class ShellyGen2(PlugDriver):
     def _rpc(self, method, **params):
         query = {k: (json.dumps(v) if isinstance(v, (bool, dict)) else v) for k, v in params.items()}
         url = "http://%s/rpc/%s%s" % (self.host, method, "?" + urlencode(query) if query else "")
-        data = self.http.get_json(url, self.USER, self.password or None)
+        data = self.http.get_json(url, self.USER, self.password or self.key or None)
         if not isinstance(data, dict):
             raise PlugError("Unexpected answer from the plug")
         return data
@@ -78,7 +81,7 @@ class ShellyGen2(PlugDriver):
     def _call(self, method, **params):
         """JSON-RPC: POST /rpc with method and params in the body."""
         data = self.http.post_json("http://%s/rpc" % self.host, {"id": 1, "method": method, "params": params},
-                                   self.USER, self.password or None)
+                                   self.USER, self.password or self.key or None)
         if not isinstance(data, dict):
             raise PlugError("Unexpected answer from the plug")
         if isinstance(data.get("error"), dict):

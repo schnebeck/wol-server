@@ -89,7 +89,8 @@ These rules are enforced in WOL-Server itself, not only in the GUI.
 - **Manual:** a plug outside the DHCP (e.g. a fixed IP) can be entered by host name or IP, with the driver chosen
   by hand or detected automatically.
 - **Password:** digest authentication as the plug requires (user `admin`, SHA-256). The password is stored on the
-  server only and is never sent back to the browser.
+  server only and is never sent back to the browser. After the first successful login the server keeps only the key
+  derived from it (HA1 for the plug's realm, as the plug keeps it), not the password itself.
 - **Live view:** relay state, power (W), voltage, current, temperature, energy counter, switching cycles, error
   flags.
 - **Switch:** on, off and power cycle, with the rules from section 3.
@@ -275,11 +276,13 @@ are still no extra packages. The Shelly driver supports all capabilities.
 
 ### Data
 
-- **`plugs.json`** in the data directory, mode 0600 (contains the plug passwords):
+- **`plugs.json`** in the data directory, mode 0600 (contains the plug keys, or the password where a driver
+  cannot derive a key):
   ```json
   {"id": "…", "name": "plug-office-pc", "driver": "shelly-gen2", "host": "plug-office-pc.home.arpa", "channel": 0,
    "model": "S3PL-30110EU",
-   "mac": "…", "password": "…", "consumer": {"kind": "device", "id": "…"}, "standby_w": 3, "running_w": 20,
+   "mac": "…", "password": "", "key": {"realm": "…", "algorithm": "SHA-256", "ha1": "…"},
+   "consumer": {"kind": "device", "id": "…"}, "standby_w": 3, "running_w": 20,
    "wake_method": "power_wol", "cut_after_sleep": false, "price_kwh": null}
   ```
   `consumer.kind` is `device` (WOL device, by ID), `reservation` (by MAC) or `label` (just a name), or the field is

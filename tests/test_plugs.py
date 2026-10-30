@@ -30,7 +30,7 @@ from tests import test_api
 from wolserver import plugs
 from wolserver.plugs import fake
 from wolserver.plugs.base import PlugAuthError, PlugUnreachable
-from wolserver.plugs.http import HttpClient, digest_response, parse_challenge
+from wolserver.plugs.http import HttpClient, digest_key, digest_response, parse_challenge
 from wolserver.plugs.shelly import ShellyGen2
 
 FIXTURES = os.path.join(os.path.dirname(__file__), "fixtures", "shelly")
@@ -56,6 +56,18 @@ class DigestTest(unittest.TestCase):
     def test_rfc7616_vectors(self):
         self.assertEqual(self.response("SHA-256"), "753927fa0e85d155564e2e272a28d1802ca10daf4496794697cf8db5856cb6c1")
         self.assertEqual(self.response("MD5"), "8ca523f5e9506fed4657c9700eebdbec")
+
+    def test_key_stands_in_for_the_password(self):
+        challenge = parse_challenge(self.CHALLENGE % "SHA-256")
+        key = digest_key(challenge, "Mufasa", "Circle of Life")
+        self.assertEqual(key, {"realm": "http-auth@example.org", "algorithm": "SHA-256", "ha1": hashlib.sha256(
+            b"Mufasa:http-auth@example.org:Circle of Life").hexdigest()})
+        header = digest_response(challenge, "GET", "/dir/index.html", "Mufasa", key, 1, self.CNONCE)
+        self.assertEqual(parse_challenge(header)["response"], self.response("SHA-256"))
+        # bound to the realm: another plug (or the same one after a reset) does not accept it
+        for other in (dict(key, realm="shellyplugmg3-000000"), dict(key, algorithm="MD5")):
+            with self.assertRaisesRegex(PlugAuthError, "enter the password again"):
+                digest_response(challenge, "GET", "/", "Mufasa", other, 1, self.CNONCE)
 
     def test_parse_challenge(self):
         c = parse_challenge('Digest qop="auth", realm="shellyplugmg3-a8032a", nonce="60dc59c6", algorithm=SHA-256')
@@ -231,6 +243,55 @@ class ShellyTest(unittest.TestCase):
         self.assertTrue(self.driver("zufall-123").security()["password"])
         with self.assertRaisesRegex(plugs.PlugError, "Unknown setting"):
             d.secure(None, ["telnet"])
+
+    def test_key_in_place_of_the_password(self):
+        d = self.driver()
+        self.assertIsNone(d.make_key())  # no challenge yet
+        d.status()
+        key = d.make_key()
+        self.assertEqual(key, {"realm": FakeShelly.realm, "algorithm": "SHA-256", "ha1": hashlib.sha256(
+            ("admin:%s:geheim" % FakeShelly.realm).encode()).hexdigest()})
+        self.assertTrue(ShellyGen2(self.host, 0, "", HttpClient(timeout=2), key=key).status().on)
+        with self.assertRaises(PlugAuthError):
+            ShellyGen2(self.host, 0, "", HttpClient(timeout=2), key=dict(key, ha1="0" * 64)).status()
+        self.assertIsNone(self.driver("").make_key())
+
+    def manager_with_plug(self, **fields):
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp)
+        mgr = plugs.PlugManager(tmp, http=HttpClient(timeout=2))
+        self.addCleanup(mgr.shutdown)
+        plug = dict({"id": "p1", "name": "office", "host": self.host, "driver": "shelly-gen2", "channel": 0,
+                     "password": "", "consumer": None, "standby_w": 5.0, "locked": False}, **fields)
+        mgr._plugs.append(plug)
+        mgr._save()
+        return mgr, os.path.join(tmp, "plugs.json")
+
+    def test_manager_replaces_a_stored_password_by_the_key(self):
+        mgr, path = self.manager_with_plug(password="geheim")  # stored before keys existed
+        self.assertIsNone(mgr.live("p1", max_age=0)["error"])
+        stored = mgr.get("p1")
+        self.assertEqual((stored["password"], stored["key"]["realm"]), ("", FakeShelly.realm))
+        with open(path, encoding="utf-8") as f:
+            self.assertNotIn("geheim", f.read())
+        self.assertTrue(mgr.get_public("p1")["has_password"])
+        self.assertNotIn("key", mgr.get_public("p1"))
+        reloaded = plugs.PlugManager(os.path.dirname(path), http=HttpClient(timeout=2))
+        self.addCleanup(reloaded.shutdown)
+        self.assertIsNone(reloaded.live("p1", max_age=0)["error"])  # the key alone is enough
+
+    def test_manager_keeps_only_the_key_of_a_new_password(self):
+        mgr, path = self.manager_with_plug(password="geheim")
+        mgr.live("p1", max_age=0)
+        FakeShelly.new_password = "neu-und-lang"
+        mgr.secure("p1", "neu-und-lang", [])
+        stored = mgr.get("p1")
+        self.assertEqual(stored["password"], "")
+        self.assertEqual(stored["key"]["ha1"], hashlib.sha256(("admin:%s:neu-und-lang" % FakeShelly.realm)
+                                                              .encode()).hexdigest())
+        with open(path, encoding="utf-8") as f:
+            self.assertNotIn("neu-und-lang", f.read())
+        self.assertIsNone(mgr.live("p1", max_age=0)["error"])
 
     def test_factory_power_on_state(self):
         d = self.driver()

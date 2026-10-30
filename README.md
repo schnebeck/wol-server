@@ -534,7 +534,10 @@ cycles used, plug unreachable for 5 minutes.
 **Notes:**
 - Plugs measure poorly below about 1 W; a Shelly then shows 0 W and counts no energy. A Pi Zero on its own plug
   therefore mostly reads 0 W.
-- The plug passwords stay on the server (`plugs.json`, mode 0600); the GUI never gets them back.
+- The plug passwords stay on the server (`plugs.json`, mode 0600); the GUI never gets them back. For a Shelly the
+  server does not even keep the password: after the first successful login it stores only the digest key derived
+  from it (HA1, the value the plug keeps itself). That key works for this one plug only, so the file does not give
+  away a password that may be in use elsewhere. Plugs saved with their password are switched over by themselves.
 - The energy log is easy on the SD card: values of the running hour stay in RAM and are written once per hour.
 - The plug endpoints need a GUI session; API tokens are limited to devices.
 
@@ -596,7 +599,7 @@ Files:
 /var/lib/wol-server/data.json    devices, schedules, log (written atomically)
 /var/lib/wol-server/auth.json    password hash (PBKDF2) + cookie secret, mode 0600
 /var/lib/wol-server/.ssh/        SSH key and known_hosts for putting devices to sleep
-/var/lib/wol-server/plugs.json   plugs incl. their passwords, price per kWh, mode 0600
+/var/lib/wol-server/plugs.json   plugs incl. their keys (or passwords), price per kWh, mode 0600
 /var/lib/wol-server/energy.db    energy log (SQLite, one row per plug and hour)
 /var/lib/wol-server/requests.json   open requests and remembered sleeps
 /etc/wol-server/tls/             HTTPS: cert.pem, key.pem, fetch_key (fetching), known_hosts (web server)
