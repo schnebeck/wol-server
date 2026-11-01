@@ -210,6 +210,24 @@ class AppTest(unittest.TestCase):
         self.assertEqual((event["action"], event["ok"], event["message"]),
                          ("sleep", True, "Already off or asleep - nothing to do"))
 
+    def test_a_second_wake_waits_for_the_first(self):
+        sent = []
+        with mock.patch("wolserver.wol.send_magic_packet", lambda *a, **kw: sent.append(a)), \
+                mock.patch.object(self.app.status, "_checker", lambda host: False):
+            self.app.run_action(self.device, "wake", "manual")
+            ok, message = self.app.run_action(self.device, "wake", "API: laptop")
+            self.assertEqual((ok, message, len(sent)),
+                             (True, "Magic packet sent again: backup is still starting (woken 0 s ago)", 2))
+        # It answers: the next wake is an ordinary one again, also after a sleep
+        self.app.status.invalidate(self.device["id"])
+        with mock.patch("wolserver.wol.send_magic_packet", lambda *a, **kw: sent.append(a)), \
+                mock.patch.object(self.app.status, "_checker", lambda host: True):
+            self.assertTrue(self.app._answers(self.device))
+            self.assertTrue(self.app.run_action(self.device, "wake", "manual")[1].startswith("Magic packet sent to "))
+        with mock.patch("wolserver.server.check_host", lambda host: False):
+            self.app.run_action(self.device, "sleep", "manual")
+        self.assertEqual(self.app._waking, {})
+
     def test_contradictions_are_shown_and_logged_once(self):
         self.app.CONFLICT_SECONDS = 0
         self.app.requests.create(self.device, "laptop-backup", 900, "manual")

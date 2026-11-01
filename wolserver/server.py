@@ -198,6 +198,8 @@ class App:
                                online=self._answers, live=self._plug_status, cycle=self._hang_cycle,
                                on_event=self.store.add_event)
         self._conflicts = {}  # device id -> {key: {message, since, logged}}: contradictions in the shown state
+        self._waking = {}  # device id -> time.monotonic() of a wake the device has not answered yet
+        self._waking_lock = threading.Lock()
         self.scheduler = Scheduler(self.store, self.run_scheduled, run_plug=self.run_plug_action)
         self.started = time.time()
         self._static_cache = {}
@@ -325,7 +327,33 @@ class App:
 
     def _answers(self, device):
         """Ping status of a device (cached briefly), None without a host."""
-        return self.status.get([device]).get(device["id"]) if device.get("host") else None
+        if not device.get("host"):
+            return None
+        return self._answered(self.status.get([device]))[device["id"]]
+
+    def _answered(self, status):
+        """A device that answers is no longer being woken. Returns status."""
+        with self._waking_lock:
+            for device_id, online in status.items():
+                if online:
+                    self._waking.pop(device_id, None)
+        return status
+
+    def _still_starting(self, device):
+        """Seconds since an earlier wake that the device has not answered yet (it is still starting), or None -
+        then this wake is noted as the start. Checked and noted at once: two requests at the same moment are one
+        wake and one that waits for it."""
+        now = time.monotonic()
+        with self._waking_lock:
+            since = self._waking.get(device["id"])
+            if since is None or now - since >= self.WAKE_SECONDS:
+                self._waking[device["id"]] = now
+                return None
+        if not self._answers(device):
+            return round(now - since)
+        with self._waking_lock:  # it is up: an ordinary wake
+            self._waking[device["id"]] = now
+        return None
 
     def _plug_status(self, plug_id):
         """Live status of a plug ({"on", "power_w", ...}), None if it does not answer."""
@@ -359,18 +387,31 @@ class App:
             if source_ip == wifi.HOTSPOT_ADDRESS:
                 ok, message = False, "Not executed: the Pi is not on the home network (setup hotspot active)"
             elif action == "wake":
-                ok, message = self._power_wake(device, source)
+                starting = self._still_starting(device)
+                if starting is None:
+                    ok, message = self._power_wake(device, source)
+                else:
+                    # A second wake while the first one's device starts: the plug may not switch again, a power
+                    # cycle would cut the start off. A magic packet does no harm and covers a lost first one.
+                    plug = self.plugs.for_device(device["id"])
+                    ok, message = (True, "Already being woken (%d s ago): the power stays as it is" % starting) \
+                        if plug and plug.get("wake_method") == "power" else (None, None)
                 if message is None:
                     wol.send_magic_packet(
                         device["mac"], device["broadcast"], device["wol_port"], source_ip=source_ip
                     )
-                    if iface:
+                    if starting is not None:
+                        ok, message = True, "Magic packet sent again: %s is still starting (woken %d s ago)" % (
+                            device["name"], starting)
+                    elif iface:
                         ok, message = True, "Magic packet sent to %s via %s" % (device["mac"], iface["name"])
                     else:
                         ok, message = True, "Magic packet sent to %s" % device["mac"]
             else:
                 # The WOL-Server's own inhibitor would make the device refuse (e.g. wol-sleep): let go first
                 self.holds.release(device["id"])
+                with self._waking_lock:
+                    self._waking.pop(device["id"], None)
                 if device.get("host") and not check_host(device["host"]):
                     # Asleep or off already (a person, its own power management, an earlier try): that is the
                     # wanted state, not an SSH error to retry - and no sleep command for a device that cannot hear it
@@ -392,6 +433,7 @@ class App:
         return ok, message
 
     POWER_WOL_DELAY = 15  # s from power on to the magic packet: the network card needs power first
+    WAKE_SECONDS = 300  # s a woken device may take to answer; another wake in that time switches no power
     CUT_WAIT = 300  # s: how long the device may take to shut down before its power is cut
     CUT_INTERVAL = 10
     HOUR_VIEW_MAX_AGE = 3  # s: the live view polls every 5 s and should get a fresh reading each time
@@ -669,6 +711,7 @@ class App:
             time.sleep(3)
             online = check_host(device["host"])
         self.status.invalidate(device["id"])
+        self._answered({device["id"]: online})
         result.update(online=online, waited=round(time.monotonic() - start))
         if online != want:
             result.update(ok=False, message=("%s did not come online within %d s" if want
@@ -819,7 +862,7 @@ class App:
 
     def api_status(self, req):
         devices = self.store.list("devices")
-        status = self.status.get(devices)
+        status = self._answered(self.status.get(devices))
         power_ = self._device_power(devices)
         requests = self.requests.snapshot([d["id"] for d in devices])
         holds = {d["id"]: h for d in devices if (h := self.holds.state(d["id"]))}

@@ -2,9 +2,11 @@
 // Keys with {0}, {1} … are patterns (see i18n.js); keep the keys identical to the texts
 // in index.html, app.js and the server messages.
 window.I18N_DE = {
+ "Already being woken ({0} s ago): the power stays as it is": "Wird bereits geweckt (vor {0} s): der Strom bleibt, wie er ist",
  "Hangs (no answer for {0} s at {1} W): {2} ({3}/{4})": "Hängt (seit {0} s keine Antwort bei {1} W): {2} ({3}/{4})",
  "Hangs (no answer for {0} s at {1} W), power cycle failed: {2}": "Hängt (seit {0} s keine Antwort bei {1} W), Strom-Neustart fehlgeschlagen: {2}",
  "Hangs: still no answer after {0} power cycles · automatic restart given up": "Hängt: auch nach {0} Neustarts keine Antwort · automatischer Neustart aufgegeben",
+ "Magic packet sent again: {0} is still starting (woken {1} s ago)": "Magic Packet erneut gesendet: {0} startet noch (geweckt vor {1} s)",
  "hang watch": "Hänger-Überwachung",
  "Needs a host or IP address above: it watches the ping.": "Braucht oben einen Host oder eine IP-Adresse: Die Überwachung nutzt den Ping.",
  "Needs the running threshold of the plug first (Plugs → Edit → Advanced → Running from).": "Braucht zuerst die Betriebsschwelle der Steckdose (Steckdosen → Bearbeiten → Erweitert → In Betrieb ab).",

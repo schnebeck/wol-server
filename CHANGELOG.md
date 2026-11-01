@@ -5,6 +5,11 @@ What changed in which version. The version is also shown in the GUI (*System →
 
 ## Unreleased
 
+- **A second wake while the device starts:** each wake started from scratch. With the wake method "Power" or "Power
+  on, then WOL", a second request that came while the device was still starting at standby power cycled the plug -
+  and cut off the start the first request had begun. Now the WOL-Server remembers a wake until the device answers,
+  for at most 5 minutes. A wake in that time sends the magic packet again and leaves the plug alone ("Already being
+  woken"). The request itself counts as always and waits for the device.
 - **Restart when it hangs:** a new option at the link of a device and its plug (*Edit device → Plug*). If the device
   does not answer ping while its plug measures more than the running threshold, without a break for the time set
   (default 900 s, from 60 s), the plug cycles the power, at most twice in a row; an answer starts over. Until now a device

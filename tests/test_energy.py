@@ -259,16 +259,24 @@ class LinkedDeviceTest(unittest.TestCase):
         self.assertEqual((status, res["message"]), (200, "Power switched on via plug-office"))
         self.assertTrue(self.dev.on)
         self.assertEqual(self.sent, [])
+        # A second wake while it starts, still at standby power: no power cycle that would cut the start off
+        switches = self.dev.switch_count
+        status, res = self.call("POST", "/api/devices/%s/wake" % self.device["id"])
+        self.assertEqual((status, res["message"]), (200, "Already being woken (0 s ago): the power stays as it is"))
+        self.assertEqual((self.dev.switch_count, self.sent), (switches, []))
+        self.app._waking.clear()  # the start is long over
         # Relay on, device in standby: a power cycle starts it
         status, res = self.call("POST", "/api/devices/%s/wake" % self.device["id"])
         self.assertEqual(res["message"], "Power cycle via plug-office: the device starts when the power returns")
         self.dev.set(True)
         self.dev.load_w = 90
+        self.app._waking.clear()
         status, res = self.call("POST", "/api/devices/%s/wake" % self.device["id"])
         self.assertEqual(res["message"], "Power is already on: Office PC draws 90 W")
         # Power on, then WOL
         self.link(wake_method="power_wol")
         self.dev.on, self.dev.load_w = False, 0
+        self.app._waking.clear()
         with mock.patch("wolserver.server.App.POWER_WOL_DELAY", 0):
             status, res = self.call("POST", "/api/devices/%s/wake" % self.device["id"])
         self.assertTrue(self.dev.on)
@@ -283,15 +291,23 @@ class LinkedDeviceTest(unittest.TestCase):
         self.assertEqual((status, len(self.sent), self.dev.switch_count), (200, 1, 0))
         # ... with the relay off the packet would reach nothing: power first, then the packet
         self.dev.on = False
+        self.app._waking.clear()
         with mock.patch("wolserver.server.App.POWER_WOL_DELAY", 0):
             status, res = self.call("POST", "/api/devices/%s/wake" % self.device["id"])
         self.assertEqual((status, self.dev.on, len(self.sent)), (200, True, 2))
         events = [e["action"] for e in self.call("GET", "/api/events")[1]["events"]]
         self.assertEqual(events[:2], ["wake", "power_on"])
+        # Woken a moment ago and not answering yet: only the packet again, the plug is left alone
+        self.dev.on = False
+        status, res = self.call("POST", "/api/devices/%s/wake" % self.device["id"])
+        self.assertEqual((status, res["message"], self.dev.on, len(self.sent)),
+                         (200, "Magic packet sent again: Office PC is still starting (woken 0 s ago)", False, 3))
+        self.dev.on = True
+        self.app._waking.clear()
         # A plug that does not answer does not stop the packet
         fake.FakePlug.devices = {}
         status, res = self.call("POST", "/api/devices/%s/wake" % self.device["id"])
-        self.assertEqual((status, len(self.sent)), (200, 3))
+        self.assertEqual((status, len(self.sent)), (200, 4))
 
     def test_cut_after_sleep(self):
         self.link(cut_after_sleep=True)

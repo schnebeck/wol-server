@@ -753,7 +753,10 @@ erledigt das alles selbst, mit `WOL_SERVER_URL`, `WOL_SERVER_TOKEN` und `WOL_DEV
   - `POST …/requests`: 201 mit `id`, `client`, `ttl`, `expires` (Unix-Zeit, `null` bei `ttl` 0), `online` und
     `woken` (`true`, wenn der Rechner nicht antwortete und diese Anforderung ihn geweckt hat; ein Client kann Schlafen
     dann nur für einen Rechner beantragen, den er selbst geweckt hat, und einer, den jemand eingeschaltet hat, bleibt an).
-    Auch bei 502 und 504 bleibt die Anforderung offen.
+    Auch bei 502 und 504 bleibt die Anforderung offen. Kommt eine Anforderung, während der Rechner von einem früheren
+    Wecken noch startet (bis zu 5 Minuten, bis er antwortet), wartet sie auf dieses Wecken: Sie schickt das Magic Packet
+    noch einmal, was nicht schadet, schaltet aber nie die Steckdose - ein Strom-Neustart würde den Start abbrechen.
+    Das gilt ebenso für den Button, Zeitpläne und den Halt.
   - `PUT …/requests/<id>`: 200 mit dem neuen `expires`; 404, wenn die Anforderung abgelaufen ist oder beendet wurde.
   - `DELETE …/requests/<id>`: 200 mit `sleep` (`"pending"` oder `null`), `waiting_for` (Clients, die den Rechner
     noch halten) und `sleep_at`.

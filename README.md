@@ -734,7 +734,10 @@ later) does all of this by itself with `WOL_SERVER_URL`, `WOL_SERVER_TOKEN` and 
   - `POST …/requests`: 201 with `id`, `client`, `ttl`, `expires` (Unix time, `null` for `ttl` 0), `online` and
     `woken` (`true` if the device did not answer and this request woke it; a client can then ask for sleep
     only for a device it woke, and one that someone switched on stays on).
-    The request also stays open on 502 and 504.
+    The request also stays open on 502 and 504. A request that comes while the device is still starting from an
+    earlier wake (up to 5 minutes, until it answers) waits for that wake: it sends the magic packet again, which does
+    no harm, but never switches the plug - a power cycle would cut the start off. The same holds for the button,
+    schedules and the hold.
   - `PUT …/requests/<id>`: 200 with the new `expires`; 404 if the request has expired or was ended.
   - `DELETE …/requests/<id>`: 200 with `sleep` (`"pending"` or `null`), `waiting_for` (clients still holding
     the device) and `sleep_at`.
