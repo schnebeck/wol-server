@@ -174,6 +174,8 @@ class HttpsServerTest(unittest.TestCase):
         conn.close()
         original = server_mod.Handler._client_ip
         server_mod.Handler._client_ip = lambda self: server_mod.Handler._plain_ip("192.168.7.12")
+        allows = self.app.access.allows
+        self.app.access.allows = lambda ip: True  # a client in the home network, whatever network this machine is in
         try:
             conn = http.client.HTTPConnection("127.0.0.1", self.http.server_address[1], timeout=10)
             conn.request("GET", "/geraete?x=1")
@@ -188,6 +190,7 @@ class HttpsServerTest(unittest.TestCase):
             conn.close()
         finally:
             server_mod.Handler._client_ip = original
+            self.app.access.allows = allows
 
     def test_secure_cookie_over_https(self):
         self.app.auth.set_password("geheim123")
