@@ -47,6 +47,7 @@ const state = {
   power: {},
   requests: {},
   holds: {},
+  hangs: {},
   conflicts: {},
 };
 
@@ -308,6 +309,7 @@ async function refreshStatus() {
     state.power = data.power || {};
     state.requests = data.requests || {};
     state.holds = data.holds || {};
+    state.hangs = data.hangs || {};
     state.conflicts = data.conflicts || {};
     const online = Object.values(data.status).filter((s) => s === true).length;
     $("#status-line").textContent =
@@ -396,6 +398,7 @@ function deviceCard(d) {
     requestsLine(d),
     // What the server found contradictory in the state shown here (also in its log)
     (state.conflicts[d.id] || []).map((message) => el("p", { class: "plug-warn" }, icon("alert"), " ", tr(message))),
+    hangLine(d),
     // Wake only what is not online, sleep only what is not known to be off (ping status, not the guess)
     el("div", { class: "card-actions" },
       el("button", {
@@ -407,6 +410,22 @@ function deviceCard(d) {
         title: !canSleep ? t("No sleep method configured") : offline ? t("Already off or asleep") : "",
         onclick: (e) => deviceAction(d, "sleep", e.currentTarget),
       }, icon("moon"), t("Sleep"))));
+}
+
+// Hang watch (Restart when it hangs): what it sees and what it did
+const fmtWait = (seconds) => (seconds < 120 ? `${seconds} s` : `${Math.ceil(seconds / 60)} min`);
+
+function hangLine(d) {
+  const h = state.hangs && state.hangs[d.id];
+  if (!h) return null;
+  const text = {
+    hanging: h.restarts
+      ? t("Still no answer after power cycle {0} of {1} · next one in {2}", h.restarts, h.max_restarts, fmtWait(h.restart_in))
+      : t("No answer at running power · power cycle in {0}", fmtWait(h.restart_in)),
+    restarted: t("Power cycled ({0} of {1}) · waiting for an answer", h.restarts, h.max_restarts),
+    gave_up: t("Hangs: still no answer after {0} power cycles · automatic restart given up", h.restarts),
+  }[h.state];
+  return text ? el("p", { class: "plug-warn" }, icon("alert"), " ", text) : null;
 }
 
 // Requests: clients that hold the device through the API (they keep it awake), and a remembered sleep
@@ -590,6 +609,8 @@ function fillDevicePlug(device) {
   const method = (linked && linked.wake_method) || "wol";
   for (const radio of form.querySelectorAll("input[name=wake_method]")) radio.checked = radio.value === method;
   form.elements.cut_after_sleep.checked = Boolean(linked && linked.cut_after_sleep);
+  form.elements.restart_when_hung.checked = Boolean(linked && linked.restart_when_hung);
+  form.elements.hang_seconds.value = (linked && linked.hang_seconds) || 900;
   updateDevicePlug();
 }
 
@@ -602,6 +623,14 @@ function updateDevicePlug() {
   const power = editingDevice && state.power[editingDevice.id];
   $("#device-plug-hint").textContent = plug && power && power.plug_id === plug.id && power.reachable
     ? t("Measured now: {0} W", fmtWatt(power.power_w)) : "";
+  // Restart when it hangs: needs the ping (host) and the running threshold of the plug (suspend is not a hang)
+  const box = form.elements.restart_when_hung;
+  const missing = !plug ? "" : !form.elements.host.value.trim() ? t("Needs a host or IP address above: it watches the ping.")
+    : plug.running_w == null ? t("Needs the running threshold of the plug first (Plugs → Edit → Advanced → Running from).") : "";
+  box.disabled = Boolean(missing);
+  if (missing) box.checked = false;
+  $("#hang-hint").textContent = missing || (plug ? t("No answer to ping while the plug measures more than {0} W: power cycle, at most twice in a row.", fmtWatt(plug.running_w)) : "");
+  $("#hang-seconds-field").hidden = !box.checked;
 }
 
 // Show the device's static IP in the network (DHCP reservation), only if network management is running.
@@ -641,8 +670,9 @@ async function onDeviceSubmit(event) {
   data.hold = data.sleep_method === "ssh" && form.elements.hold.checked;
   const plugLink = {
     plug_id: data.plug_id || null, wake_method: data.wake_method || "wol", cut_after_sleep: Boolean(form.elements.cut_after_sleep.checked),
+    restart_when_hung: Boolean(form.elements.restart_when_hung.checked), hang_seconds: Number(data.hang_seconds) || 900,
   };
-  for (const key of ["plug_id", "wake_method", "cut_after_sleep"]) delete data[key];
+  for (const key of ["plug_id", "wake_method", "cut_after_sleep", "restart_when_hung", "hang_seconds"]) delete data[key];
   await busy($("button[type=submit]", form), async () => {
     try {
       const saved = editingDevice ? await api("PUT", `/api/devices/${editingDevice.id}`, data) : await api("POST", "/api/devices", data);
@@ -3551,6 +3581,8 @@ function bind() {
   });
   $("#device-plug").addEventListener("change", updateDevicePlug);
   for (const radio of $$("#device-form input[name=wake_method]")) radio.addEventListener("change", updateDevicePlug);
+  $("#device-form").elements.restart_when_hung.addEventListener("change", updateDevicePlug);
+  $("#device-form").elements.host.addEventListener("input", updateDevicePlug);
   for (const tab of $$("#plug-subtabs .subtab")) tab.addEventListener("click", () => setPlugSub(tab.dataset.sub));
   $("#energy-period").addEventListener("change", (e) => {
     plugView.period = e.target.value;

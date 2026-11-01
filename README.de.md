@@ -536,6 +536,12 @@ Gen3); weitere Hersteller brauchen nur einen Treiber. Hintergrund und Entscheidu
 - **Nach „Schlafen“ den Strom abschalten:** Nach *Schlafen* schaltet die Steckdose ab, sobald die Leistung auf
   Standby gefallen ist. Nur für einen Schlaf-Befehl, der den Rechner herunterfährt: Ein Rechner im Standby (Suspend to
   RAM) verlöre seine ungesicherte Arbeit.
+- **Neu starten, wenn er hängt:** Antwortet der Rechner nicht auf Ping, während die Steckdose mehr als ihre Schwelle
+  *In Betrieb ab* misst, und das ohne Unterbrechung für *Neustart nach* Sekunden (Voreinstellung 900, z. B. 150 für
+  einen Server, der nach einer Minute läuft), macht die Steckdose einen Stromneustart – höchstens zweimal hintereinander, eine Antwort setzt die Zählung zurück. Für einen
+  Rechner, der in der Firmware oder beim Booten hängt und auf kein Magic Packet mehr reagiert. Braucht einen Host für
+  den Ping und die Betriebsschwelle der Steckdose; die Zeit länger wählen als der langsamste Start (Dateisystemprüfung).
+  Das BIOS muss den Rechner bei Stromrückkehr starten.
 - Die Rechnerkarte zeigt die Leistung und öffnet von dort das Schalten der Steckdose; der Status unterscheidet
   *Standby*, *Ohne Strom*, *Startet oder fährt herunter* und *Reagiert nicht* (zieht Strom, antwortet aber nicht auf
   Ping).

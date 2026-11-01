@@ -5,6 +5,12 @@ What changed in which version. The version is also shown in the GUI (*System →
 
 ## Unreleased
 
+- **Restart when it hangs:** a new option at the link of a device and its plug (*Edit device → Plug*). If the device
+  does not answer ping while its plug measures more than the running threshold, without a break for the time set
+  (default 900 s, from 60 s), the plug cycles the power, at most twice in a row; an answer starts over. Until now a device
+  that hung in the firmware or while booting after a wake stayed on and deaf to every further magic packet until
+  someone switched it off by hand. The device card counts down to the power cycle and names a given-up restart;
+  each power cycle goes into the log with the source "hang watch".
 - **Plug passwords:** `plugs.json` no longer keeps the password of a Shelly. After the first successful login the
   server stores only the digest key derived from it (HA1, which the plug keeps itself). The key works for that one
   plug only, so the file does not give away a password that may be in use elsewhere. Plugs saved with their password

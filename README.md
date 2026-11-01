@@ -524,6 +524,11 @@ only need a driver. Background and decisions: [docs/proposal-smart-plugs.md](doc
   power cycle.
 - **Cut the power after "Sleep":** after *Sleep* the plug switches off once the draw has dropped to standby. Only
   for a sleep command that shuts the device down: a device in suspend to RAM would lose its unsaved work.
+- **Restart when it hangs:** if the device does not answer ping while the plug measures more than its *Running from*
+  threshold, without a break for *Restart after* seconds (default 900, e.g. 150 for a server that is up in a minute),
+  the plug cycles the power - at most twice in a row, an answer starts over. For a device that hangs in the firmware or while booting, where no magic packet
+  helps any more. Needs a host for the ping and the running threshold of the plug; choose the time longer than the
+  slowest start (a file system check). The BIOS must start the device when the power returns.
 - The device card shows the power and opens the plug's switch from there; the status tells *Standby*, *No power*,
   *Starting or shutting down* and *Not responding* (draws power, but no answer to ping) apart.
 

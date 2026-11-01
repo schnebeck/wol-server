@@ -669,6 +669,15 @@ echo "$USER ALL=(root) NOPASSWD: /usr/bin/systemctl suspend, /usr/bin/systemctl 
             <input type="checkbox" name="cut_after_sleep">
             <span>Cut the power after "Sleep" <small class="muted">Only if the sleep command shuts the device down. A device in standby (suspend to RAM) loses its unsaved work.</small></span>
           </label>
+          <label class="check">
+            <input type="checkbox" name="restart_when_hung">
+            <span>Restart when it hangs <small class="muted" id="hang-hint"></small></span>
+          </label>
+          <label class="field" id="hang-seconds-field">
+            <span>Restart after</span>
+            <div class="input-unit"><input name="hang_seconds" type="number" min="60" max="14400" step="10" value="900"><span>s</span></div>
+            <small>Without an answer at running power, without a break. Long enough for the slowest start, e.g. a file system check.</small>
+          </label>
         </div>
       </fieldset>
       <p class="form-error" hidden></p>

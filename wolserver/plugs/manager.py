@@ -70,6 +70,7 @@ class PlugManager:
     CYCLE_SECONDS = 10
     POLL_SECONDS = 60  # background reading for the energy log and the alerts
     DEFAULT_STANDBY_W = 5.0
+    DEFAULT_HANG_SECONDS = 900
     # Alerts
     WELD_W = 1.0  # relay off, but more than this flows ...
     WELD_SECONDS = 30  # ... for longer than this: contacts may be welded
@@ -227,7 +228,8 @@ class PlugManager:
         return plug
 
     def _validate_device_options(self, data, plug):
-        """What a plug does for its device: wake method, power cut after sleep, running threshold."""
+        """What a plug does for its device: wake method, power cut after sleep, running threshold, restart when it
+        hangs."""
         method = data.get("wake_method", plug.get("wake_method")) or "wol"
         if method not in WAKE_METHODS:
             raise PlugError("Unknown wake method")
@@ -243,6 +245,21 @@ class PlugManager:
                 raise PlugError("Running threshold: number expected") from None
             if not plug["standby_w"] < plug["running_w"] <= 4000:
                 raise PlugError("Running threshold must be above the standby threshold (max. 4000 W)")
+        # Hang watch (wolserver/watchdog.py): power cycle after hang_seconds at running power without an answer
+        plug["restart_when_hung"] = bool(data.get("restart_when_hung", plug.get("restart_when_hung", False)))
+        seconds = data.get("hang_seconds", plug.get("hang_seconds"))
+        try:
+            plug["hang_seconds"] = int(self.DEFAULT_HANG_SECONDS if seconds in (None, "") else seconds)
+        except (TypeError, ValueError):
+            raise PlugError("Restart after: number of seconds expected") from None
+        if not 60 <= plug["hang_seconds"] <= 14400:
+            raise PlugError("Restart after must be between 60 and 14400 seconds")
+        if plug["restart_when_hung"]:
+            if plug["running_w"] is None:
+                raise PlugError("Restart when it hangs needs the running threshold of the plug (Running from): the "
+                                "standby threshold alone cannot tell suspend from a hang")
+            if plug.get("locked"):
+                raise PlugError("%s supplies the WOL-Server or the network: it is never switched off" % plug["name"])
 
     def _check_unique_consumer(self, plug):
         """A device (and the WOL-Server itself) has at most one plug."""

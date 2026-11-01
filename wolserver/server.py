@@ -34,6 +34,7 @@ from urllib.parse import parse_qs, unquote, urlsplit
 from . import __version__, dnsclient, models, netinfo, plugs, power, wifi, wol
 from .devrequests import DeviceRequests, RequestError
 from .hold import DeviceHolds
+from .watchdog import HangWatch
 from .auth import ApiTokens, Auth, LoginLimiter
 from .scheduler import Scheduler, next_run
 from .status import StatusMonitor, check_host
@@ -193,6 +194,9 @@ class App:
         self.holds = DeviceHolds(self.identity, device_lookup=lambda device_id: self.store.get("devices", device_id),
                                  requested=self.requests.open_clients, online=self._answers,
                                  wake=lambda device, source: self.run_action(device, "wake", source))
+        self.hangs = HangWatch(devices=lambda: self.store.list("devices"), plug_for=self.plugs.for_device,
+                               online=self._answers, live=self._plug_status, cycle=self._hang_cycle,
+                               on_event=self.store.add_event)
         self._conflicts = {}  # device id -> {key: {message, since, logged}}: contradictions in the shown state
         self.scheduler = Scheduler(self.store, self.run_scheduled, run_plug=self.run_plug_action)
         self.started = time.time()
@@ -309,8 +313,10 @@ class App:
         self.plugs.start()
         self.requests.start()
         self.holds.start()
+        self.hangs.start()
 
     def stop(self):
+        self.hangs.stop()
         self.holds.stop()
         self.requests.stop()
         self.scheduler.stop()
@@ -320,6 +326,20 @@ class App:
     def _answers(self, device):
         """Ping status of a device (cached briefly), None without a host."""
         return self.status.get([device]).get(device["id"]) if device.get("host") else None
+
+    def _plug_status(self, plug_id):
+        """Live status of a plug ({"on", "power_w", ...}), None if it does not answer."""
+        try:
+            return self.plugs.live(plug_id)["status"]
+        except KeyError:
+            return None
+
+    def _hang_cycle(self, plug, device):
+        """Power cycle of a hanging device. It draws running power, so rule 1 is confirmed here: the hang watch
+        has seen it hang for the whole time set at the device."""
+        message = self.plugs.switch(plug["id"], "cycle", confirm=True, source="hang watch", log_event=False)
+        self.status.invalidate(device["id"])
+        return message
 
     # -- Actions (used by API and scheduler) --
 
@@ -619,10 +639,13 @@ class App:
 
     def api_device_plug(self, req, item_id):
         """The plug of a device (or none), with what it does for the device."""
-        self._device_or_404(item_id)
+        device = self._device_or_404(item_id)
         b = req.body
+        if b.get("plug_id") and b.get("restart_when_hung") and not device.get("host"):
+            raise ApiError(400, "Restart when it hangs needs a host or IP address for the device: it watches the ping")
         self._plug_call(self.plugs.link_device, item_id, b.get("plug_id") or None,
-                        {k: b[k] for k in ("wake_method", "cut_after_sleep", "running_w") if k in b})
+                        {k: b[k] for k in ("wake_method", "cut_after_sleep", "running_w", "restart_when_hung",
+                                           "hang_seconds") if k in b})
         plug = self.plugs.for_device(item_id)
         return 200, {"plug": self.plugs.public(plug) if plug else None}
 
@@ -800,9 +823,10 @@ class App:
         power_ = self._device_power(devices)
         requests = self.requests.snapshot([d["id"] for d in devices])
         holds = {d["id"]: h for d in devices if (h := self.holds.state(d["id"]))}
+        hangs = {d["id"]: h for d in devices if (h := self.hangs.state(d["id"]))}
         conflicts = self._check_conflicts(devices, status, power_, requests)
-        return 200, {"status": status, "power": power_, "requests": requests, "holds": holds, "conflicts": conflicts,
-                     "checked": time.time()}
+        return 200, {"status": status, "power": power_, "requests": requests, "holds": holds, "hangs": hangs,
+                     "conflicts": conflicts, "checked": time.time()}
 
     CONFLICT_SECONDS = 30  # a contradiction counts once it lasts this long (ping and power are not read at once)
     BOOT_SECONDS = 300  # a freshly requested device may take this long to answer
@@ -863,7 +887,7 @@ class App:
                 "plug_id": plug["id"], "plug": plug["name"], "reachable": bool(st), "on": st.get("on"),
                 "power_w": st.get("power_w"), "standby_w": plug.get("standby_w"), "running_w": plug.get("running_w"),
                 "wake_method": plug.get("wake_method", "wol"), "cut_after_sleep": bool(plug.get("cut_after_sleep")),
-                "locked": bool(plug.get("locked")),
+                "restart_when_hung": bool(plug.get("restart_when_hung")), "locked": bool(plug.get("locked")),
             }
         return out
 
