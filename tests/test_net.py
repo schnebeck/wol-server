@@ -508,7 +508,7 @@ class ManagerTest(unittest.TestCase):
         self.sys = Systemctl()
         self.now = 1_700_000_000.0
         self.ifaces = [{"name": "wlan0", "kind": "wifi", "up": True, "address": "192.168.7.8", "netmask": "255.255.255.0"}]
-        self.arp = {"192.168.7.10": "a8:b8:e0:23:47:fe"}
+        self.arp = {"192.168.7.10": "00:11:22:33:44:55"}
         self.static, self.probed = set(), []  # devices with a static address: not in the ARP cache until asked
 
         def probe(ips):

@@ -249,7 +249,7 @@ class ApiTokenTest(unittest.TestCase):
 
     def test_tokens(self):
         from unittest import mock
-        device = self.app.store.add("devices", {"name": "Backup-Server", "mac": "a8:b8:e0:23:47:fe", "host": "192.168.7.10",
+        device = self.app.store.add("devices", {"name": "Backup-Server", "mac": "00:11:22:33:44:55", "host": "192.0.2.10",
                                                 "broadcast": "255.255.255.255", "wol_port": 9, "sleep_method": "none"})
         entry = self.app.tokens.create("backup script")
         token = entry["token"]
@@ -260,7 +260,7 @@ class ApiTokenTest(unittest.TestCase):
         # Wake by name, case-insensitive, without CSRF header
         status, data = self.request("POST", "/api/devices/backup-server/wake", token)
         self.assertEqual((status, data["ok"], data["device"]), (200, True, "Backup-Server"))
-        self.assertEqual(self.sent[0][0], "a8:b8:e0:23:47:fe")
+        self.assertEqual(self.sent[0][0], "00:11:22:33:44:55")
         self.assertEqual(self.app.store.list("events")[0]["source"], "API: backup script")
         self.assertEqual(self.request("POST", "/api/devices/%s/wake" % device["id"], token)[0], 200)
         self.assertEqual(self.request("POST", "/api/devices/nas/wake", token)[0], 404)

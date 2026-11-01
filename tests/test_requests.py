@@ -161,12 +161,13 @@ class RequestApiTest(unittest.TestCase):
         self.sent, self.slept = [], []
         for target, fn in (("wolserver.wol.send_magic_packet", lambda *a, **kw: self.sent.append(a)),
                            ("wolserver.power.sleep_device", lambda d, *a, **kw: (self.slept.append(d["name"]) or True,
-                                                                                  "SSH command executed"))):
+                                                                                  "SSH command executed")),
+                           ("wolserver.server.check_host", lambda host: True)):  # the device answers, unless a test says otherwise
             patcher = mock.patch(target, fn)
             patcher.start()
             self.addCleanup(patcher.stop)
         self.device = self.app.store.add("devices", {
-            "name": "backup", "mac": "a8:b8:e0:23:47:fe", "host": "192.168.7.10", "broadcast": "255.255.255.255",
+            "name": "backup", "mac": "00:11:22:33:44:55", "host": "192.0.2.10", "broadcast": "255.255.255.255",
             "wol_port": 9, "sleep_method": "ssh", "ssh_user": "root", "ssh_port": 22, "ssh_command": "poweroff"})
         self.token = self.app.tokens.create("laptop")["token"]
 
