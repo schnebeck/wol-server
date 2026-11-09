@@ -197,7 +197,7 @@ class ManagerTest(unittest.TestCase):
         mgr, clock = make_manager(fake, self.tmp, hotspot_delay_minutes=5)
         mgr.tick()
         self.assertEqual(mgr.snapshot()["ssid"], "Heim")
-        fake.address = None
+        fake.address, fake.connect_ok = None, False  # out of reach
         clock.now += 240
         mgr.tick()
         self.assertIsNone(fake.address)
@@ -213,7 +213,7 @@ class ManagerTest(unittest.TestCase):
         self.assertIsNone(fake.address)
 
     def test_hotspot_retries_known_networks_unless_in_use(self):
-        fake = FakeNM(["Heim"])
+        fake = FakeNM(["Heim"], connect_ok=False)  # out of reach
         mgr, clock = make_manager(fake, self.tmp, hotspot_delay_minutes=5, hotspot_retry_minutes=5)
         clock.now += 301
         mgr.tick()
@@ -223,11 +223,13 @@ class ManagerTest(unittest.TestCase):
         clock.now += 301
         mgr.tick()
         self.assertEqual(fake.address, wifi.HOTSPOT_ADDRESS)
-        # nobody connected: hotspot off, NetworkManager may look for known Wi-Fi networks
+        # nobody connected: hotspot off, the saved network is activated by its UUID
         fake.stations = 0
+        fake.calls.clear()
         mgr.tick()
         self.assertIsNone(fake.address)
-        self.assertTrue(fake.ran("device", "connect"))
+        self.assertTrue(fake.ran("connection", "up", "uuid", "00000000-0000-0000-0000-000000000000"))
+        self.assertFalse(fake.ran("device", "connect"))  # NetworkManager would pick the hotspot again
         clock.now += wifi.ATTEMPT_SECONDS - 1
         mgr.tick()
         self.assertIsNone(fake.address)
@@ -235,8 +237,44 @@ class ManagerTest(unittest.TestCase):
         mgr.tick()
         self.assertEqual(fake.address, wifi.HOTSPOT_ADDRESS)
 
-    def test_recent_gui_access_keeps_hotspot(self):
+    def test_a_device_on_the_hotspot_postpones_the_search_for_a_while_only(self):
+        fake = FakeNM(["Heim"], connect_ok=False)
+        mgr, clock = make_manager(fake, self.tmp, hotspot_delay_minutes=5, hotspot_retry_minutes=5)
+        clock.now += 301
+        mgr.tick()
+        fake.stations = 1  # e.g. a device that joins every open network
+        clock.now += wifi.STATION_HOLD - 1
+        mgr.tick()
+        self.assertEqual(fake.address, wifi.HOTSPOT_ADDRESS)
+        clock.now += 2
+        mgr.tick()
+        self.assertIsNone(fake.address)
+        self.assertTrue(fake.ran("connection", "up", "uuid"))
+
+    def test_router_restart_reconnects_by_itself(self):
+        # The router restarts: the key exchange fails, NetworkManager gives up the network for good
         fake = FakeNM(["Heim"])
+        fake.address, fake.connected = CLIENT_IP, "Heim"
+        mgr, clock = make_manager(fake, self.tmp, hotspot_delay_minutes=5)
+        mgr.tick()
+        fake.address, fake.connect_ok = None, False
+        clock.now += wifi.TICK
+        mgr.tick()
+        self.assertEqual(sum("up" in c for c in fake.calls), 1)  # tried at once
+        clock.now += wifi.TICK
+        mgr.tick()
+        self.assertEqual(sum("up" in c for c in fake.calls), 1)  # not before RECONNECT_EVERY
+        fake.connect_ok = True  # the router is back
+        clock.now += wifi.RECONNECT_EVERY
+        mgr.tick()
+        self.assertEqual(fake.address, CLIENT_IP)
+        clock.now += 300
+        mgr.tick()  # no hotspot: it was online again before the delay ran out
+        self.assertEqual((fake.address, mgr.snapshot()["mode"]), (CLIENT_IP, "client"))
+        self.assertIsNone(fake.hotspot_args)
+
+    def test_recent_gui_access_keeps_hotspot(self):
+        fake = FakeNM(["Heim"], connect_ok=False)
         mgr, clock = make_manager(fake, self.tmp)
         clock.now += 301
         mgr.tick()

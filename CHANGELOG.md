@@ -5,6 +5,15 @@ What changed in which version. The version is also shown in the GUI (*System →
 
 ## Unreleased
 
+- **Wi-Fi back after a router restart:** a router that restarted (here after a firmware update) broke off the key
+  exchange; NetworkManager took that for a wrong password and gave the network up for good. Five minutes later the
+  setup hotspot started, and its search every 5 minutes asked NetworkManager for "any connection" of the device -
+  which picked the hotspot again each time. The Pi stayed in the hotspot for twelve hours, and with DHCP/DNS on the
+  Pi the whole home network was without addresses. Now the Pi activates its saved networks itself by their UUID:
+  every minute while it is offline, and every 5 minutes from the hotspot. A device connected to the hotspot
+  postpones the search for at most 30 minutes.
+- **dnsmasq after a restart of the Wi-Fi service:** the first report of the Wi-Fi part now sets dnsmasq to match.
+  A restart of wol-wifi while the hotspot had paused dnsmasq left DHCP and DNS off after the Wi-Fi was back.
 - **A second wake while the device starts:** each wake started from scratch. With the wake method "Power" or "Power
   on, then WOL", a second request that came while the device was still starting at standby power cycled the plug -
   and cut off the start the first request had begun. Now the WOL-Server remembers a wake until the device answers,

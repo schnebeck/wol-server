@@ -257,10 +257,10 @@ class Job:
         if request.get("hotspot"):
             self.systemctl("stop", UNIT)
             return "Paused (setup hotspot active)"
-        if self.systemctl("is-enabled", UNIT)[0] == 0:
-            self.systemctl("start", UNIT)
-            return "Restarted after hotspot mode"
-        return "Nothing to do"
+        if self.systemctl("is-enabled", UNIT)[0] != 0 or self.is_active():
+            return "Nothing to do"
+        self.systemctl("start", UNIT)
+        return "Restarted after hotspot mode"
 
     def do_probe(self, request):
         iface = request.get("iface") or "wlan0"

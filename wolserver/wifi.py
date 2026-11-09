@@ -49,6 +49,9 @@ TICK = 15  # s between two checks
 BOOT_GRACE = 30  # s until the hotspot when no Wi-Fi is saved at all
 ATTEMPT_SECONDS = 90  # how long a connection attempt from the hotspot may take
 BUSY_SECONDS = 300  # do not stop the hotspot automatically after a GUI access
+RECONNECT_EVERY = 60  # s between two activations of the saved Wi-Fi networks while offline
+CONNECT_WAIT = 20  # s one activation may take
+STATION_HOLD = 1800  # s a device connected to the hotspot may postpone the search for known Wi-Fi networks
 MAX_REQUEST = 512 * 1024  # VPN configuration with certificates, network backups
 
 
@@ -223,6 +226,7 @@ class WifiManager:
         self.hotspot_since = None
         self.hotspot_started_at = None  # wall clock, for display
         self.wait_until = None  # do not start a hotspot before this (connection attempt/backoff)
+        self.reconnect_at = None  # last activation of the saved Wi-Fi networks
         self.mode = None
         self.address = None
         self.profiles = []  # [{"name", "uuid", "ssid"}]
@@ -383,7 +387,24 @@ class WifiManager:
     def _hotspot_in_use(self, now):
         if self.last_request is not None and now - self.last_request < BUSY_SECONDS:
             return True
-        return bool(self._stations())
+        return now - self.hotspot_since < STATION_HOLD and bool(self._stations())
+
+    def _reconnect(self):
+        """Activates the saved Wi-Fi networks one by one, True once one is up. NetworkManager gives up a network
+        on its own after a failed key exchange (e.g. while the router restarts) and, asked for any connection
+        of the device, picks the hotspot profile; an activation by UUID always tries that network."""
+        self.reconnect_at = self.clock()
+        for profile in self.profiles:
+            try:
+                self.nm("--wait", str(CONNECT_WAIT), "connection", "up", "uuid", profile["uuid"],
+                        timeout=CONNECT_WAIT + 10)
+            except WifiError as e:
+                log.info("Wi-Fi %s not reachable: %s", profile["ssid"], e)
+                continue
+            log.info("Wi-Fi %s connected again", profile["ssid"])
+            self.last_online = self.clock()
+            return True
+        return False
 
     # -- periodic check --
 
@@ -416,13 +437,14 @@ class WifiManager:
                 log.info("Stopping the hotspot briefly to look for known Wi-Fi networks")
                 self.stop_hotspot()
                 self.wait_until = now + ATTEMPT_SECONDS
-                try:
-                    self.nm("--wait", "0", "device", "connect", self.iface)
-                except WifiError:
-                    pass  # no matching Wi-Fi visible - the hotspot returns after ATTEMPT_SECONDS
-        elif self.enabled and not (self.wait_until and now < self.wait_until):
+                self._reconnect()  # none up: the hotspot returns after ATTEMPT_SECONDS
+        elif not (self.wait_until and now < self.wait_until):
+            if self.profiles and (self.reconnect_at is None or now - self.reconnect_at >= RECONNECT_EVERY) \
+                    and self._reconnect():
+                self._publish()
+                return
             due = self.last_online + self.delay if self.profiles else self.started + BOOT_GRACE
-            if now >= due:
+            if self.enabled and now >= due:
                 if self.profiles:
                     log.info("No Wi-Fi for %d min - starting setup hotspot", (now - self.last_online) // 60)
                 else:

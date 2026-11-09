@@ -707,6 +707,13 @@ class ManagerTest(unittest.TestCase):
         self.mgr.wifi_changed("offline")  # hotspot over → start again
         self.assertFalse(json.load(open(self.mgr.path("requests", os.listdir(self.mgr.path("requests"))[0])))["hotspot"])
         self.finish()
+        # The Wi-Fi part restarts while dnsmasq is paused: its first report sets dnsmasq to match
+        self.mgr.wifi_mode = None
+        self.mgr.wifi_changed("offline")
+        self.assertEqual(os.listdir(self.mgr.path("requests")), [])  # not known yet
+        self.mgr.wifi_changed("client")
+        self.assertFalse(json.load(open(self.mgr.path("requests", os.listdir(self.mgr.path("requests"))[0])))["hotspot"])
+        self.finish()
         with self.assertRaises(NetError):
             self.mgr.probe()  # MAC of wlan0 unknown in the test
         self.mgr._server_state = lambda cfg: {"interface": "wlan0", "mac": "b8:27:eb:50:a8:f0", "address": "192.168.7.8",
@@ -743,6 +750,7 @@ class ManagerTest(unittest.TestCase):
         # Static address: DNS on -> ask itself first, the router stays as fallback
         self.sys.method = "manual"
         self.mgr.wifi_changed("client")
+        self.finish()  # the first report also sets dnsmasq to match
         modify = [c for c in self.sys.calls if c[:3] == ["nmcli", "connection", "modify"]][-1]
         self.assertEqual(modify[4:6], ["ipv4.dns", "127.0.0.1 192.168.7.1"])
         self.assertIn(["nmcli", "device", "reapply", "wlan0"], self.sys.calls)

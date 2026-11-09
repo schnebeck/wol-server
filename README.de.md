@@ -222,8 +222,14 @@ ist.
 
 Gut zu wissen:
 - Der Zero W hat nur einen 2,4-GHz-Funkchip. Hotspot und WLAN-Client gehen **nicht gleichzeitig**. Während der
-  Hotspot läuft, schaltet der Pi ihn deshalb alle 5 Minuten kurz ab und sucht nach den gespeicherten WLANs. Das
-  passiert nicht, solange ein Gerät mit dem Hotspot verbunden ist oder die Einrichtungsseite benutzt wird.
+  Hotspot läuft, schaltet der Pi ihn deshalb alle 5 Minuten kurz ab und verbindet sich der Reihe nach mit den
+  gespeicherten WLANs. Ein mit dem Hotspot verbundenes Gerät schiebt das um höchstens 30 Minuten auf, die
+  Einrichtungsseite, solange sie benutzt wird.
+- **Von selbst zurück:** Fällt das WLAN aus, wartet der Pi nicht auf NetworkManager. Nach einem Router-Neustart
+  gibt NetworkManager ein Netz oft dauerhaft auf (der Schlüsselaustausch ist gescheitert, das hält er für ein
+  falsches Passwort). Der Pi aktiviert seine gespeicherten WLANs deshalb selbst jede Minute, vor dem Hotspot und
+  aus ihm heraus, bis eines wieder da ist. Mit DHCP/DNS auf dem Pi pausiert dnsmasq im Hotspot-Betrieb und startet
+  wieder, sobald das WLAN steht.
 - Die WLAN-Liste im Hotspot stammt aus der Suche direkt vor dem Start, denn im Hotspot-Betrieb kann der Chip
   nicht scannen. Fehlt ein Netz, den Namen von Hand eingeben.
 - **Sicherheit:** Der Hotspot ist anfangs offen, damit die Ersteinrichtung ohne Vorwissen klappt. Die GUI ist

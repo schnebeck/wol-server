@@ -736,12 +736,15 @@ class NetManager:
             log.info("Own DNS resolver: %s (%s)", " ".join(wanted), name)
 
     def wifi_changed(self, mode):
-        """Reported by the Wi-Fi part: pause dnsmasq in hotspot mode, start it again afterwards."""
+        """Reported by the Wi-Fi part: pause dnsmasq in hotspot mode, start it again afterwards. The first report
+        after a start sets dnsmasq to match: the hotspot may have paused it before."""
         with self.lock:
             if mode == "client":
                 self._own_resolver(self.active())
+            if mode == "offline" and self.wifi_mode is None:
+                return  # just started: dnsmasq follows once the Wi-Fi or the hotspot is up
             previous, self.wifi_mode = self.wifi_mode, mode
-            if previous is None or (mode == "hotspot") == (previous == "hotspot"):
+            if previous is not None and (mode == "hotspot") == (previous == "hotspot"):
                 return
             active = self.active()
             if active["dns"]["enabled"] or active["dhcp"]["enabled"]:
