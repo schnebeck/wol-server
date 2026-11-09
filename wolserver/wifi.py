@@ -51,7 +51,7 @@ ATTEMPT_SECONDS = 90  # how long a connection attempt from the hotspot may take
 BUSY_SECONDS = 300  # do not stop the hotspot automatically after a GUI access
 RECONNECT_EVERY = 60  # s between two activations of the saved Wi-Fi networks while offline
 CONNECT_WAIT = 20  # s one activation may take
-STATION_HOLD = 1800  # s a device connected to the hotspot may postpone the search for known Wi-Fi networks
+HOLD_MAX = 1800  # s a connected device or the setup page in use may postpone the search for known Wi-Fi networks
 MAX_REQUEST = 512 * 1024  # VPN configuration with certificates, network backups
 
 
@@ -227,6 +227,7 @@ class WifiManager:
         self.hotspot_started_at = None  # wall clock, for display
         self.wait_until = None  # do not start a hotspot before this (connection attempt/backoff)
         self.reconnect_at = None  # last activation of the saved Wi-Fi networks
+        self.search_at = None  # next search for the saved Wi-Fi networks from the hotspot
         self.mode = None
         self.address = None
         self.profiles = []  # [{"name", "uuid", "ssid"}]
@@ -274,7 +275,10 @@ class WifiManager:
 
     def snapshot(self):
         with self._lock:
-            return dict(self._snapshot)
+            snap = dict(self._snapshot)
+        if snap.get("hotspot") and self.search_at is not None and self.mode == "hotspot":
+            snap["hotspot"] = dict(snap["hotspot"], search_in=max(0, round(self.search_at - self.clock())))
+        return snap
 
     def _publish(self):
         snap = {
@@ -384,10 +388,15 @@ class WifiManager:
         self.hotspot_since = self.hotspot_started_at = None
         self.mode, self.address = "offline", None
 
-    def _hotspot_in_use(self, now):
-        if self.last_request is not None and now - self.last_request < BUSY_SECONDS:
-            return True
-        return now - self.hotspot_since < STATION_HOLD and bool(self._stations())
+    def _search_due(self):
+        """When the hotspot looks for the saved Wi-Fi networks next: after the retry interval, later while a device
+        is connected or the setup page was used in the last BUSY_SECONDS, never later than HOLD_MAX."""
+        due = self.hotspot_since + self.retry
+        if self.last_request is not None:
+            due = max(due, self.last_request + BUSY_SECONDS)
+        if self._stations():
+            due = max(due, self.hotspot_since + HOLD_MAX)
+        return min(due, self.hotspot_since + max(self.retry, HOLD_MAX))
 
     def _reconnect(self):
         """Activates the saved Wi-Fi networks one by one, True once one is up. NetworkManager gives up a network
@@ -433,9 +442,11 @@ class WifiManager:
         elif mode == "hotspot":
             if self.hotspot_since is None:  # e.g. taken over after a service restart
                 self.hotspot_since, self.hotspot_started_at = now, time.time()
-            if self.profiles and now - self.hotspot_since >= self.retry and not self._hotspot_in_use(now):
+            self.search_at = self._search_due() if self.profiles else None
+            if self.search_at is not None and now >= self.search_at:
                 log.info("Stopping the hotspot briefly to look for known Wi-Fi networks")
                 self.stop_hotspot()
+                self.search_at = None
                 self.wait_until = now + ATTEMPT_SECONDS
                 self._reconnect()  # none up: the hotspot returns after ATTEMPT_SECONDS
         elif not (self.wait_until and now < self.wait_until):
@@ -683,7 +694,8 @@ class ControlServer:
 
     def dispatch(self, req):
         cmd = req.get("cmd")
-        self.manager.last_request = self.manager.clock()
+        if cmd in self.WAIT:  # an action on the Wi-Fi, not the polling of a page that stays open
+            self.manager.last_request = self.manager.clock()
         if cmd == "status":
             return {"ok": True, "status": self.manager.snapshot()}
         args = {k: v for k, v in req.items() if k != "cmd"}

@@ -223,8 +223,9 @@ ist.
 Gut zu wissen:
 - Der Zero W hat nur einen 2,4-GHz-Funkchip. Hotspot und WLAN-Client gehen **nicht gleichzeitig**. Während der
   Hotspot läuft, schaltet der Pi ihn deshalb alle 5 Minuten kurz ab und verbindet sich der Reihe nach mit den
-  gespeicherten WLANs. Ein mit dem Hotspot verbundenes Gerät schiebt das um höchstens 30 Minuten auf, die
-  Einrichtungsseite, solange sie benutzt wird.
+  gespeicherten WLANs. Ein mit dem Hotspot verbundenes Gerät und Aktionen auf der Einrichtungsseite (Suchen,
+  Verbinden) schieben das auf, zusammen nie um mehr als 30 Minuten; eine Seite, die nur offen steht, nicht.
+  *System → WLAN* zeigt, wann die nächste Suche kommt.
 - **Von selbst zurück:** Fällt das WLAN aus, wartet der Pi nicht auf NetworkManager. Nach einem Router-Neustart
   gibt NetworkManager ein Netz oft dauerhaft auf (der Schlüsselaustausch ist gescheitert, das hält er für ein
   falsches Passwort). Der Pi aktiviert seine gespeicherten WLANs deshalb selbst jede Minute, vor dem Hotspot und

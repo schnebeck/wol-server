@@ -242,14 +242,45 @@ class ManagerTest(unittest.TestCase):
         mgr, clock = make_manager(fake, self.tmp, hotspot_delay_minutes=5, hotspot_retry_minutes=5)
         clock.now += 301
         mgr.tick()
+        mgr.tick()
+        self.assertEqual(mgr.snapshot()["hotspot"]["search_in"], 300)
         fake.stations = 1  # e.g. a device that joins every open network
-        clock.now += wifi.STATION_HOLD - 1
+        clock.now += 60
+        mgr.tick()
+        self.assertEqual(mgr.snapshot()["hotspot"]["search_in"], wifi.HOLD_MAX - 60)
+        clock.now += wifi.HOLD_MAX - 61
         mgr.tick()
         self.assertEqual(fake.address, wifi.HOTSPOT_ADDRESS)
         clock.now += 2
         mgr.tick()
         self.assertIsNone(fake.address)
         self.assertTrue(fake.ran("connection", "up", "uuid"))
+
+    def test_the_setup_page_postpones_the_search_while_used_never_longer_than_the_limit(self):
+        fake = FakeNM(["Heim"], connect_ok=False)
+        mgr, clock = make_manager(fake, self.tmp, hotspot_delay_minutes=5, hotspot_retry_minutes=5)
+        server = wifi.ControlServer(os.path.join(self.tmp, "sock"), mgr, {0})
+        clock.now += 301
+        mgr.tick()
+        start = clock.now
+        for _ in range(4):  # a page that stays open and polls the status
+            clock.now += 120
+            server.dispatch({"cmd": "status"})
+        mgr.tick()
+        self.assertIsNone(fake.address)  # polling is no use: searched after 5 min
+        clock.now += wifi.ATTEMPT_SECONDS + 1
+        mgr.tick()
+        self.assertEqual(fake.address, wifi.HOTSPOT_ADDRESS)
+        start = clock.now
+        while clock.now - start < wifi.HOLD_MAX - 60:  # someone works on the page all the time
+            clock.now += 60
+            mgr.last_request = clock.now
+            mgr.tick()
+            self.assertEqual(fake.address, wifi.HOTSPOT_ADDRESS)
+        clock.now += 60
+        mgr.last_request = clock.now
+        mgr.tick()
+        self.assertIsNone(fake.address)  # searched after HOLD_MAX all the same
 
     def test_router_restart_reconnects_by_itself(self):
         # The router restarts: the key exchange fails, NetworkManager gives up the network for good

@@ -10,8 +10,9 @@ What changed in which version. The version is also shown in the GUI (*System →
   setup hotspot started, and its search every 5 minutes asked NetworkManager for "any connection" of the device -
   which picked the hotspot again each time. The Pi stayed in the hotspot for twelve hours, and with DHCP/DNS on the
   Pi the whole home network was without addresses. Now the Pi activates its saved networks itself by their UUID:
-  every minute while it is offline, and every 5 minutes from the hotspot. A device connected to the hotspot
-  postpones the search for at most 30 minutes.
+  every minute while it is offline, and every 5 minutes from the hotspot. A device connected to the hotspot or
+  actions on the setup page postpone the search, never by more than 30 minutes; a page that only stays open and
+  polls no longer counts as use. *System → Wi-Fi* counts down to the next search.
 - **dnsmasq after a restart of the Wi-Fi service:** the first report of the Wi-Fi part now sets dnsmasq to match.
   A restart of wol-wifi while the hotspot had paused dnsmasq left DHCP and DNS off after the Wi-Fi was back.
 - **A second wake while the device starts:** each wake started from scratch. With the wake method "Power" or "Power

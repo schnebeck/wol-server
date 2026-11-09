@@ -223,8 +223,9 @@ no longer reachable.
 Good to know:
 - The Zero W has only a single 2.4 GHz radio. Hotspot and Wi-Fi client do **not work at the same time**. While the
   hotspot is running, the Pi therefore briefly turns it off every 5 minutes and connects to the saved Wi-Fi
-  networks one by one. A device connected to the hotspot postpones this for up to 30 minutes, the setup page
-  for as long as it is in use.
+  networks one by one. A device connected to the hotspot and actions on the setup page (scan, connect) postpone
+  this, together never by more than 30 minutes; a page that only stays open does not. *System → Wi-Fi* shows when
+  the next search comes.
 - **Back on its own:** if the Wi-Fi drops, the Pi does not wait for NetworkManager. After a router restart
   NetworkManager often gives a network up for good (the key exchange failed, it takes that for a wrong
   password). The Pi activates its saved networks itself every minute, before the hotspot and from it, until one is

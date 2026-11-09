@@ -1975,7 +1975,11 @@ async function renderWifi() {
   let status;
   if (wifi.pending) status = el("span", {}, t("connecting to \"{0}\" …", wifi.pending));
   else if (wifi.mode === "client") status = el("span", { class: "signal good" }, t("connected to \"{0}\"", wifi.ssid || "?"));
-  else if (wifi.mode === "hotspot") status = el("span", { class: "signal fair" }, t("Hotspot \"{0}\" active", hs.ssid));
+  else if (wifi.mode === "hotspot") {
+    const search = hs.search_in == null ? null : hs.search_in < 30 ? t("looking for the saved Wi-Fi now")
+      : t("next search for the saved Wi-Fi in {0} min", Math.ceil(hs.search_in / 60));
+    status = el("span", { class: "signal fair" }, t("Hotspot \"{0}\" active", hs.ssid) + (search ? ` · ${search}` : ""));
+  }
   else status = el("span", { class: "signal poor" }, t("not connected"));
   const rows = [
     [t("Status"), status],
