@@ -5,6 +5,9 @@ What changed in which version. The version is also shown in the GUI (*System →
 
 ## Unreleased
 
+- **Wake after the power cycle of a hanging device:** 30 s after the hang watch cycled the power, it wakes the
+  device, unless it answers by then. A device whose firmware does not switch on when its power comes back stayed off
+  until the next wake from somewhere else - in the case seen, five minutes, until the hold sent its next magic packet.
 - **Wi-Fi back after a router restart:** a router that restarted (here after a firmware update) broke off the key
   exchange; NetworkManager took that for a wrong password and gave the network up for good. Five minutes later the
   setup hotspot started, and its search every 5 minutes asked NetworkManager for "any connection" of the device -

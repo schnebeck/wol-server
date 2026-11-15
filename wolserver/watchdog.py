@@ -22,6 +22,10 @@ answer to ping while the plug measures more than the running threshold, without 
 plug cycles the power (off, on again after 10 s - the plug switches back on by itself), at most MAX_RESTARTS times in
 a row. A device that answers again starts over; one that still hangs after that is left alone and named on its card.
 
+A device whose firmware does not switch on when its power comes back stays off after the power cycle. WAKE_DELAY
+seconds after the cycle - the plug is on again and the network card has its standby power - the hang watch wakes it,
+unless it answers by then. It was running when it hung, so it is meant to be on.
+
 Without an answer from the plug, a relay that is off, or a draw at or below the running threshold (standby, suspend,
 shutting down), the time starts again. The running threshold is required: the standby threshold alone cannot tell a
 device in suspend to RAM from one that hangs. See docs/proposal-smart-plugs.md."""
@@ -37,11 +41,12 @@ log = logging.getLogger("wolserver")
 TICK = 10  # s between checks: a short time set at the device (e.g. 150 s) should not run long
 MAX_RESTARTS = 2  # power cycles in a row without an answer in between
 DEFAULT_SECONDS = 900  # as PlugManager.DEFAULT_HANG_SECONDS, for links saved before the option existed
+WAKE_DELAY = 30  # s after a power cycle: 10 s off, then time for the network card to take its standby power
 SOURCE = "hang watch"
 
 
 class HangWatch:
-    def __init__(self, devices, plug_for, online, live, cycle, on_event=None, clock=time.monotonic):
+    def __init__(self, devices, plug_for, online, live, cycle, on_event=None, clock=time.monotonic, wake=None):
         self.devices = devices  # () -> [device, ...]
         self.plug_for = plug_for  # device id -> plug (with its link options) or None
         self.online = online  # device -> True/False/None (ping)
@@ -49,8 +54,9 @@ class HangWatch:
         self.cycle = cycle  # (plug, device) -> message; raises on failure
         self.on_event = on_event or (lambda **event: None)
         self.clock = clock
+        self.wake = wake  # (device, source) -> None: wakes the device after a power cycle; None: no wake
         self._lock = threading.Lock()
-        self._watch = {}  # device id -> {since, restarts, gave_up, seconds}
+        self._watch = {}  # device id -> {since, restarts, gave_up, seconds, wake_at}
         self._stop = threading.Event()
         self._thread = None
 
@@ -101,11 +107,12 @@ class HangWatch:
             return
         if answers is None:
             return  # no verdict from the ping: change nothing
+        now = self.clock()
+        self._wake_if_due(device, w, now)
         st = self.live(plug["id"])
         power_w = st.get("power_w") if st and st.get("on") else None
         running = power_w is not None and power_w > plug["running_w"]
         seconds = plug.get("hang_seconds") or DEFAULT_SECONDS
-        now = self.clock()
         with self._lock:
             w = self._watch.setdefault(device["id"], {"since": None, "restarts": 0, "gave_up": False,
                                                       "seconds": seconds})
@@ -138,6 +145,9 @@ class HangWatch:
         try:
             result = self.cycle(plug, device)
             ok, message = True, "Hangs (%s): %s (%d/%d)" % (reason, result, restarts, MAX_RESTARTS)
+            if self.wake is not None:
+                with self._lock:
+                    w["wake_at"] = now + WAKE_DELAY
         except Exception as e:  # noqa: BLE001 - the plug did not switch; try again after the full time
             ok, message = False, "Hangs (%s), power cycle failed: %s" % (reason, e)
             with self._lock:
@@ -146,6 +156,22 @@ class HangWatch:
         (log.warning if ok else log.error)("Hang watch %s: %s", device["name"], message)
         self.on_event(device_id=device["id"], device=device["name"], action="power_cycle", source=SOURCE, ok=ok,
                       message=message)
+
+    def _wake_if_due(self, device, w, now):
+        """The wake after a power cycle, once WAKE_DELAY has passed. Only one: a device that hangs again is
+        counted anew and gets its next power cycle with its own wake."""
+        if w is None:
+            return
+        with self._lock:
+            due = w.get("wake_at") is not None and now >= w["wake_at"]
+            if due:
+                w["wake_at"] = None
+        if not due:
+            return
+        try:
+            self.wake(device, SOURCE)
+        except Exception:  # noqa: BLE001 - a failed wake must not stop the watch
+            log.exception("Hang watch %s: wake after the power cycle failed", device["name"])
 
     def start(self):
         if self._thread is None:

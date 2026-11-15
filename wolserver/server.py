@@ -196,7 +196,8 @@ class App:
                                  wake=lambda device, source: self.run_action(device, "wake", source))
         self.hangs = HangWatch(devices=lambda: self.store.list("devices"), plug_for=self.plugs.for_device,
                                online=self._answers, live=self._plug_status, cycle=self._hang_cycle,
-                               on_event=self.store.add_event)
+                               on_event=self.store.add_event,
+                               wake=lambda device, source: self.run_action(device, "wake", source))
         self._conflicts = {}  # device id -> {key: {message, since, logged}}: contradictions in the shown state
         self._waking = {}  # device id -> time.monotonic() of a wake the device has not answered yet
         self._waking_lock = threading.Lock()

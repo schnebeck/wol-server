@@ -148,6 +148,44 @@ class HangWatchTest(unittest.TestCase):
         self.assertEqual(self.events[-1]["message"],
                          "Hangs (no answer for 150 s at 53 W): Power cycle: off, on again after 10 s (1/2)")
 
+    def test_wake_after_the_power_cycle(self):
+        # backup does not switch on when its plug comes back: it stays off until a magic packet
+        wakes = []
+        self.watch.wake = lambda device, source: wakes.append((device["id"], source))
+        self.plug = dict(PLUG, hang_seconds=300)
+        self.run_for(5, step=1 / 6)  # the power cycle comes with the last tick
+        self.assertEqual(len(self.cycles), 1)
+        self.status = {"on": True, "power_w": 1.1}  # off at standby power
+        self.clock.now += watchdog.WAKE_DELAY - 20
+        self.watch.tick()
+        self.assertEqual(wakes, [])
+        self.clock.now += 20
+        self.watch.tick()
+        self.assertEqual(wakes, [("d1", "hang watch")])
+        self.run_for(10)
+        self.assertEqual(len(wakes), 1)  # one wake per power cycle
+        self.assertEqual(self.watch.state("d1")["state"], "restarted")
+
+    def test_no_wake_when_it_answers_by_itself(self):
+        wakes = []
+        self.watch.wake = lambda device, source: wakes.append(device["id"])
+        self.run_for(15)
+        self.assertEqual(len(self.cycles), 1)
+        self.answers = True
+        self.clock.now += watchdog.WAKE_DELAY
+        self.watch.tick()
+        self.answers = False
+        self.status = {"on": True, "power_w": 8.0}
+        self.run_for(5)
+        self.assertEqual(wakes, [])
+
+    def test_failed_power_cycle_is_not_followed_by_a_wake(self):
+        wakes = []
+        self.watch.wake = lambda device, source: wakes.append(device["id"])
+        self.fail = "Plug shelly-backup not reachable"
+        self.run_for(16)
+        self.assertEqual((self.cycles, wakes), ([], []))
+
     def test_failed_power_cycle(self):
         self.fail = "Plug shelly-backup not reachable"
         self.run_for(15)
@@ -222,6 +260,15 @@ class HangWatchLinkTest(unittest.TestCase):
                          ("power_cycle", "hang watch", "backup"))
         _, res = self.call("GET", "/api/status")
         self.assertEqual(res["hangs"][self.device["id"]]["state"], "restarted")
+        # The device stays off after the cycle: the hang watch wakes it
+        sent = []
+        with mock.patch.object(self.app, "_answers", return_value=False), \
+                mock.patch("wolserver.wol.send_magic_packet", lambda *a, **kw: sent.append(a)):
+            clock.now += watchdog.WAKE_DELAY
+            self.app.hangs.tick()
+        self.assertEqual(len(sent), 1)
+        events = self.call("GET", "/api/events")[1]["events"]
+        self.assertEqual((events[0]["action"], events[0]["source"], events[0]["ok"]), ("wake", "hang watch", True))
 
 
 if __name__ == "__main__":
